@@ -63,7 +63,7 @@ export function loadConfig(configPath = getConfigPath()): McpxConfig {
 
   const clientEntries: Partial<Record<ClientId, McpxConfig["clients"][ClientId]>> = {};
   for (const [key, value] of Object.entries(parsed.data.clients)) {
-    if (["claude", "codex", "cursor", "cline", "vscode"].includes(key)) {
+    if (["claude", "codex", "cursor", "cline", "opencode", "kiro", "vscode"].includes(key)) {
       clientEntries[key as ClientId] = value;
     }
   }

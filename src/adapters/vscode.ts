@@ -8,7 +8,7 @@ import {
   okResult,
   pruneStaleManagedEntries,
   setManagedEntries
-} from "./utils.js";
+} from "./utils/index.js";
 
 interface VsCodeMcpConfig {
   servers?: Record<string, unknown>;

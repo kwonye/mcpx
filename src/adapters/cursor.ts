@@ -8,7 +8,7 @@ import {
   okResult,
   pruneStaleManagedEntries,
   setManagedEntries
-} from "./utils.js";
+} from "./utils/index.js";
 
 interface CursorMcpConfig {
   servers?: Record<string, unknown>;

@@ -1,14 +1,25 @@
 # mcpx
 
-Install MCP servers once, expose them to multiple clients through one local HTTP gateway.
+`mcpx` is a local MCP gateway that lets you install upstream MCP servers once, authorize them once, and expose them to multiple AI clients through managed gateway entries.
 
 ## What it does
 
-- Stores upstream MCP server definitions in one place: `~/.config/mcpx/config.json`
-- Runs a local gateway at `http://127.0.0.1:<port>/mcp`
-- Syncs managed entries into supported clients (Claude, Codex, Cursor, Cline, VS Code)
-- Creates one managed entry per upstream server name
-- Routes client traffic through one daemon while preserving per-upstream auth/headers
+- Stores upstream servers in a central config (`~/.config/mcpx/config.json`)
+- Stores upstream auth in one consolidated secure store so each MCP auth flow is done once and reused across all synced clients
+- Runs a local MCP gateway daemon (`http://127.0.0.1:<port>/mcp`)
+- Syncs managed gateway entries into supported clients (one per upstream):
+  - Claude
+  - Codex
+  - Cursor
+  - Cline
+  - OpenCode
+  - Kiro
+  - VS Code
+- Gives each upstream a top-level client entry (`/vercel`, `/next-devtools`, etc.) while routing through one local daemon.
+- Uses local gateway-token auth for client -> gateway (`x-mcpx-local-token`)
+- Supports keychain-backed secret references for upstream headers
+- Passes upstream OAuth challenges (`401/403` + `WWW-Authenticate`) through to compatible clients
+- Proxies OAuth well-known metadata endpoints in single-upstream mode (`/.well-known/oauth-protected-resource` and `/.well-known/oauth-authorization-server`)
 
 ## Install
 
@@ -16,7 +27,6 @@ Prerequisite: Node.js `>=20`
 
 ```bash
 npm install -g @kwonye/mcpx@latest
-mcpx --help
 ```
 
 ## Quick Start
