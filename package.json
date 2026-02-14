@@ -1,29 +1,43 @@
 {
   "name": "@kwonye/mcpx",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "description": "HTTP-first MCP gateway and cross-client installer",
-  "type": "module",
-  "bin": {
-    "mcpx": "dist/cli.js"
-  },
-  "scripts": {
-    "dev": "tsx src/cli.ts",
-    "build": "tsc -p tsconfig.json",
-    "test": "vitest run",
-    "test:watch": "vitest"
-  },
   "keywords": [
     "mcp",
     "cli",
     "gateway"
   ],
-  "author": "",
-  "license": "MIT",
-  "engines": {
-    "node": ">=20"
+  "homepage": "https://github.com/kwonye/mcpx#readme",
+  "bugs": {
+    "url": "https://github.com/kwonye/mcpx/issues"
   },
-  "publishConfig": {
-    "access": "public"
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kwonye/mcpx.git"
+  },
+  "license": "MIT",
+  "author": "Will Kwon",
+  "type": "module",
+  "main": "index.js",
+  "bin": {
+    "mcpx": "dist/cli.js"
+  },
+  "directories": {
+    "test": "test"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "dev": "tsx src/cli.ts",
+    "sync-version": "node scripts/sync-version.mjs",
+    "prebuild": "npm run sync-version",
+    "build": "tsc -p tsconfig.json",
+    "prepack": "npm run build",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@iarna/toml": "^2.2.5",
@@ -36,5 +50,11 @@
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",
     "vitest": "^4.0.18"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

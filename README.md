@@ -21,47 +21,98 @@
 - Passes upstream OAuth challenges (`401/403` + `WWW-Authenticate`) through to compatible clients
 - Proxies OAuth well-known metadata endpoints in single-upstream mode (`/.well-known/oauth-protected-resource` and `/.well-known/oauth-authorization-server`)
 
-## Install / run
+## Install
 
-Global install from npm:
+Prerequisite: Node.js `>=20`
 
 ```bash
 npm install -g @kwonye/mcpx@latest
 ```
 
-Build/run from source:
+## Quick Start
+
+### Path A: Add servers with CLI (recommended)
 
 ```bash
-npm install
-npm run build
-node dist/cli.js --help
-```
+# HTTP upstream
+mcpx add vercel --transport http https://example.com/mcp
 
-For local development:
-
-```bash
-npm run dev -- --help
-```
-
-## Core commands
-
-```bash
-mcpx add circleback https://app.circleback.ai/api/mcp
-mcpx add next-devtools npx next-devtools-mcp@latest
+# stdio upstream
 mcpx add next-devtools --transport stdio npx next-devtools-mcp@latest
-mcpx remove circleback
-mcpx list
-mcpx sync
-mcpx sync claude
-mcpx sync codex
-mcpx status
-mcpx doctor
 ```
 
-`add` and `remove` update the central `mcpx` registry and automatically sync managed entries across supported clients.
-Use `mcpx sync ...` when you want to manually re-sync or target specific clients.
+`mcpx add` and `mcpx remove` auto-sync by default. Run `mcpx sync` when you want a manual re-sync or to target specific clients.
 
-Daemon lifecycle:
+### Path B: Add servers manually in JSON config
+
+Edit `~/.config/mcpx/config.json` and add entries under `servers`:
+
+```json
+{
+  "servers": {
+    "vercel": {
+      "transport": "http",
+      "url": "https://example.com/mcp",
+      "headers": {
+        "Authorization": "secret://vercel_auth_header"
+      }
+    },
+    "next-devtools": {
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["next-devtools-mcp@latest"],
+      "env": {
+        "FOO": "bar"
+      },
+      "cwd": "/path/to/project"
+    }
+  }
+}
+```
+
+After manual edits, you must run:
+
+```bash
+mcpx sync
+```
+
+Manual config changes do not update client configs until `mcpx sync` runs.
+
+## Supported Clients
+
+- Claude
+- Codex
+- Cursor
+- Cline
+- VS Code
+
+## Claude Convention
+
+`mcpx` follows Claude-style MCP server conventions by syncing per-upstream entries keyed by server name under `mcpServers` in Claude config. Each entry is an HTTP endpoint to the local gateway (`/mcp?upstream=<name>`) and includes the required local auth header.
+
+## How it works
+
+1. Define upstream servers in central `mcpx` config.
+2. `mcpx` ensures local gateway auth and daemon state.
+3. `mcpx sync` writes managed client entries that point to the local gateway.
+
+## Advanced Usage
+
+### Auth and secrets
+
+```bash
+mcpx secret set vercel_auth_header --value "Bearer <token>"
+mcpx secret ls
+mcpx secret rm vercel_auth_header
+
+mcpx auth set vercel --header Authorization --value "Bearer <token>"
+mcpx auth set next-devtools --env NEXT_DEVTOOLS_TOKEN --value "<token>"
+mcpx auth show
+mcpx auth rm vercel --header Authorization --delete-secret
+mcpx auth rotate-local-token
+```
+
+### Daemon lifecycle
 
 ```bash
 mcpx daemon start
@@ -70,50 +121,40 @@ mcpx daemon logs
 mcpx daemon stop
 ```
 
-Secrets:
+### Targeted sync
 
 ```bash
-mcpx secret set circleback_token --value "..."
-mcpx secret ls
-mcpx secret rm circleback_token
-mcpx auth set vercel --header Authorization --value "Bearer ..."
-mcpx auth set next-devtools --env NEXT_DEVTOOLS_TOKEN --value "..."
-mcpx auth show
-mcpx auth rm vercel --header Authorization --delete-secret
-mcpx auth rotate-local-token
+mcpx sync
+mcpx sync claude
+mcpx sync --client claude --client codex
 ```
 
-Compatibility namespace:
-
-```bash
-mcpx mcp add circleback https://app.circleback.ai/api/mcp
-mcpx mcp add next-devtools npx next-devtools-mcp@latest
-```
-
-## Config and state paths
-
-- Config: `~/.config/mcpx/config.json`
-- Managed index: `~/.local/share/mcpx/managed-index.json`
-- Secret name index: `~/.local/share/mcpx/secret-names.json`
-- Daemon PID: `~/.local/state/mcpx/runtime/daemon.pid`
-- Daemon logs: `~/.local/state/mcpx/logs/daemon.log`
-
-Override roots with env vars:
+### Config/data/state path overrides
 
 - `MCPX_CONFIG_HOME`
 - `MCPX_DATA_HOME`
 - `MCPX_STATE_HOME`
 
-## Test
+## Troubleshooting
 
 ```bash
+mcpx doctor
+mcpx status
+mcpx daemon logs
+mcpx sync --json
+```
+
+## Build and test from source
+
+```bash
+npm install
+npm run build
 npm test
 ```
 
 ## Notes
 
-- v1 is HTTP-only for client connectivity.
-- Upstreams can be HTTP or stdio command-based.
-- No stdio fallback is implemented for client connectivity.
-- macOS keychain is the default secure secret backend.
-- CI/headless secret override is supported via `MCPX_SECRET_<name>` env vars.
+- Client connectivity is HTTP-first.
+- Upstreams can be HTTP or stdio.
+- macOS keychain is the secure secret backend.
+- In CI/headless environments, `MCPX_SECRET_<name>` env vars can override keychain lookups.
