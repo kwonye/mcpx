@@ -2,10 +2,34 @@
   "name": "@kwonye/mcpx",
   "version": "0.1.1",
   "description": "HTTP-first MCP gateway and cross-client installer",
+  "keywords": [
+    "mcp",
+    "cli",
+    "gateway"
+  ],
+  "homepage": "https://github.com/kwonye/mcpx#readme",
+  "bugs": {
+    "url": "https://github.com/kwonye/mcpx/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kwonye/mcpx.git"
+  },
+  "license": "MIT",
+  "author": "Will Kwon",
   "type": "module",
+  "main": "index.js",
   "bin": {
     "mcpx": "dist/cli.js"
   },
+  "directories": {
+    "test": "test"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "dev": "tsx src/cli.ts",
     "sync-version": "node scripts/sync-version.mjs",
@@ -15,24 +39,6 @@
     "test": "vitest run",
     "test:watch": "vitest"
   },
-  "keywords": [
-    "mcp",
-    "cli",
-    "gateway"
-  ],
-  "author": "",
-  "license": "MIT",
-  "engines": {
-    "node": ">=20"
-  },
-  "publishConfig": {
-    "access": "public"
-  },
-  "files": [
-    "dist",
-    "README.md",
-    "LICENSE"
-  ],
   "dependencies": {
     "@iarna/toml": "^2.2.5",
     "@modelcontextprotocol/sdk": "^1.26.0",
@@ -44,5 +50,11 @@
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",
     "vitest": "^4.0.18"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }
