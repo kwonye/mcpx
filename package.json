@@ -1,5 +1,5 @@
 {
-  "name": "mcpx",
+  "name": "@kwonye/mcpx",
   "version": "0.1.0",
   "description": "HTTP-first MCP gateway and cross-client installer",
   "type": "module",
@@ -21,6 +21,9 @@
   "license": "MIT",
   "engines": {
     "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "dependencies": {
     "@iarna/toml": "^2.2.5",

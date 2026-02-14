@@ -20,6 +20,15 @@
 
 ## Install / run
 
+Global install from npm:
+
+```bash
+npm install -g @kwonye/mcpx@latest
+mcpx --help
+```
+
+Build/run from source:
+
 ```bash
 npm install
 npm run build
