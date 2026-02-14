@@ -3,6 +3,8 @@ import { ClaudeAdapter } from "./claude.js";
 import { CodexAdapter } from "./codex.js";
 import { CursorAdapter } from "./cursor.js";
 import { ClineAdapter } from "./cline.js";
+import { KiroAdapter } from "./kiro.js";
+import { OpenCodeAdapter } from "./opencode.js";
 import { VsCodeAdapter } from "./vscode.js";
 
 export function getAdapters(): ClientAdapter[] {
@@ -11,6 +13,8 @@ export function getAdapters(): ClientAdapter[] {
     new CodexAdapter(),
     new CursorAdapter(),
     new ClineAdapter(),
+    new OpenCodeAdapter(),
+    new KiroAdapter(),
     new VsCodeAdapter()
   ];
 }

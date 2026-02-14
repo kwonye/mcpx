@@ -1,5 +1,5 @@
-import type { ClientId, ManagedIndex, SyncResult } from "../types.js";
-import { sha256 } from "../util/fs.js";
+import type { ClientId, ManagedIndex, SyncResult } from "../../types.js";
+import { sha256 } from "../../util/fs.js";
 
 export function getManagedEntryNames(managedIndex: ManagedIndex, clientId: ClientId): string[] {
   return Object.keys(managedIndex.managed[clientId]?.entries ?? {});

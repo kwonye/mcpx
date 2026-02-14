@@ -30,7 +30,7 @@ import { getConfigPath, getManagedIndexPath } from "./core/paths.js";
 import { loadManagedIndex } from "./core/managed-index.js";
 import { APP_VERSION } from "./version.js";
 
-const VALID_CLIENTS: ClientId[] = ["claude", "codex", "cursor", "cline", "vscode"];
+const VALID_CLIENTS: ClientId[] = ["claude", "codex", "cursor", "cline", "opencode", "kiro", "vscode"];
 
 interface AddCommandOptions {
   transport?: string;
