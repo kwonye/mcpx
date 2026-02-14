@@ -1,0 +1,37 @@
+{
+  "name": "mcpx",
+  "version": "0.1.0",
+  "description": "HTTP-first MCP gateway and cross-client installer",
+  "type": "module",
+  "bin": {
+    "mcpx": "dist/cli.js"
+  },
+  "scripts": {
+    "dev": "tsx src/cli.ts",
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "keywords": [
+    "mcp",
+    "cli",
+    "gateway"
+  ],
+  "author": "",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@iarna/toml": "^2.2.5",
+    "@modelcontextprotocol/sdk": "^1.26.0",
+    "commander": "^14.0.1",
+    "zod": "^4.1.12"
+  },
+  "devDependencies": {
+    "@types/node": "^25.2.3",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.18"
+  }
+}
