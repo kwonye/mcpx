@@ -9,6 +9,7 @@ import {
 } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { loadConfig } from "../core/config.js";
 import { SecretsManager } from "../core/secrets.js";
+import { APP_VERSION } from "../version.js";
 import type {
   HttpServerSpec,
   JsonRpcRequest,
@@ -20,7 +21,7 @@ import type {
 } from "../types.js";
 
 const JSON_RPC_VERSION = "2.0";
-const SERVER_VERSION = "0.1.0";
+const SERVER_VERSION = APP_VERSION;
 const DEFAULT_UPSTREAM_TIMEOUT_MS = 30_000;
 const OAUTH_WELL_KNOWN_PREFIXES = [
   "/.well-known/oauth-protected-resource",

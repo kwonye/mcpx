@@ -28,6 +28,7 @@ import {
 } from "./core/daemon.js";
 import { getConfigPath, getManagedIndexPath } from "./core/paths.js";
 import { loadManagedIndex } from "./core/managed-index.js";
+import { APP_VERSION } from "./version.js";
 
 const VALID_CLIENTS: ClientId[] = ["claude", "codex", "cursor", "cline", "opencode", "kiro", "vscode"];
 
@@ -677,7 +678,7 @@ function registerMcpCompat(program: Command): void {
 
 export async function runCli(argv = process.argv): Promise<void> {
   const program = new Command();
-  program.name("mcpx").description("HTTP-first MCP gateway and multi-client installer").version("0.1.0");
+  program.name("mcpx").description("HTTP-first MCP gateway and multi-client installer").version(APP_VERSION);
 
   registerAddCommand(program);
   registerRemoveCommand(program);
