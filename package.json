@@ -1,6 +1,6 @@
 {
   "name": "@kwonye/mcpx",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "HTTP-first MCP gateway and cross-client installer",
   "type": "module",
   "bin": {
