@@ -1,16 +1,19 @@
 # mcpx
 
-`mcpx` is an HTTP-first local MCP gateway that lets you install upstream MCP servers once and expose them to multiple AI clients through managed gateway entries.
+`mcpx` is a local MCP gateway that lets you install upstream MCP servers once, authorize them once, and expose them to multiple AI clients through managed gateway entries.
 
 ## What it does
 
 - Stores upstream servers in a central config (`~/.config/mcpx/config.json`)
+- Stores upstream auth in one consolidated secure store so each MCP auth flow is done once and reused across all synced clients
 - Runs a local MCP gateway daemon (`http://127.0.0.1:<port>/mcp`)
 - Syncs managed gateway entries into supported clients (one per upstream):
   - Claude
   - Codex
   - Cursor
   - Cline
+  - OpenCode
+  - Kiro
   - VS Code
 - Gives each upstream a top-level client entry (`/vercel`, `/next-devtools`, etc.) while routing through one local daemon.
 - Uses local gateway-token auth for client -> gateway (`x-mcpx-local-token`)
@@ -24,7 +27,6 @@ Global install from npm:
 
 ```bash
 npm install -g @kwonye/mcpx@latest
-mcpx --help
 ```
 
 Build/run from source:
@@ -44,7 +46,7 @@ npm run dev -- --help
 ## Core commands
 
 ```bash
-mcpx add circleback --transport http https://app.circleback.ai/api/mcp
+mcpx add circleback https://app.circleback.ai/api/mcp
 mcpx add next-devtools npx next-devtools-mcp@latest
 mcpx add next-devtools --transport stdio npx next-devtools-mcp@latest
 mcpx remove circleback
@@ -84,7 +86,7 @@ mcpx auth rotate-local-token
 Compatibility namespace:
 
 ```bash
-mcpx mcp add circleback --transport http https://app.circleback.ai/api/mcp
+mcpx mcp add circleback https://app.circleback.ai/api/mcp
 mcpx mcp add next-devtools npx next-devtools-mcp@latest
 ```
 

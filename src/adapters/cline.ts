@@ -9,7 +9,7 @@ import {
   okResult,
   pruneStaleManagedEntries,
   setManagedEntries
-} from "./utils.js";
+} from "./utils/index.js";
 
 interface ClineConfig {
   mcpServers?: Record<string, unknown>;

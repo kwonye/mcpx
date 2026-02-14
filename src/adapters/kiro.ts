@@ -1,8 +1,7 @@
 import os from "node:os";
 import path from "node:path";
-import fs from "node:fs";
-import { parse, stringify } from "@iarna/toml";
 import type { ClientAdapter, McpxConfig, SyncClientOptions, SyncResult } from "../types.js";
+import { readJsonFile, writeJsonAtomic } from "../util/fs.js";
 import {
   ensureManagedEntryWritable,
   errorResult,
@@ -11,11 +10,15 @@ import {
   setManagedEntries
 } from "./utils/index.js";
 
-export class CodexAdapter implements ClientAdapter {
-  readonly id = "codex" as const;
+interface KiroMcpConfig {
+  mcpServers?: Record<string, unknown>;
+}
+
+export class KiroAdapter implements ClientAdapter {
+  readonly id = "kiro" as const;
 
   detectConfigPath(): string | null {
-    return path.join(os.homedir(), ".codex", "config.toml");
+    return path.join(os.homedir(), ".kiro", "settings", "mcp.json");
   }
 
   supportsHttp(): boolean {
@@ -25,20 +28,20 @@ export class CodexAdapter implements ClientAdapter {
   syncGateway(_config: McpxConfig, options: SyncClientOptions): SyncResult {
     const configPath = this.detectConfigPath();
     if (!configPath) {
-      return errorResult(this.id, undefined, "Unable to resolve Codex config.toml path.");
+      return errorResult(this.id, undefined, "Unable to resolve Kiro MCP config path.");
     }
 
     try {
-      const existing = fs.existsSync(configPath) ? fs.readFileSync(configPath, "utf8") : "";
-      const doc = existing.trim().length > 0 ? (parse(existing) as Record<string, unknown>) : ({} as Record<string, unknown>);
-
-      const mcpServers = ((doc.mcp_servers as Record<string, unknown> | undefined) ?? {}) as Record<string, unknown>;
+      const raw = readJsonFile<KiroMcpConfig>(configPath, {});
+      const servers = {
+        ...(raw.mcpServers ?? {})
+      };
       const managedNames = options.managedEntries.map((entry) => entry.name);
       const serverEntries = Object.fromEntries(
         options.managedEntries.map((entry) => [entry.name, {
-          enabled: true,
           url: entry.url,
-          headers: entry.headers
+          headers: entry.headers,
+          disabled: false
         }])
       ) as Record<string, unknown>;
 
@@ -47,25 +50,24 @@ export class CodexAdapter implements ClientAdapter {
           options.managedIndex,
           this.id,
           name,
-          mcpServers[name]
+          servers[name]
         );
         if (conflict) {
           return errorResult(this.id, configPath, conflict);
         }
       }
 
-      pruneStaleManagedEntries(options.managedIndex, this.id, mcpServers, managedNames);
+      pruneStaleManagedEntries(options.managedIndex, this.id, servers, managedNames);
       for (const [name, entry] of Object.entries(serverEntries)) {
-        mcpServers[name] = entry;
+        servers[name] = entry;
       }
 
-      doc.mcp_servers = mcpServers;
+      const next: KiroMcpConfig = {
+        ...raw,
+        mcpServers: servers
+      };
 
-      fs.mkdirSync(path.dirname(configPath), { recursive: true });
-      const tmpPath = `${configPath}.tmp-${process.pid}-${Date.now()}`;
-      fs.writeFileSync(tmpPath, stringify(doc as never), { mode: 0o600 });
-      fs.renameSync(tmpPath, configPath);
-
+      writeJsonAtomic(configPath, next);
       setManagedEntries(
         options.managedIndex,
         this.id,
