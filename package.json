@@ -8,7 +8,10 @@
   },
   "scripts": {
     "dev": "tsx src/cli.ts",
+    "sync-version": "node scripts/sync-version.mjs",
+    "prebuild": "npm run sync-version",
     "build": "tsc -p tsconfig.json",
+    "prepack": "npm run build",
     "test": "vitest run",
     "test:watch": "vitest"
   },
@@ -25,6 +28,11 @@
   "publishConfig": {
     "access": "public"
   },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "dependencies": {
     "@iarna/toml": "^2.2.5",
     "@modelcontextprotocol/sdk": "^1.26.0",
