@@ -45,7 +45,15 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
       - name: Bump patch version
-        run: npm version patch --no-git-tag-version
+        run: |
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          NPM_VERSION=$(npm view @kwonye/mcpx version 2>/dev/null || echo "0.0.0")
+          BASE_VERSION=$(printf "%s\n%s" "$PKG_VERSION" "$NPM_VERSION" | sort -V | tail -n1)
+          echo "Package version: $PKG_VERSION"
+          echo "NPM version: $NPM_VERSION"
+          echo "Base version: $BASE_VERSION"
+          npm version $BASE_VERSION --no-git-tag-version --allow-same-version
+          npm version patch --no-git-tag-version
 
       - name: Sync runtime version
         run: npm run sync-version
@@ -63,9 +71,8 @@ jobs:
           git commit -m "chore(release): v${{ steps.version.outputs.version }} [skip ci]"
           git tag "${{ steps.version.outputs.tag }}"
 
-      - name: Push release commit and tag
+      - name: Push release tag
         run: |
-          git push origin HEAD:main
           git push origin "${{ steps.version.outputs.tag }}"
 
       - name: Publish to npm
