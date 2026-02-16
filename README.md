@@ -144,6 +144,11 @@ mcpx daemon logs
 mcpx sync --json
 ```
 
+`mcpx status` now opens an interactive MCP inventory menu in TTY sessions:
+- Shows each configured upstream MCP
+- Shows which client config files currently have that MCP synced
+- Lets you open a specific MCP and run actions (configure auth, re-authenticate, clear auth, reconnect, disable)
+
 ## Build and test from source
 
 ```bash
