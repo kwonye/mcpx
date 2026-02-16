@@ -34,11 +34,9 @@ npm install -g @kwonye/mcpx@latest
 ### Path A: Add servers with CLI (recommended)
 
 ```bash
-# HTTP upstream
-mcpx add vercel --transport http https://example.com/mcp
+mcpx add vercel https://example.com/mcp
 
-# stdio upstream
-mcpx add next-devtools --transport stdio npx next-devtools-mcp@latest
+mcpx add next-devtools npx next-devtools-mcp@latest
 ```
 
 `mcpx add` and `mcpx remove` auto-sync by default. Run `mcpx sync` when you want a manual re-sync or to target specific clients.
