@@ -2,11 +2,14 @@
 import { Command } from "commander";
 import fs from "node:fs";
 import { execFileSync } from "node:child_process";
+import { emitKeypressEvents } from "node:readline";
+import { createInterface, type Interface as ReadlineInterface } from "node:readline/promises";
 import { loadConfig, saveConfig } from "./core/config.js";
 import { addServer, removeServer } from "./core/registry.js";
 import { SecretsManager, readSecretValueFromStdin } from "./core/secrets.js";
+import { probeHttpAuthRequirement } from "./core/auth-probe.js";
 import { syncAllClients } from "./core/sync.js";
-import type { ClientId, HttpServerSpec, McpxConfig, StdioServerSpec, UpstreamServerSpec } from "./types.js";
+import type { ClientId, ClientStatus, HttpServerSpec, McpxConfig, StdioServerSpec, UpstreamServerSpec } from "./types.js";
 import {
   applyAuthReference,
   defaultAuthSecretName,
@@ -28,9 +31,10 @@ import {
 } from "./core/daemon.js";
 import { getConfigPath, getManagedIndexPath } from "./core/paths.js";
 import { loadManagedIndex } from "./core/managed-index.js";
+import { STATUS_CLIENTS, buildStatusReport, type StatusAuthBinding, type StatusReport, type StatusServerEntry } from "./core/status.js";
 import { APP_VERSION } from "./version.js";
 
-const VALID_CLIENTS: ClientId[] = ["claude", "codex", "cursor", "cline", "opencode", "kiro", "vscode"];
+const VALID_CLIENTS: ClientId[] = STATUS_CLIENTS;
 
 interface AddCommandOptions {
   transport?: string;
@@ -229,6 +233,670 @@ async function autoSyncManagedEntries(config: McpxConfig): Promise<void> {
   ensureExitCodeForSyncFailures(summary.hasErrors);
 }
 
+function isNegativeChoice(value: string): boolean {
+  const normalized = value.trim().toLowerCase();
+  return normalized === "n" || normalized === "no";
+}
+
+async function maybeAutoConfigureAuthForAddedServer(
+  serverName: string,
+  spec: UpstreamServerSpec,
+  secrets: SecretsManager
+): Promise<void> {
+  if (spec.transport !== "http") {
+    return;
+  }
+
+  const probe = await probeHttpAuthRequirement(spec, secrets);
+  if (!probe.authRequired) {
+    return;
+  }
+
+  process.stdout.write(`Upstream "${serverName}" responded with ${probe.status ?? 401} and appears to require auth.\n`);
+  if (probe.wwwAuthenticate) {
+    process.stdout.write(`WWW-Authenticate: ${probe.wwwAuthenticate}\n`);
+  }
+
+  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+    process.stdout.write(`Run \`mcpx auth set ${serverName} --header Authorization --value \"<token>\"\` to configure auth.\n`);
+    return;
+  }
+
+  const rl = createInterface({
+    input: process.stdin,
+    output: process.stdout
+  });
+
+  try {
+    const shouldConfigure = await promptLine(rl, "Configure auth now? (Y/n): ");
+    if (isNegativeChoice(shouldConfigure)) {
+      process.stdout.write("Skipping auth setup.\n");
+      return;
+    }
+
+    const currentHeaderBinding = listAuthBindings(spec)
+      .find((binding) => binding.kind === "header");
+    const headerName = await promptLineWithDefault(rl, "Header name", currentHeaderBinding?.key ?? "Authorization");
+    if (!headerName) {
+      process.stdout.write("Skipping auth setup (empty header name).\n");
+      return;
+    }
+
+    const authValueInput = await promptLine(rl, "Auth value/token (blank to skip): ");
+    if (!authValueInput) {
+      process.stdout.write("Skipping auth setup.\n");
+      return;
+    }
+
+    const target = resolveAuthTarget(spec, headerName, undefined);
+    const authValue = maybePrefixBearer(target, authValueInput, false);
+    const existingValue = listAuthBindings(spec)
+      .find((binding) => binding.kind === target.kind && binding.key === target.key)?.value;
+    const defaultSecret = secretRefName(existingValue ?? "") ?? defaultAuthSecretName(serverName, target);
+    const secretName = await promptLineWithDefault(rl, "Secret name", defaultSecret);
+
+    if (!secretName) {
+      process.stdout.write("Skipping auth setup (empty secret name).\n");
+      return;
+    }
+
+    secrets.setSecret(secretName, authValue);
+    applyAuthReference(spec, target, toSecretRef(secretName));
+    process.stdout.write(`Configured auth via ${target.kind}:${target.key} using secret://${secretName}.\n`);
+  } catch (error) {
+    process.stdout.write(`Auto auth setup skipped: ${(error as Error).message}\n`);
+    return;
+  } finally {
+    rl.close();
+  }
+
+  const verify = await probeHttpAuthRequirement(spec, secrets);
+  if (verify.authRequired) {
+    process.stdout.write("Auth is configured, but upstream still reports auth required. Re-auth may be needed.\n");
+  } else if (verify.error) {
+    process.stdout.write(`Auth check after setup could not be completed: ${verify.error}\n`);
+  } else {
+    process.stdout.write("Auth check passed.\n");
+  }
+}
+
+function loadStatusReport(): StatusReport {
+  const config = loadConfig();
+  return buildStatusReport(config, loadManagedIndex(), getDaemonStatus(config));
+}
+
+interface MenuOption {
+  label: string;
+  detail?: string;
+}
+
+interface KeypressMeta {
+  name?: string;
+  sequence?: string;
+  ctrl?: boolean;
+}
+
+function daemonEmoji(running: boolean): string {
+  return running ? "✅" : "⚠️";
+}
+
+function clientStatusEmoji(status: ClientStatus): string {
+  if (status === "SYNCED") {
+    return "✅";
+  }
+
+  if (status === "ERROR") {
+    return "❌";
+  }
+
+  if (status === "UNSUPPORTED_HTTP") {
+    return "⚠️";
+  }
+
+  return "⏭️";
+}
+
+function serverHealthEmoji(server: StatusServerEntry): string {
+  const managed = server.clients.filter((client) => client.managed);
+  if (managed.length === 0) {
+    return "⚠️";
+  }
+
+  if (managed.some((client) => client.status === "ERROR")) {
+    return "❌";
+  }
+
+  if (managed.some((client) => client.status === "UNSUPPORTED_HTTP")) {
+    return "⚠️";
+  }
+
+  return "✅";
+}
+
+function formatDaemonState(status: StatusReport["daemon"]): string {
+  if (status.running) {
+    return `running (pid ${status.pid})`;
+  }
+
+  return "stopped";
+}
+
+function formatAuthSummary(authBindings: StatusServerEntry["authBindings"]): string {
+  return authBindings.map((binding) => `${binding.kind}:${binding.key}`).join(", ");
+}
+
+function listSyncedClientLabels(server: StatusServerEntry): string[] {
+  return server.clients
+    .filter((client) => client.managed)
+    .map((client) => (
+      `${clientStatusEmoji(client.status)} ${client.configPath ? `${client.clientId} (${client.configPath})` : client.clientId}${
+        client.status === "SYNCED" ? "" : ` [${client.status}]`
+      }`
+    ));
+}
+
+function printSyncedConfigBullets(server: StatusServerEntry, indent: string): void {
+  const synced = listSyncedClientLabels(server);
+  if (synced.length === 0) {
+    process.stdout.write(`${indent}- ⚠️ none\n`);
+    return;
+  }
+
+  for (const entry of synced) {
+    process.stdout.write(`${indent}- ${entry}\n`);
+  }
+}
+
+function printStatusReportText(report: StatusReport): void {
+  process.stdout.write(`Gateway URL: ${report.gatewayUrl}\n`);
+  process.stdout.write(`Daemon: ${daemonEmoji(report.daemon.running)} ${formatDaemonState(report.daemon)}\n`);
+  process.stdout.write(`Upstream servers: ${report.upstreamCount}\n`);
+
+  if (report.servers.length === 0) {
+    process.stdout.write("⚠️ No upstream servers configured.\n");
+  } else {
+    for (const server of report.servers) {
+      process.stdout.write(`- ${serverHealthEmoji(server)} ${server.name} (${server.transport})\n`);
+      process.stdout.write(`  target: ${server.target}\n`);
+      if (server.authBindings.length > 0) {
+        process.stdout.write(`  auth: 🔐 ${formatAuthSummary(server.authBindings)}\n`);
+      }
+      process.stdout.write("  synced configs:\n");
+      printSyncedConfigBullets(server, "  ");
+    }
+  }
+
+  process.stdout.write("Client sync states:\n");
+  for (const client of STATUS_CLIENTS) {
+    const state = report.clients[client];
+    if (!state) {
+      process.stdout.write(`- ${clientStatusEmoji("SKIPPED")} ${client}: SKIPPED\n`);
+    } else {
+      process.stdout.write(`- ${clientStatusEmoji(state.status)} ${client}: ${state.status}${state.message ? ` - ${state.message}` : ""}\n`);
+    }
+  }
+}
+
+async function promptLine(rl: ReadlineInterface, prompt: string): Promise<string> {
+  return (await rl.question(prompt)).trim();
+}
+
+async function promptLineWithDefault(rl: ReadlineInterface, prompt: string, defaultValue: string): Promise<string> {
+  const suffix = defaultValue ? ` [${defaultValue}]` : "";
+  const value = (await rl.question(`${prompt}${suffix}: `)).trim();
+  return value || defaultValue;
+}
+
+function parseSelection(value: string, max: number): number | null {
+  const numeric = Number(value);
+  if (!Number.isInteger(numeric) || numeric < 1 || numeric > max) {
+    return null;
+  }
+
+  return numeric - 1;
+}
+
+function clearTerminalScreen(): void {
+  process.stdout.write("\x1b[2J\x1b[H");
+}
+
+function renderMenuScreen(titleLines: string[], options: MenuOption[], selectedIndex: number, cancelHint: string): void {
+  clearTerminalScreen();
+
+  for (const line of titleLines) {
+    process.stdout.write(`${line}\n`);
+  }
+  process.stdout.write("\n");
+
+  options.forEach((option, index) => {
+    const cursor = index === selectedIndex ? "❯" : " ";
+    process.stdout.write(`${cursor} ${index + 1}. ${option.label}\n`);
+    if (option.detail) {
+      process.stdout.write(`   ${option.detail}\n`);
+    }
+  });
+
+  process.stdout.write(`\n↑/↓ to navigate • Space/Enter to select • Esc/${cancelHint} to cancel\n`);
+}
+
+async function promptMenuSelection(
+  rl: ReadlineInterface,
+  titleLines: string[],
+  options: MenuOption[],
+  cancelHint = "q"
+): Promise<number | null> {
+  if (options.length === 0) {
+    return null;
+  }
+
+  const stdin = process.stdin as NodeJS.ReadStream;
+  const canUseKeyNavigation = process.stdin.isTTY && process.stdout.isTTY && typeof stdin.setRawMode === "function";
+
+  if (!canUseKeyNavigation) {
+    for (const line of titleLines) {
+      process.stdout.write(`${line}\n`);
+    }
+    process.stdout.write("\n");
+    options.forEach((option, index) => {
+      process.stdout.write(`${index + 1}. ${option.label}\n`);
+      if (option.detail) {
+        process.stdout.write(`   ${option.detail}\n`);
+      }
+    });
+    const selected = parseSelection(
+      await promptLine(rl, `Select option (1-${options.length}, blank to cancel): `),
+      options.length
+    );
+    return selected;
+  }
+
+  return new Promise<number | null>((resolve) => {
+    let index = 0;
+    let settled = false;
+    rl.pause();
+
+    const cleanup = () => {
+      stdin.off("keypress", onKeypress as never);
+      try {
+        stdin.setRawMode(false);
+      } catch {
+        // ignore cleanup errors
+      }
+      rl.resume();
+    };
+
+    const done = (value: number | null) => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      cleanup();
+      process.stdout.write("\n");
+      resolve(value);
+    };
+
+    const onKeypress = (_chunk: string, key: KeypressMeta) => {
+      if (key.ctrl && key.name === "c") {
+        done(null);
+        return;
+      }
+
+      if (key.name === "up" || key.name === "k") {
+        index = (index - 1 + options.length) % options.length;
+        renderMenuScreen(titleLines, options, index, cancelHint);
+        return;
+      }
+
+      if (key.name === "down" || key.name === "j") {
+        index = (index + 1) % options.length;
+        renderMenuScreen(titleLines, options, index, cancelHint);
+        return;
+      }
+
+      if (key.name === "return" || key.name === "space") {
+        done(index);
+        return;
+      }
+
+      if (key.name === "escape" || key.name === "q") {
+        done(null);
+        return;
+      }
+
+      if (key.sequence && /^[1-9]$/.test(key.sequence)) {
+        const numeric = Number(key.sequence);
+        if (numeric >= 1 && numeric <= options.length) {
+          done(numeric - 1);
+        }
+      }
+    };
+
+    emitKeypressEvents(stdin);
+    stdin.setRawMode(true);
+    stdin.resume();
+    stdin.on("keypress", onKeypress as never);
+
+    renderMenuScreen(titleLines, options, index, cancelHint);
+  });
+}
+
+async function chooseAuthBinding(
+  rl: ReadlineInterface,
+  bindings: StatusAuthBinding[],
+  prompt: string
+): Promise<StatusAuthBinding | null> {
+  if (bindings.length === 0) {
+    return null;
+  }
+
+  if (bindings.length === 1) {
+    return bindings[0];
+  }
+
+  const selected = await promptMenuSelection(
+    rl,
+    ["Auth bindings", prompt],
+    bindings.map((binding) => ({
+      label: `${binding.kind}:${binding.key}`,
+      detail: binding.secretName ? `source: secret://${binding.secretName}` : "source: <inline>"
+    })),
+    "q"
+  );
+  if (selected === null) {
+    return null;
+  }
+
+  return bindings[selected] ?? null;
+}
+
+async function configureServerAuthInteractively(
+  rl: ReadlineInterface,
+  serverName: string,
+  reauthOnly = false
+): Promise<void> {
+  const config = loadConfig();
+  const spec = getServerSpecOrThrow(config, serverName);
+  const existingBindings = listAuthBindings(spec);
+
+  let targetKind: "header" | "env";
+  let targetKey: string;
+  let existingValue: string | undefined;
+
+  if (reauthOnly) {
+    const selected = await chooseAuthBinding(
+      rl,
+      existingBindings.map((binding) => ({
+        kind: binding.kind,
+        key: binding.key,
+        value: binding.value,
+        secretName: secretRefName(binding.value) ?? undefined
+      })),
+      "Choose binding to re-authenticate"
+    );
+
+    if (!selected) {
+      process.stdout.write("No auth binding selected.\n");
+      return;
+    }
+
+    targetKind = selected.kind;
+    targetKey = selected.key;
+    existingValue = selected.value;
+  } else if (spec.transport === "http") {
+    targetKind = "header";
+    targetKey = await promptLineWithDefault(
+      rl,
+      "Header name",
+      existingBindings.find((binding) => binding.kind === "header")?.key ?? "Authorization"
+    );
+  } else {
+    targetKind = "env";
+    targetKey = await promptLineWithDefault(
+      rl,
+      "Env var name",
+      existingBindings.find((binding) => binding.kind === "env")?.key ?? ""
+    );
+  }
+
+  if (!targetKey) {
+    process.stdout.write("Auth key cannot be empty.\n");
+    return;
+  }
+
+  const target = targetKind === "header"
+    ? resolveAuthTarget(spec, targetKey, undefined)
+    : resolveAuthTarget(spec, undefined, targetKey);
+
+  if (!existingValue) {
+    existingValue = existingBindings.find((binding) => binding.kind === target.kind && binding.key === target.key)?.value;
+  }
+
+  const token = await promptLine(rl, "Auth value/token (blank to cancel): ");
+  if (!token) {
+    process.stdout.write("Cancelled.\n");
+    return;
+  }
+
+  const authValue = maybePrefixBearer(target, token, false);
+  const defaultSecret = secretRefName(existingValue ?? "") ?? defaultAuthSecretName(serverName, target);
+  const secretName = await promptLineWithDefault(rl, "Secret name", defaultSecret);
+  if (!secretName) {
+    process.stdout.write("Secret name cannot be empty.\n");
+    return;
+  }
+
+  const secrets = new SecretsManager();
+  secrets.setSecret(secretName, authValue);
+  applyAuthReference(spec, target, toSecretRef(secretName));
+  saveConfig(config);
+
+  process.stdout.write(`Configured auth for "${serverName}" at ${target.kind}:${target.key} using secret://${secretName}.\n`);
+}
+
+async function clearServerAuthInteractively(rl: ReadlineInterface, serverName: string): Promise<void> {
+  const config = loadConfig();
+  const spec = getServerSpecOrThrow(config, serverName);
+  const bindings = listAuthBindings(spec).map((binding) => ({
+    kind: binding.kind,
+    key: binding.key,
+    value: binding.value,
+    secretName: secretRefName(binding.value) ?? undefined
+  }));
+
+  const selected = await chooseAuthBinding(rl, bindings, "Choose binding to clear");
+  if (!selected) {
+    process.stdout.write("No auth binding selected.\n");
+    return;
+  }
+
+  const removed = removeAuthReference(spec, {
+    kind: selected.kind,
+    key: selected.key
+  });
+
+  if (!removed) {
+    process.stdout.write(`No auth binding found for ${selected.kind}:${selected.key}.\n`);
+    return;
+  }
+
+  const secretName = secretRefName(removed);
+  if (secretName) {
+    const shouldDelete = (await promptLine(rl, `Delete keychain secret "${secretName}" too? (y/N): `)).toLowerCase();
+    if (shouldDelete === "y" || shouldDelete === "yes") {
+      new SecretsManager().removeSecret(secretName);
+      process.stdout.write(`Removed binding and deleted ${secretName}.\n`);
+    } else {
+      process.stdout.write("Removed binding.\n");
+    }
+  } else {
+    process.stdout.write("Removed inline binding.\n");
+  }
+
+  saveConfig(config);
+}
+
+async function reconnectGatewayAndSync(): Promise<void> {
+  const config = loadConfig();
+  const secrets = new SecretsManager();
+  const restart = await restartDaemon(config, process.argv[1] ?? "", secrets);
+  process.stdout.write(`${restart.message} pid=${restart.pid} port=${restart.port}\n`);
+  const summary = syncAllClients(config, secrets);
+  printSyncSummary(summary, false);
+}
+
+async function disableServerInteractively(rl: ReadlineInterface, serverName: string): Promise<boolean> {
+  const confirmation = await promptLine(rl, `Type "${serverName}" to disable this MCP (blank to cancel): `);
+  if (confirmation !== serverName) {
+    process.stdout.write("Cancelled.\n");
+    return false;
+  }
+
+  const config = loadConfig();
+  removeServer(config, serverName, false);
+  saveConfig(config);
+  process.stdout.write(`Removed server: ${serverName}\n`);
+  process.stdout.write("Auto-syncing managed gateway entries across all supported clients...\n");
+  await autoSyncManagedEntries(config);
+  return true;
+}
+
+function buildServerActionTitle(server: StatusServerEntry): string[] {
+  const lines = [
+    `${serverHealthEmoji(server)} ${server.name} MCP Server`,
+    `Transport: ${server.transport}`,
+    `Target: ${server.target}`,
+    "Synced configs:"
+  ];
+
+  if (server.authBindings.length > 0) {
+    lines.splice(3, 0, `Auth: 🔐 ${formatAuthSummary(server.authBindings)}`);
+  }
+
+  const synced = listSyncedClientLabels(server);
+  if (synced.length === 0) {
+    lines.push("  - ⚠️ none");
+  } else {
+    for (const entry of synced) {
+      lines.push(`  - ${entry}`);
+    }
+  }
+
+  return lines;
+}
+
+function buildServerMenuDetail(server: StatusServerEntry): string {
+  const managed = server.clients.filter((client) => client.managed);
+  const errorCount = managed.filter((client) => client.status === "ERROR").length;
+  const syncSummary = managed.length > 0
+    ? `✅ ${managed.length} synced config${managed.length === 1 ? "" : "s"}`
+    : "⚠️ not synced";
+  const errorSummary = errorCount > 0 ? ` • ❌ ${errorCount} error` : "";
+  const authSummary = server.authBindings.length > 0 ? "🔐 auth configured • " : "";
+
+  return `${authSummary}${syncSummary}${errorSummary}`;
+}
+
+async function runServerActionsMenu(rl: ReadlineInterface, serverName: string): Promise<void> {
+  while (true) {
+    const report = loadStatusReport();
+    const server = report.servers.find((entry) => entry.name === serverName);
+    if (!server) {
+      process.stdout.write(`Server "${serverName}" no longer exists.\n`);
+      return;
+    }
+
+    const action = await promptMenuSelection(
+      rl,
+      buildServerActionTitle(server),
+      [
+        { label: "🔐 Configure auth", detail: "Set or update auth binding for this MCP." },
+        { label: "♻️ Re-authenticate", detail: "Replace token for an existing auth binding." },
+        { label: "🧹 Clear authentication", detail: "Remove a specific auth binding." },
+        { label: "🔄 Reconnect", detail: "Restart daemon and sync all managed client entries." },
+        { label: "🚫 Disable", detail: "Remove this MCP and sync removals to clients." },
+        { label: "← Back", detail: "Return to MCP list." }
+      ],
+      "q"
+    );
+
+    if (action === null || action === 5) {
+      return;
+    }
+
+    try {
+      if (action === 0) {
+        await configureServerAuthInteractively(rl, serverName, false);
+      } else if (action === 1) {
+        await configureServerAuthInteractively(rl, serverName, true);
+      } else if (action === 2) {
+        await clearServerAuthInteractively(rl, serverName);
+      } else if (action === 3) {
+        await reconnectGatewayAndSync();
+      } else if (action === 4) {
+        const removed = await disableServerInteractively(rl, serverName);
+        if (removed) {
+          return;
+        }
+      }
+    } catch (error) {
+      process.stdout.write(`${(error as Error).message}\n`);
+    }
+
+    await promptLine(rl, "Press Enter to continue...");
+  }
+}
+
+async function runInteractiveStatusMenu(): Promise<void> {
+  const rl = createInterface({
+    input: process.stdin,
+    output: process.stdout
+  });
+
+  try {
+    while (true) {
+      const report = loadStatusReport();
+      if (report.servers.length === 0) {
+        clearTerminalScreen();
+        process.stdout.write("mcpx status\n");
+        process.stdout.write(`Gateway: ${report.gatewayUrl}\n`);
+        process.stdout.write(`Daemon: ${daemonEmoji(report.daemon.running)} ${formatDaemonState(report.daemon)}\n`);
+        process.stdout.write("⚠️ No upstream servers configured.\n");
+        return;
+      }
+
+      const selection = await promptMenuSelection(
+        rl,
+        [
+          "mcpx status",
+          `Gateway: ${report.gatewayUrl}`,
+          `Daemon: ${daemonEmoji(report.daemon.running)} ${formatDaemonState(report.daemon)}`,
+          `MCP servers: ${report.upstreamCount}`,
+          "Choose an MCP to manage:"
+        ],
+        report.servers.map((server) => ({
+          label: `${serverHealthEmoji(server)} ${server.name} (${server.transport})`,
+          detail: buildServerMenuDetail(server)
+        })),
+        "q"
+      );
+
+      if (selection === null) {
+        return;
+      }
+
+      const server = report.servers[selection];
+      if (!server) {
+        continue;
+      }
+
+      await runServerActionsMenu(rl, server.name);
+    }
+  } finally {
+    rl.close();
+  }
+}
+
 function registerAddCommand(parent: Command): void {
   parent
     .command("add [values...]")
@@ -244,6 +912,7 @@ function registerAddCommand(parent: Command): void {
       const parsed = parseAddServerSpec(values ?? [], options);
 
       addServer(config, parsed.name, parsed.spec, options.force ?? false);
+      await maybeAutoConfigureAuthForAddedServer(parsed.name, parsed.spec, new SecretsManager());
       saveConfig(config);
 
       process.stdout.write(`Added server: ${parsed.name} (${parsed.spec.transport})\n`);
@@ -318,34 +987,24 @@ function registerSyncCommand(program: Command): void {
 function registerStatusCommand(program: Command): void {
   program
     .command("status")
+    .option("--no-interactive", "Disable interactive status menu")
     .option("--json", "Output JSON")
-    .description("Show gateway, daemon, and client sync status")
-    .action((options: { json?: boolean }) => {
-      const config = loadConfig();
-      const daemon = getDaemonStatus(config);
-      const statusPayload = {
-        gatewayUrl: `http://127.0.0.1:${config.gateway.port}/mcp`,
-        daemon,
-        clients: config.clients,
-        upstreamCount: Object.keys(config.servers).length
-      };
+    .description("Show gateway, daemon, MCP inventory, and client sync status")
+    .action(async (options: { json?: boolean; interactive?: boolean }) => {
+      const report = loadStatusReport();
 
       if (options.json) {
-        process.stdout.write(`${JSON.stringify(statusPayload, null, 2)}\n`);
+        process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
         return;
       }
 
-      process.stdout.write(`Gateway URL: ${statusPayload.gatewayUrl}\n`);
-      process.stdout.write(`Daemon: ${daemon.running ? `running (pid ${daemon.pid})` : "stopped"}\n`);
-      process.stdout.write(`Upstream servers: ${statusPayload.upstreamCount}\n`);
-      for (const client of VALID_CLIENTS) {
-        const state = config.clients[client];
-        if (!state) {
-          process.stdout.write(`- ${client}: SKIPPED\n`);
-        } else {
-          process.stdout.write(`- ${client}: ${state.status}${state.message ? ` - ${state.message}` : ""}\n`);
-        }
+      const interactive = (options.interactive ?? true) && process.stdin.isTTY && process.stdout.isTTY;
+      if (interactive) {
+        await runInteractiveStatusMenu();
+        return;
       }
+
+      printStatusReportText(report);
     });
 }
 
