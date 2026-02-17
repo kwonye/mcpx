@@ -29,15 +29,19 @@ jobs:
         with:
           node-version: '20'
           cache: npm
+          cache-dependency-path: cli/package-lock.json
 
       - name: Install dependencies
         run: npm ci
+        working-directory: cli
 
       - name: Build
         run: npm run build
+        working-directory: cli
 
       - name: Test
         run: npm test
+        working-directory: cli
 
       - name: Configure git
         run: |
@@ -46,20 +50,22 @@ jobs:
 
       - name: Bump patch version
         run: npm version patch --no-git-tag-version
+        working-directory: cli
 
       - name: Sync runtime version
         run: npm run sync-version
+        working-directory: cli
 
       - name: Capture release version
         id: version
         run: |
-          VERSION="$(node -p "require('./package.json').version")"
+          VERSION="$(node -p "require('./cli/package.json').version")"
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "tag=v${VERSION}" >> "$GITHUB_OUTPUT"
 
       - name: Commit and tag release
         run: |
-          git add package.json package-lock.json src/version.ts
+          git add cli/package.json cli/package-lock.json cli/src/version.ts
           git commit -m "chore(release): v${{ steps.version.outputs.version }} [skip ci]"
           git tag "${{ steps.version.outputs.tag }}"
 
@@ -70,6 +76,7 @@ jobs:
 
       - name: Publish to npm
         run: npm publish --provenance --access public
+        working-directory: cli
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2

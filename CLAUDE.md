@@ -1,1 +1,1 @@
-AGENTS.md
+cli/AGENTS.md
