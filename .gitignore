@@ -6,3 +6,8 @@ coverage/
 
 # Electron
 app/out/
+app/dist/
+
+# Test artifacts
+app/test-results/
+app/playwright-report/
