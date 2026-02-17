@@ -15,8 +15,13 @@ import {
 } from "@mcpx/core";
 import type { UpstreamServerSpec } from "@mcpx/core";
 import { IPC } from "../shared/ipc-channels";
+import { openDashboard } from "./dashboard";
 
 export function registerIpcHandlers(): void {
+  ipcMain.handle(IPC.OPEN_DASHBOARD, () => {
+    openDashboard();
+  });
+
   ipcMain.handle(IPC.GET_STATUS, () => {
     const config = loadConfig();
     const daemon = getDaemonStatus(config);
