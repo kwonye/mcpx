@@ -1,0 +1,16 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022"],
+    "strict": true,
+    "esModuleInterop": true,
+    "outDir": "out/main",
+    "rootDir": "src/main",
+    "paths": {
+      "@mcpx/core": ["../cli/src/core/index.ts"]
+    }
+  },
+  "include": ["src/main/**/*.ts"]
+}
