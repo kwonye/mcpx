@@ -17,6 +17,11 @@ import type { UpstreamServerSpec } from "@mcpx/core";
 import { IPC } from "../shared/ipc-channels";
 import { openDashboard } from "./dashboard";
 import { fetchRegistryServers, fetchServerDetail } from "./registry-client";
+import { selectBestPackage, extractRequiredInputs, mapServerToSpec } from "./server-mapper";
+import type { SelectedOption } from "./server-mapper";
+
+// Cache the selected option between prepare and confirm calls
+let pendingAdd: { name: string; option: SelectedOption } | null = null;
 
 export function registerIpcHandlers(): void {
   ipcMain.handle(IPC.OPEN_DASHBOARD, () => {
@@ -95,5 +100,28 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC.REGISTRY_GET, (_event, name: string) => {
     return fetchServerDetail(name);
+  });
+
+  ipcMain.handle(IPC.REGISTRY_PREPARE_ADD, async (_event, registryName: string) => {
+    const detail = await fetchServerDetail(registryName);
+    const option = selectBestPackage(detail.server.packages, detail.server.remotes);
+    const requiredInputs = extractRequiredInputs(option);
+    // Derive a short local name from the registry name
+    const shortName = registryName.split("/").pop() ?? registryName;
+    pendingAdd = { name: shortName, option };
+    return { shortName, requiredInputs, option };
+  });
+
+  ipcMain.handle(IPC.REGISTRY_CONFIRM_ADD, (_event, resolvedValues: Record<string, string>) => {
+    if (!pendingAdd) throw new Error("No pending add operation");
+    const { name, option } = pendingAdd;
+    pendingAdd = null;
+    const spec = mapServerToSpec(name, option, resolvedValues);
+    const config = loadConfig();
+    addServer(config, name, spec, false);
+    saveConfig(config);
+    const secrets = new SecretsManager();
+    const summary = syncAllClients(config, secrets);
+    return { added: name, sync: summary };
   });
 }

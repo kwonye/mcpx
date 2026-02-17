@@ -12,6 +12,8 @@ const api = {
   daemonRestart: () => ipcRenderer.invoke(IPC.DAEMON_RESTART),
   registryList: (cursor?: string, query?: string) => ipcRenderer.invoke(IPC.REGISTRY_LIST, cursor, query),
   registryGet: (name: string) => ipcRenderer.invoke(IPC.REGISTRY_GET, name),
+  registryPrepareAdd: (registryName: string) => ipcRenderer.invoke(IPC.REGISTRY_PREPARE_ADD, registryName),
+  registryConfirmAdd: (resolvedValues: Record<string, string>) => ipcRenderer.invoke(IPC.REGISTRY_CONFIRM_ADD, resolvedValues),
   openDashboard: () => ipcRenderer.invoke(IPC.OPEN_DASHBOARD)
 };
 
