@@ -2,6 +2,11 @@
 
 `mcpx` is a local MCP gateway that lets you install upstream MCP servers once, authorize them once, and expose them to multiple AI clients through managed gateway entries.
 
+This is a monorepo containing:
+
+- **`cli/`** — The `mcpx` CLI and core library
+- **`app/`** — The macOS desktop app (Electron + React)
+
 ## What it does
 
 - Stores upstream servers in a central config (`~/.config/mcpx/config.json`)
@@ -75,6 +80,25 @@ mcpx sync
 ```
 
 Manual config changes do not update client configs until `mcpx sync` runs.
+
+## Desktop App
+
+The desktop app provides a visual interface for managing MCP servers:
+
+- Menubar tray icon with quick-status popover
+- Dashboard with server list, detail view, and daemon controls
+- Browse tab to discover and one-click install servers from the official MCP Registry
+- Tab navigation: Servers, Browse, Settings
+
+### Development
+
+```bash
+cd app
+npm install
+npm run dev      # Start Electron dev server
+npm test         # Run unit tests
+npm run e2e      # Run Playwright E2E tests
+```
 
 ## Supported Clients
 
@@ -150,6 +174,14 @@ mcpx sync --json
 ## Build and test from source
 
 ```bash
+# CLI
+cd cli
+npm install
+npm run build
+npm test
+
+# Desktop app
+cd app
 npm install
 npm run build
 npm test

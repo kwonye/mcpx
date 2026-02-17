@@ -19,6 +19,11 @@
   "author": "Will Kwon",
   "type": "module",
   "main": "index.js",
+  "exports": {
+    ".": "./dist/cli.js",
+    "./core": "./dist/core/index.js",
+    "./types": "./dist/types.js"
+  },
   "bin": {
     "mcpx": "dist/cli.js"
   },
