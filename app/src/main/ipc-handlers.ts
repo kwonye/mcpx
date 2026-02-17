@@ -16,6 +16,7 @@ import {
 import type { UpstreamServerSpec } from "@mcpx/core";
 import { IPC } from "../shared/ipc-channels";
 import { openDashboard } from "./dashboard";
+import { fetchRegistryServers, fetchServerDetail } from "./registry-client";
 
 export function registerIpcHandlers(): void {
   ipcMain.handle(IPC.OPEN_DASHBOARD, () => {
@@ -86,5 +87,13 @@ export function registerIpcHandlers(): void {
     const config = loadConfig();
     const secrets = new SecretsManager();
     return restartDaemon(config, process.execPath, secrets);
+  });
+
+  ipcMain.handle(IPC.REGISTRY_LIST, (_event, cursor?: string, query?: string) => {
+    return fetchRegistryServers(cursor, query);
+  });
+
+  ipcMain.handle(IPC.REGISTRY_GET, (_event, name: string) => {
+    return fetchServerDetail(name);
   });
 }
