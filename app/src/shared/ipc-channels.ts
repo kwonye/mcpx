@@ -9,5 +9,7 @@ export const IPC = {
   DAEMON_RESTART: "mcpx:daemon-restart",
   REGISTRY_LIST: "mcpx:registry-list",
   REGISTRY_GET: "mcpx:registry-get",
+  REGISTRY_PREPARE_ADD: "mcpx:registry-prepare-add",
+  REGISTRY_CONFIRM_ADD: "mcpx:registry-confirm-add",
   OPEN_DASHBOARD: "mcpx:open-dashboard"
 } as const;
