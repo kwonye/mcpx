@@ -33,6 +33,39 @@ jobs:
           cache: npm
           cache-dependency-path: cli/package-lock.json
 
+      - name: Refresh tags
+        run: git fetch --tags --force
+
+      - name: Detect changed paths
+        id: changed_paths
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            app:
+              - 'app/**'
+
+      - name: Compute release metadata
+        id: release_meta
+        env:
+          APP_CHANGED: ${{ steps.changed_paths.outputs.app }}
+        run: |
+          INCLUDE_DESKTOP=false
+          if [ "$APP_CHANGED" = "true" ]; then
+            INCLUDE_DESKTOP=true
+          fi
+          VERSION=$(node .github/scripts/release-coordinator.mjs next-version --include-cli true --include-desktop "$INCLUDE_DESKTOP")
+          TAG="v${VERSION}"
+          RELEASE_BODY=$(node .github/scripts/release-coordinator.mjs release-body --include-cli true --include-desktop "$INCLUDE_DESKTOP" --version "$VERSION")
+
+          echo "include_desktop=${INCLUDE_DESKTOP}" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          {
+            echo "release_body<<EOF"
+            echo "$RELEASE_BODY"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Install dependencies
         run: npm ci
         working-directory: cli
@@ -50,54 +83,44 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-      - name: Refresh tags
-        run: git fetch --tags --force
-
-      - name: Bump patch version
-        run: |
-          PKG_VERSION=$(node -p "require('./package.json').version")
-          NPM_VERSION=$(npm view @kwonye/mcpx version 2>/dev/null || echo "0.0.0")
-          TAG_VERSION=$(git tag --list 'v*' | sed 's/^v//' | sort -V | tail -n1)
-          TAG_VERSION=${TAG_VERSION:-0.0.0}
-          BASE_VERSION=$(printf "%s\n%s\n%s\n" "$PKG_VERSION" "$NPM_VERSION" "$TAG_VERSION" | sort -V | tail -n1)
-          echo "Package version: $PKG_VERSION"
-          echo "NPM version: $NPM_VERSION"
-          echo "Git tag version: $TAG_VERSION"
-          echo "Base version: $BASE_VERSION"
-          npm version "$BASE_VERSION" --no-git-tag-version --allow-same-version
-          npm version patch --no-git-tag-version
+      - name: Set CLI release version
+        run: npm version "${{ steps.release_meta.outputs.version }}" --no-git-tag-version --allow-same-version
         working-directory: cli
 
       - name: Sync runtime version
         run: npm run sync-version
         working-directory: cli
 
-      - name: Sync desktop version
-        run: npm version "$(node -p "require('../cli/package.json').version")" --no-git-tag-version --allow-same-version
+      - name: Sync desktop version for mixed release
+        if: steps.release_meta.outputs.include_desktop == 'true'
+        run: npm version "${{ steps.release_meta.outputs.version }}" --no-git-tag-version --allow-same-version
         working-directory: app
 
-      - name: Capture release version
-        id: version
-        run: |
-          VERSION="$(node -p "require('./cli/package.json').version")"
-          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-          echo "tag=v${VERSION}" >> "$GITHUB_OUTPUT"
-
       - name: Commit and tag release
+        env:
+          INCLUDE_DESKTOP: ${{ steps.release_meta.outputs.include_desktop }}
+          RELEASE_VERSION: ${{ steps.release_meta.outputs.version }}
+          RELEASE_TAG: ${{ steps.release_meta.outputs.tag }}
+          SOURCE_SHA: ${{ github.sha }}
         run: |
-          git add cli/package.json cli/package-lock.json cli/src/version.ts app/package.json app/package-lock.json
-          git commit -m "chore(release): v${{ steps.version.outputs.version }} [skip ci]"
-          git tag "${{ steps.version.outputs.tag }}"
+          git add cli/package.json cli/package-lock.json cli/src/version.ts
+          if [ "$INCLUDE_DESKTOP" = "true" ]; then
+            git add app/package.json app/package-lock.json
+          fi
+          git commit -m "chore(release): v${RELEASE_VERSION} [skip ci]"
+          TAG_BODY=$(node .github/scripts/release-coordinator.mjs tag-body --source-sha "$SOURCE_SHA" --include-cli true --include-desktop "$INCLUDE_DESKTOP" --version "$RELEASE_VERSION")
+          git tag -a "$RELEASE_TAG" -m "$TAG_BODY"
 
       - name: Push release tag
-        run: git push origin "${{ steps.version.outputs.tag }}"
+        run: git push origin "${{ steps.release_meta.outputs.tag }}"
 
       - name: Publish to npm
         run: npm publish --provenance --access public
         working-directory: cli
 
-      - name: Create GitHub Release
+      - name: Create or update GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.version.outputs.tag }}
-          generate_release_notes: true
+          tag_name: ${{ steps.release_meta.outputs.tag }}
+          body: ${{ steps.release_meta.outputs.release_body }}
+          overwrite_files: true

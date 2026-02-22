@@ -76,8 +76,8 @@ Top-level release/build workflows are split by target and must stay decoupled:
 
 - **CLI release workflow**: `.github/workflows/cli-release.yml`
   - Trigger: push to `main` with changes in `cli/**`.
-  - Responsibilities: build/test CLI, bump version, sync `cli/src/version.ts`, sync `app/package.json`, create git tag, publish npm package, create GitHub Release.
-  - Version base must be tag-aware: max of local CLI package version, npm published version, and highest git `v*` tag before applying `patch`.
+  - Responsibilities: build/test CLI, compute next shared release version, sync `cli/src/version.ts`, conditionally sync `app/package.json` for mixed releases, create annotated git tag, publish npm package, create/update GitHub Release notes.
+  - Owns tag creation for `cli-only` and mixed (`cli/**` + `app/**`) releases.
 
 - **Desktop release workflow**: `.github/workflows/desktop-release.yml`
   - Triggers:
@@ -85,9 +85,12 @@ Top-level release/build workflows are split by target and must stay decoupled:
     - push tags `v*`
     - `workflow_dispatch` with required `release_tag` input
   - Responsibilities: build desktop artifacts and publish according to trigger:
-    - `main` push: upload workflow artifacts only
-    - tag push: upload assets to that GitHub Release tag
+    - `main` push with `app/**` changes and no `cli/**` changes: create the next shared annotated `v*` tag (desktop-only release)
+    - `main` push including `cli/**` changes (including mixed CLI+desktop commits): do not create a tag; wait for CLI-created `v*` tag
+    - tag push with `include_desktop=true`: build/upload desktop assets to that GitHub Release tag
+    - tag push with `include_desktop=false`: skip desktop artifacts (cli-only release)
     - manual dispatch: upload assets to provided `release_tag`
   - Signing behavior:
     - if all macOS signing/notarization secrets are present, produce signed/notarized build
     - if secrets are missing, fall back to unsigned build (`CSC_IDENTITY_AUTO_DISCOVERY=false`) and do not skip the workflow
+  - Release tags use a single monotonic shared `v*` stream across components, with component-scoped release notes (`## CLI`, `## Desktop`).
