@@ -4,6 +4,7 @@ import { ServerCard } from "./ServerCard";
 import { ServerDetail } from "./ServerDetail";
 import { BrowseTab } from "./BrowseTab";
 import { DaemonControls } from "./DaemonControls";
+import { SettingsPanel } from "./SettingsPanel";
 
 type Tab = "servers" | "browse" | "settings";
 
@@ -113,7 +114,7 @@ export function Dashboard() {
                   <h1 className="page-title">Settings</h1>
                   <p className="page-subtitle">Configure your mcpx installation.</p>
                 </div>
-                <div>Settings configuration to come.</div>
+                <SettingsPanel />
               </>
             )}
           </>

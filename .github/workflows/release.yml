@@ -17,6 +17,9 @@ jobs:
   release:
     if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
 
     steps:
       - name: Check out repository
@@ -64,6 +67,10 @@ jobs:
         run: npm run sync-version
         working-directory: cli
 
+      - name: Sync desktop version
+        run: npm version "$(node -p "require('../cli/package.json').version")" --no-git-tag-version --allow-same-version
+        working-directory: app
+
       - name: Capture release version
         id: version
         run: |
@@ -73,7 +80,7 @@ jobs:
 
       - name: Commit and tag release
         run: |
-          git add cli/package.json cli/package-lock.json cli/src/version.ts
+          git add cli/package.json cli/package-lock.json cli/src/version.ts app/package.json app/package-lock.json
           git commit -m "chore(release): v${{ steps.version.outputs.version }} [skip ci]"
           git tag "${{ steps.version.outputs.tag }}"
 
@@ -90,3 +97,57 @@ jobs:
         with:
           tag_name: ${{ steps.version.outputs.tag }}
           generate_release_notes: true
+
+  desktop-release:
+    needs: release
+    runs-on: macos-14
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check out release tag
+        run: |
+          git fetch --tags --force
+          git checkout "${{ needs.release.outputs.tag }}"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: |
+            app/package-lock.json
+            cli/package-lock.json
+
+      - name: Install CLI dependencies
+        run: npm ci
+        working-directory: cli
+
+      - name: Install desktop dependencies
+        run: npm ci
+        working-directory: app
+
+      - name: Build desktop bundle
+        run: npm run build
+        working-directory: app
+
+      - name: Package macOS app
+        run: npx --yes electron-builder@latest --mac --universal --publish never
+        working-directory: app
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+
+      - name: Upload desktop artifacts to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.release.outputs.tag }}
+          files: |
+            app/dist/*.dmg
+            app/dist/*.zip
+            app/dist/*.blockmap
+            app/dist/latest*.yml
+          fail_on_unmatched_files: true

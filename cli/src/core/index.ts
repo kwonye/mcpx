@@ -2,8 +2,15 @@
 export { loadConfig, saveConfig, defaultConfig } from "./config.js";
 
 // Daemon
-export { getDaemonStatus, startDaemon, stopDaemon, restartDaemon, readDaemonLogs } from "./daemon.js";
-export type { DaemonStatus } from "./daemon.js";
+export {
+  getDaemonStatus,
+  startDaemon,
+  stopDaemon,
+  restartDaemon,
+  readDaemonLogs,
+  runDaemonForeground
+} from "./daemon.js";
+export type { DaemonStatus, DaemonStartResult } from "./daemon.js";
 
 // Sync
 export { syncAllClients, getGatewayUrl } from "./sync.js";

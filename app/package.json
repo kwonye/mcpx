@@ -4,6 +4,24 @@
   "private": true,
   "description": "mcpx desktop app",
   "main": "./out/main/index.js",
+  "build": {
+    "appId": "io.github.kwonye.mcpx",
+    "productName": "mcpx",
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "target": [
+        "dmg",
+        "zip"
+      ]
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "kwonye",
+        "repo": "mcpx"
+      }
+    ]
+  },
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
@@ -13,6 +31,7 @@
     "e2e": "playwright test"
   },
   "dependencies": {
+    "electron-updater": "^6.6.2",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"
   },

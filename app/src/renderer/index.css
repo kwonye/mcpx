@@ -865,6 +865,99 @@ input {
     margin-top: 8px;
 }
 
+/* Settings */
+.settings-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    max-width: 760px;
+}
+
+.settings-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 24px;
+    background-color: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: 18px 20px;
+}
+
+.settings-copy {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.settings-label {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.settings-description {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+}
+
+.settings-toggle {
+    position: relative;
+    width: 52px;
+    height: 30px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.settings-toggle input {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+    pointer-events: none;
+}
+
+.settings-toggle-track {
+    width: 52px;
+    height: 30px;
+    border-radius: 999px;
+    background-color: rgba(255, 255, 255, 0.14);
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    display: inline-flex;
+    align-items: center;
+    padding: 3px;
+    transition: background-color var(--transition-fast), border-color var(--transition-fast);
+}
+
+.settings-toggle-thumb {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background-color: #fff;
+    transform: translateX(0);
+    transition: transform var(--transition-fast);
+}
+
+.settings-toggle input:checked+.settings-toggle-track {
+    background-color: rgba(59, 130, 246, 0.8);
+    border-color: rgba(59, 130, 246, 0.9);
+}
+
+.settings-toggle input:checked+.settings-toggle-track .settings-toggle-thumb {
+    transform: translateX(22px);
+}
+
+.settings-toggle input:disabled+.settings-toggle-track {
+    opacity: 0.6;
+}
+
+.settings-error {
+    color: var(--error);
+    font-size: 0.85rem;
+    padding: 6px 2px;
+}
+
 /* Popover (Menubar Window) Styles */
 .popover {
     display: flex;
