@@ -1,8 +1,10 @@
 export const IPC = {
   GET_STATUS: "mcpx:get-status",
   GET_SERVERS: "mcpx:get-servers",
+  GET_DESKTOP_SETTINGS: "mcpx:get-desktop-settings",
   ADD_SERVER: "mcpx:add-server",
   REMOVE_SERVER: "mcpx:remove-server",
+  UPDATE_DESKTOP_SETTINGS: "mcpx:update-desktop-settings",
   SYNC_ALL: "mcpx:sync-all",
   DAEMON_START: "mcpx:daemon-start",
   DAEMON_STOP: "mcpx:daemon-stop",
