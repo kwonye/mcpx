@@ -1,11 +1,14 @@
 import { contextBridge, ipcRenderer } from "electron";
 import { IPC } from "../shared/ipc-channels";
+import type { DesktopSettingsPatch } from "../shared/desktop-settings";
 
 const api = {
   getStatus: () => ipcRenderer.invoke(IPC.GET_STATUS),
   getServers: () => ipcRenderer.invoke(IPC.GET_SERVERS),
+  getDesktopSettings: () => ipcRenderer.invoke(IPC.GET_DESKTOP_SETTINGS),
   addServer: (name: string, spec: unknown) => ipcRenderer.invoke(IPC.ADD_SERVER, name, spec),
   removeServer: (name: string) => ipcRenderer.invoke(IPC.REMOVE_SERVER, name),
+  updateDesktopSettings: (patch: DesktopSettingsPatch) => ipcRenderer.invoke(IPC.UPDATE_DESKTOP_SETTINGS, patch),
   syncAll: () => ipcRenderer.invoke(IPC.SYNC_ALL),
   daemonStart: () => ipcRenderer.invoke(IPC.DAEMON_START),
   daemonStop: () => ipcRenderer.invoke(IPC.DAEMON_STOP),

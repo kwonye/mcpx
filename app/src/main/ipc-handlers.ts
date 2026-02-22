@@ -1,4 +1,4 @@
-import { ipcMain } from "electron";
+import { app, ipcMain } from "electron";
 import {
   loadConfig,
   saveConfig,
@@ -9,19 +9,26 @@ import {
   syncAllClients,
   addServer,
   removeServer,
-  loadManagedIndex,
   listAuthBindings,
   SecretsManager
 } from "@mcpx/core";
 import type { UpstreamServerSpec } from "@mcpx/core";
 import { IPC } from "../shared/ipc-channels";
+import type { DesktopSettingsPatch } from "../shared/desktop-settings";
 import { openDashboard } from "./dashboard";
 import { fetchRegistryServers, fetchServerDetail } from "./registry-client";
 import { selectBestPackage, extractRequiredInputs, mapServerToSpec } from "./server-mapper";
 import type { SelectedOption } from "./server-mapper";
+import { loadDesktopSettings, updateDesktopSettings } from "./settings-store";
+import { applyStartOnLoginSetting } from "./login-item";
+import { setAutoUpdateEnabled } from "./update-manager";
 
 // Cache the selected option between prepare and confirm calls
 let pendingAdd: { name: string; option: SelectedOption } | null = null;
+
+function daemonEntrypointArg(): string {
+  return process.argv[1] ?? app.getAppPath();
+}
 
 export function registerIpcHandlers(): void {
   ipcMain.handle(IPC.OPEN_DASHBOARD, () => {
@@ -54,6 +61,17 @@ export function registerIpcHandlers(): void {
     return Object.entries(config.servers).map(([name, spec]) => ({ name, ...spec }));
   });
 
+  ipcMain.handle(IPC.GET_DESKTOP_SETTINGS, () => {
+    return loadDesktopSettings();
+  });
+
+  ipcMain.handle(IPC.UPDATE_DESKTOP_SETTINGS, (_event, patch: DesktopSettingsPatch) => {
+    const next = updateDesktopSettings(patch);
+    applyStartOnLoginSetting(next.startOnLoginEnabled);
+    setAutoUpdateEnabled(next.autoUpdateEnabled);
+    return next;
+  });
+
   ipcMain.handle(IPC.ADD_SERVER, (_event, name: string, spec: UpstreamServerSpec) => {
     const config = loadConfig();
     addServer(config, name, spec, true);
@@ -81,7 +99,7 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(IPC.DAEMON_START, async () => {
     const config = loadConfig();
     const secrets = new SecretsManager();
-    return startDaemon(config, process.execPath, secrets);
+    return startDaemon(config, daemonEntrypointArg(), secrets);
   });
 
   ipcMain.handle(IPC.DAEMON_STOP, () => {
@@ -91,7 +109,7 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(IPC.DAEMON_RESTART, async () => {
     const config = loadConfig();
     const secrets = new SecretsManager();
-    return restartDaemon(config, process.execPath, secrets);
+    return restartDaemon(config, daemonEntrypointArg(), secrets);
   });
 
   ipcMain.handle(IPC.REGISTRY_LIST, (_event, cursor?: string, query?: string) => {
