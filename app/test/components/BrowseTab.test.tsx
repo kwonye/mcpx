@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeAll } from "vitest";
+import { describe, expect, it, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { BrowseTab } from "../../src/renderer/components/BrowseTab";
 
@@ -27,14 +27,16 @@ const mockMcpx = {
   openDashboard: vi.fn()
 };
 
-beforeAll(() => {
+beforeEach(() => {
+  vi.clearAllMocks();
   Object.defineProperty(window, "mcpx", { value: mockMcpx, writable: true });
 });
 
 describe("BrowseTab", () => {
-  it("renders search input", () => {
+  it("renders search input", async () => {
     render(<BrowseTab onServerAdded={() => {}} />);
-    expect(screen.getByPlaceholderText("Search MCP servers...")).toBeDefined();
+    expect(screen.getByPlaceholderText("Search for tools, databases, APIs...")).toBeDefined();
+    await screen.findByText("Brave Search");
   });
 
   it("shows registry results after search", async () => {
@@ -48,9 +50,9 @@ describe("BrowseTab", () => {
   it("shows add form with required inputs when adding server", async () => {
     render(<BrowseTab onServerAdded={() => {}} />);
     fireEvent.click(screen.getByText("Search"));
-    const addButtons = await screen.findAllByText("Add");
+    const addButtons = await screen.findAllByText("Add Server");
     fireEvent.click(addButtons[0]);
     expect(await screen.findByText("Configure brave-search")).toBeDefined();
-    expect(screen.getByLabelText("BRAVE_API_KEY")).toBeDefined();
+    expect(screen.getByLabelText(/^BRAVE_API_KEY/)).toBeDefined();
   });
 });

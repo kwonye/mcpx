@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeAll } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { StatusPopover } from "../../src/renderer/components/StatusPopover";
 
 const mockMcpx = {
@@ -29,11 +29,15 @@ describe("StatusPopover", () => {
 
   it("shows server count", async () => {
     render(<StatusPopover />);
-    expect(await screen.findByText(/3 servers/i)).toBeDefined();
+    const label = await screen.findByText("Configured Servers");
+    const row = label.parentElement as HTMLElement;
+    expect(within(row).getByText("3")).toBeDefined();
   });
 
   it("shows error count when errors exist", async () => {
     render(<StatusPopover />);
-    expect(await screen.findByText(/1 error/i)).toBeDefined();
+    const label = await screen.findByText("Sync Errors");
+    const row = label.parentElement as HTMLElement;
+    expect(within(row).getByText("1")).toBeDefined();
   });
 });

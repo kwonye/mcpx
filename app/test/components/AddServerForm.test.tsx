@@ -21,7 +21,7 @@ describe("AddServerForm", () => {
         onCancel={() => {}}
       />
     );
-    expect(screen.getByLabelText("API_KEY")).toBeDefined();
+    expect(screen.getByLabelText(/^API_KEY/)).toBeDefined();
     expect(screen.getByText("Your API key")).toBeDefined();
   });
 
@@ -35,7 +35,7 @@ describe("AddServerForm", () => {
         onCancel={() => {}}
       />
     );
-    const input = screen.getByLabelText("TOKEN") as HTMLInputElement;
+    const input = screen.getByLabelText(/^TOKEN/) as HTMLInputElement;
     expect(input.type).toBe("password");
   });
 
@@ -49,7 +49,7 @@ describe("AddServerForm", () => {
         onCancel={() => {}}
       />
     );
-    const input = screen.getByLabelText("PROJECT_ID") as HTMLInputElement;
+    const input = screen.getByLabelText(/^PROJECT_ID/) as HTMLInputElement;
     expect(input.type).toBe("text");
   });
 });

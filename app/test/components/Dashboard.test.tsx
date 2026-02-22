@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeAll } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { Dashboard } from "../../src/renderer/components/Dashboard";
 
@@ -24,16 +24,32 @@ const mockMcpx = {
     ]
   }),
   syncAll: vi.fn(),
+  addServer: vi.fn(),
   daemonStart: vi.fn(),
   daemonStop: vi.fn(),
   daemonRestart: vi.fn(),
   removeServer: vi.fn().mockResolvedValue({}),
+  getDesktopSettings: vi.fn().mockResolvedValue({
+    autoUpdateEnabled: true,
+    startOnLoginEnabled: true
+  }),
+  updateDesktopSettings: vi.fn().mockResolvedValue({
+    autoUpdateEnabled: false,
+    startOnLoginEnabled: true
+  }),
   openDashboard: vi.fn(),
-  registryList: vi.fn().mockResolvedValue({ servers: [], metadata: {} })
+  registryList: vi.fn().mockResolvedValue({ servers: [], metadata: {} }),
+  registryGet: vi.fn(),
+  registryPrepareAdd: vi.fn(),
+  registryConfirmAdd: vi.fn()
 };
 
-beforeAll(() => {
-  Object.defineProperty(window, "mcpx", { value: mockMcpx, writable: true });
+beforeEach(() => {
+  vi.clearAllMocks();
+  Object.defineProperty(window, "mcpx", {
+    value: mockMcpx,
+    writable: true
+  });
 });
 
 describe("Dashboard", () => {
@@ -45,21 +61,30 @@ describe("Dashboard", () => {
 
   it("shows tab navigation", async () => {
     render(<Dashboard />);
-    expect(await screen.findByText("Servers")).toBeDefined();
-    expect(screen.getByText("Browse")).toBeDefined();
-    expect(screen.getByText("Settings")).toBeDefined();
+    expect(await screen.findByRole("button", { name: "My Servers" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "Browse Registry" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "Settings" })).toBeDefined();
   });
 
   it("navigates to server detail on click", async () => {
     render(<Dashboard />);
     const vercelCard = await screen.findByText("vercel");
     fireEvent.click(vercelCard);
-    expect(await screen.findByText("Back")).toBeDefined();
+    expect(await screen.findByTitle("Back")).toBeDefined();
     expect(screen.getByText(/Authorization/)).toBeDefined();
   });
 
   it("shows daemon controls", async () => {
     render(<Dashboard />);
-    expect(await screen.findByText(/Daemon running/i)).toBeDefined();
+    expect(await screen.findByText(/Daemon Running/i)).toBeDefined();
+  });
+
+  it("loads settings panel when settings tab is selected", async () => {
+    render(<Dashboard />);
+    fireEvent.click(await screen.findByText("Settings"));
+
+    expect(await screen.findByLabelText("Auto-update")).toBeDefined();
+    expect(await screen.findByLabelText("Start on login")).toBeDefined();
+    expect(mockMcpx.getDesktopSettings).toHaveBeenCalledTimes(1);
   });
 });
