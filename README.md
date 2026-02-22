@@ -193,21 +193,26 @@ Top-level GitHub Actions workflows are split by release target:
 
 - **CLI release** (`.github/workflows/cli-release.yml`)
   - Trigger: push to `main` when files in `cli/**` change.
-  - Runs CLI install/build/test, bumps version, syncs `cli/src/version.ts` and `app/package.json`, tags release, publishes npm package, and creates GitHub Release.
-  - Version bump base is the highest of local CLI version, npm published version, and highest git tag (`v*`) to avoid duplicate tag failures.
+  - Runs CLI install/build/test, computes the next shared release version, syncs CLI runtime version, conditionally syncs desktop version for mixed releases, tags release, publishes npm package, and creates/updates the GitHub Release body.
+  - CLI creates `v*` tags for `cli-only` and mixed (`cli/**` + `app/**`) releases.
 
 - **Desktop release/build** (`.github/workflows/desktop-release.yml`)
   - Triggers:
     - Push to `main` when files in `app/**` or `cli/**` change.
     - Push of tags matching `v*`.
     - Manual run (`workflow_dispatch`) with required `release_tag` input.
-  - Always builds macOS desktop artifacts.
+  - Uses annotated tag metadata (`mcpx-release-v1`) to determine whether desktop artifacts are included for a tag.
   - If signing/notarization secrets are present, it produces signed/notarized builds.
   - If signing secrets are missing, it falls back to unsigned builds (`CSC_IDENTITY_AUTO_DISCOVERY=false`) instead of skipping.
   - Publishing behavior:
-    - `main` push: upload artifacts to workflow run.
-    - tag push (`v*`): upload artifacts to that GitHub Release tag.
+    - `main` push with `app/**` changes and no `cli/**` changes: desktop workflow creates the next shared `v*` tag (desktop-only).
+    - `main` push including `cli/**` changes: CLI workflow owns tag creation.
+    - tag push (`v*`) with `include_desktop=true`: build and upload desktop assets to that GitHub Release tag.
+    - tag push (`v*`) with `include_desktop=false`: skip desktop artifacts (cli-only release).
     - manual run: upload artifacts to the provided `release_tag`.
+  - Single monotonic version stream:
+    - every qualifying `main` push increments one shared patch version.
+    - each version can include `CLI`, `Desktop`, or both, with component-scoped release notes.
 
 ## Notes
 

@@ -18,7 +18,7 @@ on:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 permissions:
   contents: write
@@ -39,6 +39,9 @@ jobs:
           git fetch --tags --force
           git checkout "${{ inputs.release_tag }}"
 
+      - name: Refresh tags
+        run: git fetch --tags --force
+
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
@@ -48,19 +51,142 @@ jobs:
             app/package-lock.json
             cli/package-lock.json
 
+      - name: Detect changed paths
+        id: changed_paths
+        if: github.event_name == 'push' && github.ref_type == 'branch' && github.ref_name == 'main'
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            app:
+              - 'app/**'
+            cli:
+              - 'cli/**'
+
+      - name: Determine release flow
+        id: flow
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          INPUT_RELEASE_TAG: ${{ inputs.release_tag }}
+          CHANGED_APP: ${{ steps.changed_paths.outputs.app }}
+          CHANGED_CLI: ${{ steps.changed_paths.outputs.cli }}
+        run: |
+          echo "create_tag=false" >> "$GITHUB_OUTPUT"
+          echo "create_tag_version=" >> "$GITHUB_OUTPUT"
+          echo "build_desktop=false" >> "$GITHUB_OUTPUT"
+          echo "publish_release=false" >> "$GITHUB_OUTPUT"
+          echo "publish_tag=" >> "$GITHUB_OUTPUT"
+          echo "build_version=" >> "$GITHUB_OUTPUT"
+          echo "include_cli=false" >> "$GITHUB_OUTPUT"
+          echo "include_desktop=false" >> "$GITHUB_OUTPUT"
+          echo "include_body=false" >> "$GITHUB_OUTPUT"
+          echo "release_body=" >> "$GITHUB_OUTPUT"
+
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            TAG="$INPUT_RELEASE_TAG"
+            VERSION="${TAG#v}"
+            echo "build_desktop=true" >> "$GITHUB_OUTPUT"
+            echo "publish_release=true" >> "$GITHUB_OUTPUT"
+            echo "publish_tag=$TAG" >> "$GITHUB_OUTPUT"
+            echo "build_version=$VERSION" >> "$GITHUB_OUTPUT"
+            echo "include_desktop=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::Publishing desktop assets to release tag $INPUT_RELEASE_TAG (manual run)."
+          elif [ "$REF_TYPE" = "branch" ] && [ "$REF_NAME" = "main" ]; then
+            if [ "$CHANGED_APP" = "true" ] && [ "$CHANGED_CLI" != "true" ]; then
+              VERSION=$(node .github/scripts/release-coordinator.mjs next-version --include-cli false --include-desktop true)
+              echo "create_tag=true" >> "$GITHUB_OUTPUT"
+              echo "create_tag_version=$VERSION" >> "$GITHUB_OUTPUT"
+              echo "::notice::Main branch app-only push detected; creating release tag v${VERSION}."
+            elif [ "$CHANGED_CLI" = "true" ]; then
+              echo "::notice::Main push includes cli changes; CLI workflow owns release tag creation."
+            else
+              echo "::notice::Main push without app/cli changes in tracked paths; no release action."
+            fi
+          elif [ "$REF_TYPE" = "tag" ]; then
+            TAG="$REF_NAME"
+            VERSION="${TAG#v}"
+            INCLUDE_CLI=false
+            INCLUDE_DESKTOP=true
+            CONTENTS=$(git for-each-ref "refs/tags/$TAG" --format='%(contents)')
+            FIRST_LINE=$(printf '%s\n' "$CONTENTS" | sed -n '1p')
+            if [ "$FIRST_LINE" = "mcpx-release-v1" ]; then
+              PARSED_INCLUDE_CLI=$(printf '%s\n' "$CONTENTS" | sed -n 's/^include_cli=//p' | head -n1)
+              PARSED_INCLUDE_DESKTOP=$(printf '%s\n' "$CONTENTS" | sed -n 's/^include_desktop=//p' | head -n1)
+              PARSED_VERSION=$(printf '%s\n' "$CONTENTS" | sed -n 's/^version=//p' | head -n1)
+
+              if [ "$PARSED_INCLUDE_CLI" = "true" ] || [ "$PARSED_INCLUDE_CLI" = "false" ]; then
+                INCLUDE_CLI="$PARSED_INCLUDE_CLI"
+              fi
+              if [ "$PARSED_INCLUDE_DESKTOP" = "true" ] || [ "$PARSED_INCLUDE_DESKTOP" = "false" ]; then
+                INCLUDE_DESKTOP="$PARSED_INCLUDE_DESKTOP"
+              fi
+              if [ -n "$PARSED_VERSION" ]; then
+                VERSION="$PARSED_VERSION"
+              fi
+            else
+              echo "::notice::Tag metadata is missing; defaulting include_desktop=true for backward compatibility."
+            fi
+
+            if [ "$INCLUDE_DESKTOP" = "true" ]; then
+              echo "build_desktop=true" >> "$GITHUB_OUTPUT"
+              echo "publish_release=true" >> "$GITHUB_OUTPUT"
+              echo "publish_tag=$TAG" >> "$GITHUB_OUTPUT"
+              echo "build_version=$VERSION" >> "$GITHUB_OUTPUT"
+              echo "include_cli=$INCLUDE_CLI" >> "$GITHUB_OUTPUT"
+              echo "include_desktop=true" >> "$GITHUB_OUTPUT"
+              if [ "$INCLUDE_CLI" != "true" ]; then
+                BODY=$(node .github/scripts/release-coordinator.mjs release-body --include-cli false --include-desktop true --version "$VERSION")
+                echo "include_body=true" >> "$GITHUB_OUTPUT"
+                {
+                  echo "release_body<<EOF"
+                  echo "$BODY"
+                  echo "EOF"
+                } >> "$GITHUB_OUTPUT"
+              fi
+              echo "::notice::Desktop assets enabled for tag ${TAG}."
+            else
+              echo "::notice::Desktop assets skipped for cli-only tag ${TAG}."
+            fi
+          else
+            echo "::notice::Event outside release flow; no desktop release action."
+          fi
+
+      - name: Create and push app-only release tag
+        if: steps.flow.outputs.create_tag == 'true'
+        env:
+          VERSION: ${{ steps.flow.outputs.create_tag_version }}
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          TAG="v${VERSION}"
+          TAG_BODY=$(node .github/scripts/release-coordinator.mjs tag-body --source-sha "$SOURCE_SHA" --include-cli false --include-desktop true --version "$VERSION")
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "$TAG_BODY"
+          git push origin "$TAG"
+
       - name: Install CLI dependencies
+        if: steps.flow.outputs.build_desktop == 'true'
         run: npm ci
         working-directory: cli
 
       - name: Install desktop dependencies
+        if: steps.flow.outputs.build_desktop == 'true'
         run: npm ci
         working-directory: app
 
+      - name: Set desktop version for build
+        if: steps.flow.outputs.build_desktop == 'true' && steps.flow.outputs.build_version != ''
+        run: npm version "${{ steps.flow.outputs.build_version }}" --no-git-tag-version --allow-same-version
+        working-directory: app
+
       - name: Build desktop bundle
+        if: steps.flow.outputs.build_desktop == 'true'
         run: npm run build
         working-directory: app
 
       - name: Determine signing mode
+        if: steps.flow.outputs.build_desktop == 'true'
         id: signing_mode
         env:
           CSC_LINK: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
@@ -84,7 +210,7 @@ jobs:
           fi
 
       - name: Package macOS app (signed + notarized)
-        if: steps.signing_mode.outputs.enabled == 'true'
+        if: steps.flow.outputs.build_desktop == 'true' && steps.signing_mode.outputs.enabled == 'true'
         run: npx --yes electron-builder@latest --mac --universal --publish never --config.mac.hardenedRuntime=true --config.mac.gatekeeperAssess=false
         working-directory: app
         env:
@@ -96,35 +222,15 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
 
       - name: Package macOS app (unsigned)
-        if: steps.signing_mode.outputs.enabled != 'true'
+        if: steps.flow.outputs.build_desktop == 'true' && steps.signing_mode.outputs.enabled != 'true'
         run: npx --yes electron-builder@latest --mac --universal --publish never
         working-directory: app
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
 
-      - name: Determine release publish target
-        id: release_target
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          REF_TYPE: ${{ github.ref_type }}
-          REF_NAME: ${{ github.ref_name }}
-          INPUT_RELEASE_TAG: ${{ inputs.release_tag }}
-        run: |
-          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
-            echo "publish_release=true" >> "$GITHUB_OUTPUT"
-            echo "tag=$INPUT_RELEASE_TAG" >> "$GITHUB_OUTPUT"
-            echo "::notice::Publishing desktop assets to release tag $INPUT_RELEASE_TAG (manual run)."
-          elif [ "$REF_TYPE" = "tag" ]; then
-            echo "publish_release=true" >> "$GITHUB_OUTPUT"
-            echo "tag=$REF_NAME" >> "$GITHUB_OUTPUT"
-            echo "::notice::Publishing desktop assets to release tag $REF_NAME (tag push)."
-          else
-            echo "publish_release=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::Branch push detected; uploading workflow artifacts only."
-          fi
-
       - name: Upload build artifacts
+        if: steps.flow.outputs.build_desktop == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: desktop-macos-universal
@@ -136,10 +242,25 @@ jobs:
           if-no-files-found: error
 
       - name: Upload desktop artifacts to release
-        if: steps.release_target.outputs.publish_release == 'true'
+        if: steps.flow.outputs.build_desktop == 'true' && steps.flow.outputs.publish_release == 'true' && steps.flow.outputs.include_body != 'true'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.release_target.outputs.tag }}
+          tag_name: ${{ steps.flow.outputs.publish_tag }}
+          overwrite_files: true
+          files: |
+            app/dist/*.dmg
+            app/dist/*.zip
+            app/dist/*.blockmap
+            app/dist/latest*.yml
+          fail_on_unmatched_files: true
+
+      - name: Upload desktop artifacts to release with scoped body
+        if: steps.flow.outputs.build_desktop == 'true' && steps.flow.outputs.publish_release == 'true' && steps.flow.outputs.include_body == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.flow.outputs.publish_tag }}
+          body: ${{ steps.flow.outputs.release_body }}
+          overwrite_files: true
           files: |
             app/dist/*.dmg
             app/dist/*.zip
