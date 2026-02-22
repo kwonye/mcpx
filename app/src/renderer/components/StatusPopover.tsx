@@ -23,19 +23,40 @@ export function StatusPopover(): JSX.Element {
 
   return (
     <div className="popover">
-      <div className="popover-status">
-        {report.daemon.running
-          ? `Gateway running on :${report.daemon.port}`
-          : "Gateway stopped"}
+      <div className="popover-header">
+        <div className="popover-status-indicator" data-running={report.daemon.running ? "true" : "false"}></div>
+        <div className="popover-status">
+          {report.daemon.running
+            ? `Gateway running on :${report.daemon.port}`
+            : "Gateway stopped"}
+        </div>
       </div>
+
       <div className="popover-summary">
-        {report.upstreamCount} servers · {syncedCount} synced
-        {errorCount > 0 && ` · ${errorCount} error${errorCount > 1 ? "s" : ""}`}
+        <div className="popover-summary-stat">
+          <span>Configured Servers</span>
+          <span className="value">{report.upstreamCount}</span>
+        </div>
+        <div className="popover-summary-stat">
+          <span>Synced Clients</span>
+          <span className="value">{syncedCount}</span>
+        </div>
+        <div className="popover-summary-stat">
+          <span>Sync Errors</span>
+          <span className={`value ${errorCount > 0 ? "error" : ""}`}>{errorCount}</span>
+        </div>
       </div>
+
       <div className="popover-actions">
-        <button onClick={() => window.mcpx.openDashboard()}>Open Dashboard</button>
-        <button onClick={() => window.mcpx.syncAll()}>Sync All</button>
-        <button onClick={() => window.mcpx.daemonRestart()}>Restart</button>
+        <button className="popover-btn primary" onClick={() => window.mcpx.openDashboard()}>
+          Open Dashboard
+        </button>
+        <button className="popover-btn" onClick={() => window.mcpx.syncAll()}>
+          Sync All Clients
+        </button>
+        <button className="popover-btn" onClick={() => window.mcpx.daemonRestart()}>
+          Restart Daemon
+        </button>
       </div>
     </div>
   );

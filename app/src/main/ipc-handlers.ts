@@ -56,7 +56,7 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC.ADD_SERVER, (_event, name: string, spec: UpstreamServerSpec) => {
     const config = loadConfig();
-    addServer(config, name, spec, false);
+    addServer(config, name, spec, true);
     saveConfig(config);
     const secrets = new SecretsManager();
     const summary = syncAllClients(config, secrets);
@@ -118,7 +118,7 @@ export function registerIpcHandlers(): void {
     pendingAdd = null;
     const spec = mapServerToSpec(name, option, resolvedValues);
     const config = loadConfig();
-    addServer(config, name, spec, false);
+    addServer(config, name, spec, true);
     saveConfig(config);
     const secrets = new SecretsManager();
     const summary = syncAllClients(config, secrets);

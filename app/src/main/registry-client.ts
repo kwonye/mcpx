@@ -76,6 +76,8 @@ export async function fetchRegistryServers(
   if (cursor) params.set("cursor", cursor);
   if (query) params.set("q", query);
 
+  console.log("[fetchRegistryServers] fetching URL:", `${REGISTRY_BASE}/v0.1/servers?${params}`);
+
   const response = await fetch(`${REGISTRY_BASE}/v0.1/servers?${params}`, {
     headers: { accept: "application/json" }
   });
