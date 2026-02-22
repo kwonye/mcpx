@@ -1,0 +1,108 @@
+name: Desktop Build
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-macos:
+    name: macOS (${{ matrix.target }})
+    runs-on: macos-14
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: arm64
+            builder_args: --arm64
+            artifact_name: desktop-macos-arm64
+          - target: universal
+            builder_args: --universal
+            artifact_name: desktop-macos-universal
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: |
+            app/package-lock.json
+            cli/package-lock.json
+
+      - name: Install CLI dependencies
+        run: npm ci
+        working-directory: cli
+
+      - name: Install desktop dependencies
+        run: npm ci
+        working-directory: app
+
+      - name: Build desktop bundle
+        run: npm run build
+        working-directory: app
+
+      - name: Determine signing mode
+        id: signing_mode
+        env:
+          CSC_LINK: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+          CSC_KEY_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          missing=()
+          for var in CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; do
+            if [ -z "${!var}" ]; then
+              missing+=("${var}")
+            fi
+          done
+          if [ "${#missing[@]}" -eq 0 ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+            echo "Signing and notarization enabled."
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Signing/notarization disabled for this run; missing secrets: ${missing[*]}"
+          fi
+
+      - name: Package macOS app (signed + notarized)
+        if: steps.signing_mode.outputs.enabled == 'true'
+        run: npx --yes electron-builder@latest --mac ${{ matrix.builder_args }} --publish never --config.mac.hardenedRuntime=true --config.mac.gatekeeperAssess=false
+        working-directory: app
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_LINK: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+          CSC_KEY_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
+      - name: Package macOS app (unsigned)
+        if: steps.signing_mode.outputs.enabled != 'true'
+        run: npx --yes electron-builder@latest --mac ${{ matrix.builder_args }} --publish never
+        working-directory: app
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: |
+            app/dist/*.dmg
+            app/dist/*.zip
+            app/dist/*.blockmap
+            app/dist/latest*.yml
+          if-no-files-found: error
