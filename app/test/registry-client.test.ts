@@ -46,6 +46,10 @@ describe("registry client", () => {
 
     await fetchRegistryServers(undefined, "brave");
     expect(mockFetch).toHaveBeenCalledWith(
+      expect.stringContaining("search=brave"),
+      expect.any(Object)
+    );
+    expect(mockFetch).toHaveBeenCalledWith(
       expect.stringContaining("q=brave"),
       expect.any(Object)
     );
