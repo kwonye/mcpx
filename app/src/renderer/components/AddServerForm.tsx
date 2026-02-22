@@ -13,7 +13,7 @@ interface AddServerFormProps {
   onCancel: () => void;
 }
 
-export function AddServerForm({ requiredInputs, onSubmit, onCancel }: AddServerFormProps): JSX.Element | null {
+export function AddServerForm({ requiredInputs, onSubmit, onCancel }: AddServerFormProps) {
   const [values, setValues] = useState<Record<string, string>>({});
 
   useEffect(() => {
@@ -33,7 +33,9 @@ export function AddServerForm({ requiredInputs, onSubmit, onCancel }: AddServerF
     <form className="add-server-form" onSubmit={handleSubmit}>
       {requiredInputs.map((input) => (
         <div key={input.name} className="form-field">
-          <label htmlFor={input.name}>{input.name}</label>
+          <label htmlFor={input.name}>
+            {input.name} <span style={{ color: "var(--accent-purple)", fontSize: "0.7rem", verticalAlign: "top", marginLeft: "4px" }}>({input.kind})</span>
+          </label>
           {input.description && <p className="field-description">{input.description}</p>}
           <input
             id={input.name}
@@ -45,8 +47,8 @@ export function AddServerForm({ requiredInputs, onSubmit, onCancel }: AddServerF
         </div>
       ))}
       <div className="form-actions">
-        <button type="button" onClick={onCancel}>Cancel</button>
-        <button type="submit">Add</button>
+        <button type="button" className="btn btn-secondary" onClick={onCancel}>Cancel</button>
+        <button type="submit" className="btn btn-primary">Save and Add</button>
       </div>
     </form>
   );

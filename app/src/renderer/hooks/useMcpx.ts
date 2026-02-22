@@ -24,20 +24,32 @@ export function useRegistryList() {
   const [loading, setLoading] = useState(false);
 
   const search = useCallback(async (query?: string) => {
+    console.log("[useMcpx.search] called with query:", query);
     setLoading(true);
-    const result = await window.mcpx.registryList(undefined, query);
-    setServers(result.servers ?? []);
-    setCursor(result.metadata?.nextCursor ?? undefined);
-    setLoading(false);
+    try {
+      const result = await window.mcpx.registryList(undefined, query);
+      console.log("[useMcpx.search] search result:", result);
+      setServers(result.servers ?? []);
+      setCursor(result.metadata?.nextCursor ?? undefined);
+    } catch (err) {
+      console.error("Registry search error:", err);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   const loadMore = useCallback(async (query?: string) => {
     if (!cursor) return;
     setLoading(true);
-    const result = await window.mcpx.registryList(cursor, query);
-    setServers((prev) => [...prev, ...(result.servers ?? [])]);
-    setCursor(result.metadata?.nextCursor ?? undefined);
-    setLoading(false);
+    try {
+      const result = await window.mcpx.registryList(cursor, query);
+      setServers((prev) => [...prev, ...(result.servers ?? [])]);
+      setCursor(result.metadata?.nextCursor ?? undefined);
+    } catch (err) {
+      console.error("Registry loadMore error:", err);
+    } finally {
+      setLoading(false);
+    }
   }, [cursor]);
 
   return { servers, loading, search, loadMore, hasMore: Boolean(cursor) };
