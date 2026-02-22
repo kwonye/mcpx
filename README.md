@@ -187,6 +187,28 @@ npm run build
 npm test
 ```
 
+## CI/CD Workflows
+
+Top-level GitHub Actions workflows are split by release target:
+
+- **CLI release** (`.github/workflows/cli-release.yml`)
+  - Trigger: push to `main` when files in `cli/**` change.
+  - Runs CLI install/build/test, bumps version, syncs `cli/src/version.ts` and `app/package.json`, tags release, publishes npm package, and creates GitHub Release.
+  - Version bump base is the highest of local CLI version, npm published version, and highest git tag (`v*`) to avoid duplicate tag failures.
+
+- **Desktop release/build** (`.github/workflows/desktop-release.yml`)
+  - Triggers:
+    - Push to `main` when files in `app/**` or `cli/**` change.
+    - Push of tags matching `v*`.
+    - Manual run (`workflow_dispatch`) with required `release_tag` input.
+  - Always builds macOS desktop artifacts.
+  - If signing/notarization secrets are present, it produces signed/notarized builds.
+  - If signing secrets are missing, it falls back to unsigned builds (`CSC_IDENTITY_AUTO_DISCOVERY=false`) instead of skipping.
+  - Publishing behavior:
+    - `main` push: upload artifacts to workflow run.
+    - tag push (`v*`): upload artifacts to that GitHub Release tag.
+    - manual run: upload artifacts to the provided `release_tag`.
+
 ## Notes
 
 - Client connectivity is HTTP-first.
