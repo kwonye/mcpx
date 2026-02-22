@@ -40,9 +40,10 @@ export function BrowseTab({ onServerAdded }: BrowseTabProps) {
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
+    const normalizedQuery = searchInput.trim();
     setActiveCategory("");
-    setActiveQuery(searchInput);
-    search(searchInput || undefined);
+    setActiveQuery(normalizedQuery);
+    search(normalizedQuery || undefined);
   };
 
   const handleCategoryClick = (categoryId: string, categoryQuery: string) => {
@@ -104,6 +105,8 @@ export function BrowseTab({ onServerAdded }: BrowseTabProps) {
     );
   }
 
+  const serverEntries = servers as Array<{ server: { name: string; title?: string; description?: string } }>;
+
   return (
     <div className="browse-tab">
       <div className="browse-hero">
@@ -139,7 +142,7 @@ export function BrowseTab({ onServerAdded }: BrowseTabProps) {
       {loading && <div style={{ color: "var(--text-secondary)", textAlign: "center", padding: "40px" }}>Loading registry...</div>}
 
       <div className="browse-results">
-        {(servers as Array<{ server: { name: string; title?: string; description?: string } }>).map((entry) => (
+        {serverEntries.map((entry) => (
           <div key={entry.server.name} className="browse-card">
             <div className="browse-card-header">
               <span className="browse-card-name">{entry.server.title ?? entry.server.name}</span>
@@ -153,6 +156,12 @@ export function BrowseTab({ onServerAdded }: BrowseTabProps) {
           </div>
         ))}
       </div>
+
+      {!loading && serverEntries.length === 0 && (
+        <div className="browse-empty">
+          {activeQuery ? `No servers found for "${activeQuery}". Try another search.` : "No servers found."}
+        </div>
+      )}
 
       {hasMore && !loading && (
         <div style={{ display: "flex", justifyContent: "center", marginTop: "32px", width: "100%" }}>

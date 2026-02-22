@@ -73,8 +73,13 @@ export async function fetchRegistryServers(
   limit = DEFAULT_LIMIT
 ): Promise<RegistryListResponse> {
   const params = new URLSearchParams({ limit: String(limit) });
+  const normalizedQuery = query?.trim();
   if (cursor) params.set("cursor", cursor);
-  if (query) params.set("q", query);
+  if (normalizedQuery) {
+    // Keep compatibility with registry deployments that still expect `q`.
+    params.set("search", normalizedQuery);
+    params.set("q", normalizedQuery);
+  }
 
   console.log("[fetchRegistryServers] fetching URL:", `${REGISTRY_BASE}/v0.1/servers?${params}`);
 
