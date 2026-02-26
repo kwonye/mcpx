@@ -26,3 +26,4 @@ Implementations for various AI clients to automate the registration of `mcpx` ma
 - `npm run dev -- [args]`: Run the CLI from source.
 - `npm run build`: Compile TypeScript to `dist/`.
 - `npm test`: Execute the test suite.
+\n<!-- trigger build -->
