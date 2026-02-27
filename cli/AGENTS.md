@@ -27,3 +27,4 @@ Implementations for various AI clients to automate the registration of `mcpx` ma
 - `npm run build`: Compile TypeScript to `dist/`.
 - `npm test`: Execute the test suite.
 \n<!-- trigger build -->
+\n<!-- trigger mixed release -->
