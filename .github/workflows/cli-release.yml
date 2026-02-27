@@ -32,7 +32,6 @@ jobs:
           node-version: '20'
           cache: npm
           cache-dependency-path: cli/package-lock.json
-          registry-url: 'https://registry.npmjs.org/'
 
       - name: Refresh tags
         run: git fetch --tags --force
@@ -116,8 +115,7 @@ jobs:
         run: git push origin "${{ steps.release_meta.outputs.tag }}"
 
       - name: Publish to npm
-        run: npm publish --provenance --access public
-        working-directory: cli
+        run: npm publish -w cli --provenance --access public
 
       - name: Create or update GitHub Release
         uses: softprops/action-gh-release@v2
