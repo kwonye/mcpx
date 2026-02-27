@@ -32,3 +32,4 @@ The desktop app is integrated with the CLI core logic. It uses a TypeScript path
 ## Integration with Core
 
 The app resolves the `@mcpx/core` alias in `electron.vite.config.ts`. Any changes to the core library in the `cli/` directory are immediately available to the desktop app during development.
+\n<!-- trigger mixed release -->
