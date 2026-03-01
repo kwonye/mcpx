@@ -19,7 +19,7 @@ export function getGatewayUrl(config: McpxConfig): string {
 function buildManagedEntries(config: McpxConfig, gatewayUrl: string, localToken: string): ManagedGatewayEntry[] {
   const names = Object.keys(config.servers);
   return names.map((name) => ({
-    name,
+    name: `${name} (mcpx)`,
     url: `${gatewayUrl}?upstream=${encodeURIComponent(name)}`,
     headers: {
       "x-mcpx-local-token": localToken

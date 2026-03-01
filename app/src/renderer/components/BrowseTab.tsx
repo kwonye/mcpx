@@ -4,6 +4,9 @@ import { AddServerForm } from "./AddServerForm";
 
 interface BrowseTabProps {
   onServerAdded: () => void;
+  status: {
+    servers: Array<{ name: string }>;
+  };
 }
 
 interface RequiredInput {
@@ -21,7 +24,7 @@ const CATEGORIES = [
   { id: "web", label: "Web & Browser 🌐", query: "puppeteer brave browser" }
 ];
 
-export function BrowseTab({ onServerAdded }: BrowseTabProps) {
+export function BrowseTab({ onServerAdded, status }: BrowseTabProps) {
   const { servers, loading, search, loadMore, hasMore } = useRegistryList();
   const [searchInput, setSearchInput] = useState("");
   const [activeQuery, setActiveQuery] = useState("");
@@ -34,23 +37,21 @@ export function BrowseTab({ onServerAdded }: BrowseTabProps) {
   const [addStatus, setAddStatus] = useState<string | null>(null);
   const [isError, setIsError] = useState(false);
 
-  useEffect(() => {
-    search(undefined);
-  }, [search]);
+  const installedServerNames = new Set(status.servers.map(s => s.name));
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
     const normalizedQuery = searchInput.trim();
     setActiveCategory("");
     setActiveQuery(normalizedQuery);
-    search(normalizedQuery || undefined);
+    search(normalizedQuery);
   };
 
   const handleCategoryClick = (categoryId: string, categoryQuery: string) => {
     setActiveCategory(categoryId);
     setSearchInput("");
     setActiveQuery(categoryQuery);
-    search(categoryQuery || undefined);
+    search(categoryQuery);
   };
 
   const handleAdd = async (registryName: string) => {
@@ -71,6 +72,19 @@ export function BrowseTab({ onServerAdded }: BrowseTabProps) {
         });
         setAddStatus(null);
       }
+    } catch (err) {
+      setIsError(true);
+      setAddStatus(`Error: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  };
+
+  const handleRemove = async (serverName: string) => {
+    try {
+      setIsError(false);
+      setAddStatus("Removing...");
+      await window.mcpx.removeServer(serverName);
+      setAddStatus(`Removed "${serverName}" successfully!`);
+      onServerAdded(); // Refresh status
     } catch (err) {
       setIsError(true);
       setAddStatus(`Error: ${err instanceof Error ? err.message : String(err)}`);
@@ -142,19 +156,37 @@ export function BrowseTab({ onServerAdded }: BrowseTabProps) {
       {loading && <div style={{ color: "var(--text-secondary)", textAlign: "center", padding: "40px" }}>Loading registry...</div>}
 
       <div className="browse-results">
-        {serverEntries.map((entry) => (
-          <div key={entry.server.name} className="browse-card">
-            <div className="browse-card-header">
-              <span className="browse-card-name">{entry.server.title ?? entry.server.name}</span>
-              <button className="browse-card-add" onClick={() => handleAdd(entry.server.name)}>
-                Add Server
-              </button>
+        {serverEntries.map((entry) => {
+          const shortName = entry.server.name.split("/").pop() ?? entry.server.name;
+          const isInstalled = installedServerNames.has(shortName);
+
+          return (
+            <div key={entry.server.name} className="browse-card">
+              <div className="browse-card-header">
+                <span className="browse-card-name">{entry.server.title ?? entry.server.name}</span>
+                {isInstalled ? (
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                    <span style={{ fontSize: "0.85rem", color: "var(--success)", fontWeight: 500 }}>Added</span>
+                    <button 
+                      className="browse-card-add" 
+                      style={{ background: "rgba(239, 68, 68, 0.1)", color: "var(--error)", borderColor: "rgba(239, 68, 68, 0.2)" }}
+                      onClick={() => handleRemove(shortName)}
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ) : (
+                  <button className="browse-card-add" onClick={() => handleAdd(entry.server.name)}>
+                    Add Server
+                  </button>
+                )}
+              </div>
+              {entry.server.description && (
+                <div className="browse-card-description">{entry.server.description}</div>
+              )}
             </div>
-            {entry.server.description && (
-              <div className="browse-card-description">{entry.server.description}</div>
-            )}
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       {!loading && serverEntries.length === 0 && (
@@ -165,7 +197,7 @@ export function BrowseTab({ onServerAdded }: BrowseTabProps) {
 
       {hasMore && !loading && (
         <div style={{ display: "flex", justifyContent: "center", marginTop: "32px", width: "100%" }}>
-          <button className="browse-load-more" onClick={() => loadMore(activeQuery || undefined)}>
+          <button className="browse-load-more" onClick={() => loadMore(activeQuery)}>
             Load More Results
           </button>
         </div>
