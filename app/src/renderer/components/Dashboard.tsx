@@ -104,7 +104,7 @@ export function Dashboard() {
                   <h1 className="page-title">Registry</h1>
                   <p className="page-subtitle">Discover and install official MCP servers.</p>
                 </div>
-                <BrowseTab onServerAdded={refresh} />
+                <BrowseTab onServerAdded={refresh} status={report} />
               </>
             )}
 

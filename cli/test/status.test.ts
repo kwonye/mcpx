@@ -44,7 +44,7 @@ describe("status report", () => {
         claude: {
           configPath: "/Users/test/.claude.json",
           entries: {
-            vercel: {
+            "vercel (mcpx)": {
               fingerprint: "sha",
               lastSyncedAt: "2026-02-15T00:00:00.000Z"
             }
@@ -53,7 +53,7 @@ describe("status report", () => {
         codex: {
           configPath: "/Users/test/.codex/config.toml",
           entries: {
-            vercel: {
+            "vercel (mcpx)": {
               fingerprint: "sha2",
               lastSyncedAt: "2026-02-15T00:00:01.000Z"
             }
@@ -97,7 +97,7 @@ describe("status report", () => {
         kiro: {
           configPath: "/Users/test/.kiro/mcp.json",
           entries: {
-            circleback: {
+            "circleback (mcpx)": {
               fingerprint: "sha",
               lastSyncedAt: "2026-02-15T00:00:00.000Z"
             }

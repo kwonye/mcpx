@@ -10,7 +10,9 @@ import {
   addServer,
   removeServer,
   listAuthBindings,
-  SecretsManager
+  SecretsManager,
+  buildStatusReport,
+  loadManagedIndex
 } from "@mcpx/core";
 import type { UpstreamServerSpec } from "@mcpx/core";
 import { IPC } from "../shared/ipc-channels";
@@ -37,23 +39,8 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC.GET_STATUS, () => {
     const config = loadConfig();
-    const daemon = getDaemonStatus(config);
-    const servers = Object.entries(config.servers).map(([name, spec]) => {
-      const transport = spec.transport;
-      const target = transport === "http" ? spec.url : `${spec.command} ${(spec.args ?? []).join(" ")}`;
-      const authBindings = listAuthBindings(spec);
-      const clientStatuses = Object.entries(config.clients).map(([clientId, state]) => ({
-        clientId,
-        status: state?.status ?? "SKIPPED",
-        managed: true
-      }));
-      return { name, transport, target, authBindings, clients: clientStatuses };
-    });
-    return {
-      daemon,
-      upstreamCount: Object.keys(config.servers).length,
-      servers
-    };
+    const managedIndex = loadManagedIndex();
+    return buildStatusReport(config, managedIndex);
   });
 
   ipcMain.handle(IPC.GET_SERVERS, () => {

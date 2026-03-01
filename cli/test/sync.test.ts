@@ -61,13 +61,13 @@ describe("sync engine", () => {
     };
 
     expect(finalConfig.servers.custom_unmanaged.type).toBe("stdio");
-    expect(finalConfig.servers.circleback.type).toBe("http");
-    expect(finalConfig.servers.circleback.url).toContain("127.0.0.1");
-    expect(finalConfig.servers.circleback.url).toContain("upstream=circleback");
-    expect(typeof finalConfig.servers.circleback.headers?.["x-mcpx-local-token"]).toBe("string");
+    expect(finalConfig.servers["circleback (mcpx)"].type).toBe("http");
+    expect(finalConfig.servers["circleback (mcpx)"].url).toContain("127.0.0.1");
+    expect(finalConfig.servers["circleback (mcpx)"].url).toContain("upstream=circleback");
+    expect(typeof finalConfig.servers["circleback (mcpx)"].headers?.["x-mcpx-local-token"]).toBe("string");
 
     const managed = loadManagedIndex(getManagedIndexPath());
-    expect(managed.managed.vscode?.entries.circleback).toBeDefined();
+    expect(managed.managed.vscode?.entries["circleback (mcpx)"]).toBeDefined();
   });
 
   it("reports partial failures but continues syncing other clients", () => {
@@ -125,8 +125,8 @@ describe("sync engine", () => {
     const firstDoc = JSON.parse(fs.readFileSync(vscodePath, "utf8")) as {
       servers: Record<string, { type: string }>;
     };
-    expect(firstDoc.servers.circleback?.type).toBe("http");
-    expect(firstDoc.servers.vercel?.type).toBe("http");
+    expect(firstDoc.servers["circleback (mcpx)"]?.type).toBe("http");
+    expect(firstDoc.servers["vercel (mcpx)"]?.type).toBe("http");
 
     delete config.servers.vercel;
     saveConfig(config);
@@ -137,11 +137,11 @@ describe("sync engine", () => {
     const secondDoc = JSON.parse(fs.readFileSync(vscodePath, "utf8")) as {
       servers: Record<string, { type: string }>;
     };
-    expect(secondDoc.servers.circleback?.type).toBe("http");
-    expect(secondDoc.servers.vercel).toBeUndefined();
+    expect(secondDoc.servers["circleback (mcpx)"]?.type).toBe("http");
+    expect(secondDoc.servers["vercel (mcpx)"]).toBeUndefined();
 
     const managed = loadManagedIndex(getManagedIndexPath());
-    expect(Object.keys(managed.managed.vscode?.entries ?? {})).toEqual(["circleback"]);
+    expect(Object.keys(managed.managed.vscode?.entries ?? {})).toEqual(["circleback (mcpx)"]);
   });
 
   it("syncs Claude only at root mcpServers and leaves project mcpServers untouched", () => {
@@ -181,11 +181,11 @@ describe("sync engine", () => {
       projects?: Record<string, { mcpServers?: Record<string, { type: string; command?: string }> }>;
     };
 
-    expect(syncedClaude.mcpServers.vercel?.type).toBe("http");
-    expect(syncedClaude.mcpServers.vercel?.url).toContain("127.0.0.1");
+    expect(syncedClaude.mcpServers["vercel (mcpx)"]?.type).toBe("http");
+    expect(syncedClaude.mcpServers["vercel (mcpx)"]?.url).toContain("127.0.0.1");
 
     const projectServers = syncedClaude.projects?.["/tmp/project-a"]?.mcpServers ?? {};
     expect(projectServers.project_only?.type).toBe("stdio");
-    expect(projectServers.vercel).toBeUndefined();
+    expect(projectServers["vercel (mcpx)"]).toBeUndefined();
   });
 });
