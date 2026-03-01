@@ -59,7 +59,7 @@ function buildClientMappings(config: McpxConfig, managedIndex: ManagedIndex, ser
   return STATUS_CLIENTS.map((clientId) => {
     const configState = config.clients[clientId];
     const managedClient = managedIndex.managed[clientId];
-    const managedEntry = managedClient?.entries?.[serverName];
+    const managedEntry = managedClient?.entries?.[`${serverName} (mcpx)`];
     const managed = Boolean(managedEntry);
 
     return {
