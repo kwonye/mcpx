@@ -8,6 +8,7 @@
 import { parseClaudeArgs } from "./claude.js";
 import { parseCodexArgs } from "./codex.js";
 import { parseVSCodeArgs } from "./vscode.js";
+import { parseQwenArgs } from "./qwen.js";
 import { detectUnsupportedClient } from "./unsupported.js";
 
 export interface CompatibilityResult {
@@ -83,6 +84,23 @@ export function parseCompatibilityArgs(argv: string[]): CompatibilityResult {
     }
     return {
       client: "vscode",
+      normalizedArgs: result.normalizedArgs
+    };
+  }
+
+  // Check for Qwen: mcpx qwen mcp add ...
+  if (argv[0] === "qwen" && argv[1] === "mcp" && argv[2] === "add") {
+    const qwenArgs = argv.slice(3);
+    const result = parseQwenArgs(qwenArgs);
+    if (result.error) {
+      return {
+        client: "qwen",
+        normalizedArgs: null,
+        error: result.error
+      };
+    }
+    return {
+      client: "qwen",
       normalizedArgs: result.normalizedArgs
     };
   }
