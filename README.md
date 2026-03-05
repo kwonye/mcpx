@@ -46,6 +46,25 @@ mcpx add next-devtools npx next-devtools-mcp@latest
 
 `mcpx add` and `mcpx remove` auto-sync by default. Run `mcpx sync` when you want a manual re-sync or to target specific clients.
 
+### Path C: Client-native compatibility shims
+
+For convenience, `mcpx` also accepts client-native install commands and translates them to the canonical `mcpx add` flow:
+
+```bash
+# Claude Code
+mcpx claude mcp add vercel https://example.com/mcp
+mcpx claude mcp add next-devtools --env FOO=bar -- npx next-devtools-mcp@latest
+
+# Codex
+mcpx codex mcp add next-devtools --env FOO=bar -- npx next-devtools-mcp@latest
+
+# VS Code
+mcpx code --add-mcp '{"name":"vercel","url":"https://example.com/mcp"}'
+mcpx code --add-mcp '{"name":"next-devtools","command":"npx","args":["next-devtools-mcp@latest"]}'
+```
+
+Unsupported client-native commands (e.g., `cursor-agent`, `cline`, `kiro`, `opencode`) will fail with guidance to use `mcpx add` directly.
+
 ### Path B: Add servers manually in JSON config
 
 Edit `~/.config/mcpx/config.json` and add entries under `servers`:
