@@ -7,6 +7,7 @@ import { parseCompatibilityArgs } from "../src/compat/index.js";
 import { parseClaudeArgs } from "../src/compat/claude.js";
 import { parseCodexArgs } from "../src/compat/codex.js";
 import { parseVSCodeArgs } from "../src/compat/vscode.js";
+import { parseQwenArgs } from "../src/compat/qwen.js";
 import { detectUnsupportedClient } from "../src/compat/unsupported.js";
 
 describe("parseCompatibilityArgs", () => {
@@ -34,6 +35,12 @@ describe("parseCompatibilityArgs", () => {
     const result = parseCompatibilityArgs(["code", "--add-mcp", json]);
     expect(result.client).toBe("vscode");
     expect(result.normalizedArgs).toEqual(["my-server", "https://example.com/mcp"]);
+  });
+
+  it("detects qwen mcp add", () => {
+    const result = parseCompatibilityArgs(["qwen", "mcp", "add", "my-server", "npx", "-y", "my-mcp"]);
+    expect(result.client).toBe("qwen");
+    expect(result.normalizedArgs).toEqual(["my-server", "npx", "-y", "my-mcp"]);
   });
 
   it("rejects unsupported cursor-agent", () => {
@@ -648,5 +655,197 @@ describe("detectUnsupportedClient", () => {
 
   it("returns null for empty args", () => {
     expect(detectUnsupportedClient([])).toBeNull();
+  });
+});
+
+describe("parseQwenArgs", () => {
+  describe("stdio mode", () => {
+    it("parses basic stdio add", () => {
+      const result = parseQwenArgs(["my-server", "npx", "-y", "my-mcp"]);
+      expect(result.error).toBeUndefined();
+      expect(result.normalizedArgs).toEqual(["my-server", "npx", "-y", "my-mcp"]);
+    });
+
+    it("parses stdio add with env vars", () => {
+      const result = parseQwenArgs([
+        "my-server",
+        "--env",
+        "DATABASE_URL=postgres://localhost/db",
+        "--env",
+        "API_KEY=secret123",
+        "python",
+        "-m",
+        "my_mcp_server"
+      ]);
+      expect(result.error).toBeUndefined();
+      expect(result.normalizedArgs).toEqual([
+        "my-server",
+        "python",
+        "-m",
+        "my_mcp_server",
+        "--env",
+        "DATABASE_URL=postgres://localhost/db",
+        "--env",
+        "API_KEY=secret123"
+      ]);
+    });
+
+    it("parses stdio add with separator", () => {
+      const result = parseQwenArgs(["my-server", "npx", "--", "-y", "my-mcp"]);
+      expect(result.error).toBeUndefined();
+      expect(result.normalizedArgs).toEqual(["my-server", "npx", "--", "-y", "my-mcp"]);
+    });
+
+    it("parses stdio add with env and separator", () => {
+      const result = parseQwenArgs([
+        "my-server",
+        "--env",
+        "TOKEN=abc",
+        "python",
+        "-m",
+        "server",
+        "--",
+        "--port",
+        "8080"
+      ]);
+      expect(result.error).toBeUndefined();
+      expect(result.normalizedArgs).toEqual([
+        "my-server",
+        "python",
+        "-m",
+        "server",
+        "--",
+        "--port",
+        "8080",
+        "--env",
+        "TOKEN=abc"
+      ]);
+    });
+
+    it("rejects missing command", () => {
+      const result = parseQwenArgs(["my-server"]);
+      expect(result.error).toContain("stdio mode requires a command");
+    });
+  });
+
+  describe("HTTP mode", () => {
+    it("parses HTTP add with explicit transport", () => {
+      const result = parseQwenArgs(["--transport", "http", "my-server", "https://example.com/mcp"]);
+      expect(result.error).toBeUndefined();
+      expect(result.normalizedArgs).toEqual([
+        "my-server",
+        "https://example.com/mcp",
+        "--transport",
+        "http"
+      ]);
+    });
+
+    it("parses HTTP add with headers", () => {
+      const result = parseQwenArgs([
+        "--transport",
+        "http",
+        "my-server",
+        "https://example.com/mcp",
+        "--header",
+        "Authorization: Bearer token123"
+      ]);
+      expect(result.error).toBeUndefined();
+      expect(result.normalizedArgs).toEqual([
+        "my-server",
+        "https://example.com/mcp",
+        "--header",
+        "Authorization=Bearer token123",
+        "--transport",
+        "http"
+      ]);
+    });
+
+    it("parses HTTP add with multiple headers", () => {
+      const result = parseQwenArgs([
+        "--transport",
+        "http",
+        "my-server",
+        "https://example.com/mcp",
+        "--header",
+        "Authorization: Bearer token",
+        "--header",
+        "X-Custom: value"
+      ]);
+      expect(result.error).toBeUndefined();
+      expect(result.normalizedArgs).toEqual([
+        "my-server",
+        "https://example.com/mcp",
+        "--header",
+        "Authorization=Bearer token",
+        "--header",
+        "X-Custom=value",
+        "--transport",
+        "http"
+      ]);
+    });
+
+    it("parses HTTP add with permissive option ordering", () => {
+      const result = parseQwenArgs([
+        "my-server",
+        "--header",
+        "Auth: token",
+        "--transport",
+        "http",
+        "https://example.com/mcp"
+      ]);
+      expect(result.error).toBeUndefined();
+      expect(result.normalizedArgs).toEqual([
+        "my-server",
+        "https://example.com/mcp",
+        "--header",
+        "Auth=token",
+        "--transport",
+        "http"
+      ]);
+    });
+  });
+
+  describe("unsupported features", () => {
+    it("rejects --scope", () => {
+      const result = parseQwenArgs(["-s", "user", "my-server", "npx", "server"]);
+      expect(result.error).toContain("--scope is not supported");
+    });
+
+    it("rejects --trust", () => {
+      const result = parseQwenArgs(["--trust", "my-server", "npx", "server"]);
+      expect(result.error).toContain("--trust is not supported");
+    });
+
+    it("rejects --include-tools", () => {
+      const result = parseQwenArgs(["--include-tools", "tool1,tool2", "my-server", "npx", "server"]);
+      expect(result.error).toContain("--include-tools/--exclude-tools are not supported");
+    });
+
+    it("rejects --exclude-tools", () => {
+      const result = parseQwenArgs(["--exclude-tools", "tool1", "my-server", "npx", "server"]);
+      expect(result.error).toContain("--include-tools/--exclude-tools are not supported");
+    });
+
+    it("rejects --timeout", () => {
+      const result = parseQwenArgs(["--timeout", "5000", "my-server", "npx", "server"]);
+      expect(result.error).toContain("--timeout is not supported");
+    });
+
+    it("rejects --transport sse", () => {
+      const result = parseQwenArgs(["--transport", "sse", "my-server", "http://example.com/sse"]);
+      expect(result.error).toContain("--transport sse is not supported");
+    });
+  });
+
+  describe("error cases", () => {
+    it("rejects empty args", () => {
+      const result = parseQwenArgs([]);
+      expect(result.error).toContain("Usage:");
+    });
+
+    it("rejects HTTP mode without URL", () => {
+      const result = parseQwenArgs(["--transport", "http", "my-server"]);
+      expect(result.error).toContain("HTTP mode requires");
+    });
   });
 });
