@@ -61,6 +61,10 @@ mcpx codex mcp add next-devtools --env FOO=bar -- npx next-devtools-mcp@latest
 # VS Code
 mcpx code --add-mcp '{"name":"vercel","url":"https://example.com/mcp"}'
 mcpx code --add-mcp '{"name":"next-devtools","command":"npx","args":["next-devtools-mcp@latest"]}'
+
+# Qwen CLI
+mcpx qwen mcp add vercel https://example.com/mcp
+mcpx qwen mcp add next-devtools --env FOO=bar -- python -m my_mcp_server
 ```
 
 Unsupported client-native commands (e.g., `cursor-agent`, `cline`, `kiro`, `opencode`) will fail with guidance to use `mcpx add` directly.
