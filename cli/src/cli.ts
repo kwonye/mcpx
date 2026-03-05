@@ -10,6 +10,7 @@ import { SecretsManager, readSecretValueFromStdin } from "./core/secrets.js";
 import { probeHttpAuthRequirement } from "./core/auth-probe.js";
 import { syncAllClients } from "./core/sync.js";
 import type { ClientId, ClientStatus, HttpServerSpec, McpxConfig, StdioServerSpec, UpstreamServerSpec } from "./types.js";
+import { parseCompatibilityArgs } from "./compat/index.js";
 import {
   applyAuthReference,
   defaultAuthSecretName,
@@ -1336,6 +1337,27 @@ function registerMcpCompat(program: Command): void {
 }
 
 export async function runCli(argv = process.argv): Promise<void> {
+  // Extract raw args (without node and script path) for compatibility check
+  const rawArgs = argv.slice(2);
+
+  // Check for client-native compatibility patterns before Commander parses
+  if (rawArgs.length > 0) {
+    const compat = parseCompatibilityArgs(rawArgs);
+
+    // If unsupported client detected, show error and exit
+    if (compat.error && compat.client !== null) {
+      process.stderr.write(`Error: ${compat.error}\n`);
+      process.exit(1);
+    }
+
+    // If valid compatibility command, normalize and inject into add flow
+    if (compat.normalizedArgs !== null) {
+      // Replace argv with normalized args for the add command
+      // mcpx add <normalizedArgs...>
+      argv = [argv[0], argv[1], "add", ...compat.normalizedArgs];
+    }
+  }
+
   const program = new Command();
   program.name("mcpx").description("HTTP-first MCP gateway and multi-client installer").version(APP_VERSION);
 
