@@ -215,6 +215,11 @@ input {
     overflow-y: auto;
     padding: 56px 48px 40px 48px;
     /* Increased top padding */
+    -webkit-app-region: drag;
+}
+
+.main-content > * {
+    -webkit-app-region: no-drag;
 }
 
 .page-header {
