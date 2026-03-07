@@ -22,7 +22,8 @@ import type {
 
 const JSON_RPC_VERSION = "2.0";
 const SERVER_VERSION = APP_VERSION;
-const DEFAULT_UPSTREAM_TIMEOUT_MS = 30_000;
+const DEFAULT_UPSTREAM_TIMEOUT_MS = 60_000;
+const DEFAULT_CONNECT_TIMEOUT_MS = 10_000;
 const OAUTH_WELL_KNOWN_PREFIXES = [
   "/.well-known/oauth-protected-resource",
   "/.well-known/oauth-authorization-server",
@@ -369,7 +370,14 @@ async function getStdioConnection(
       name: "mcpx",
       version: SERVER_VERSION
     });
-    await client.connect(transport);
+    
+    // Add connection timeout
+    await withTimeout(
+      client.connect(transport),
+      DEFAULT_CONNECT_TIMEOUT_MS,
+      `Upstream ${upstream.name} failed to connect within ${DEFAULT_CONNECT_TIMEOUT_MS}ms.`
+    );
+
     return {
       fingerprint,
       client,
@@ -1144,7 +1152,7 @@ export function createGatewayServer(options: GatewayServerOptions): http.Server 
 
       for await (const chunk of request) {
         body += chunk;
-        if (body.length > 2_000_000) {
+        if (body.length > 10_000_000) {
           response.statusCode = 413;
           response.end("Payload Too Large");
           if (debug) {

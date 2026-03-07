@@ -218,12 +218,84 @@ input {
     -webkit-app-region: drag;
 }
 
-.main-content > * {
+.main-content button,
+.main-content input,
+.main-content a,
+.main-content select,
+.main-content textarea,
+.main-content .server-card,
+.main-content .server-detail,
+.main-content .detail-section,
+.main-content .cli-command-input {
     -webkit-app-region: no-drag;
 }
 
 .page-header {
     margin-bottom: 32px;
+}
+
+.servers-controls-container {
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+    max-width: 800px;
+    margin-left: auto;
+    margin-right: auto;
+    margin-bottom: 24px;
+}
+
+.servers-controls-container .cli-command-input {
+    margin-bottom: 0;
+}
+
+.servers-controls-container .daemon-controls {
+    margin-bottom: 0;
+}
+
+/* CLI Command Input */
+.cli-command-input {
+    background-color: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: 20px;
+    width: 100%;
+}
+
+.cli-command-input form {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.cli-command-input input {
+    background-color: rgba(0, 0, 0, 0.2);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    padding: 12px 16px;
+    border-radius: var(--radius-sm);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.875rem;
+    transition: all var(--transition-fast);
+}
+
+.cli-command-input input:focus {
+    outline: none;
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+}
+
+.cli-command-input .field-description {
+    color: var(--text-secondary);
+    font-size: 0.75rem;
+    line-height: 1.4;
+}
+
+.cli-command-input .field-description code {
+    background-color: rgba(255, 255, 255, 0.05);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.7rem;
 }
 
 .page-title {
@@ -384,7 +456,6 @@ input {
     border: 1px solid var(--border-color);
     border-radius: var(--radius-md);
     padding: 16px 20px;
-    margin-bottom: 24px;
 }
 
 .daemon-status {

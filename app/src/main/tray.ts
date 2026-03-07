@@ -1,12 +1,57 @@
-import { Tray, nativeImage, Menu } from "electron";
+import { Tray, nativeImage, Menu, app } from "electron";
 import { join } from "node:path";
 import { openDashboard } from "./dashboard";
 
 let tray: Tray | null = null;
 let onQuitRequested: (() => void) | null = null;
+let onStartDaemonRequested: (() => void) | null = null;
+let onStopDaemonRequested: (() => void) | null = null;
 
 export function setQuitHandler(handler: () => void): void {
   onQuitRequested = handler;
+}
+
+export function setStartDaemonHandler(handler: () => void): void {
+  onStartDaemonRequested = handler;
+}
+
+export function setStopDaemonHandler(handler: () => void): void {
+  onStopDaemonRequested = handler;
+}
+
+function buildContextMenu(daemonRunning: boolean): Menu {
+  const template: Electron.MenuItemConstructorOptions[] = [];
+
+  if (daemonRunning) {
+    template.push(
+      {
+        label: "Stop Daemon",
+        click: () => {
+          onStopDaemonRequested?.();
+        }
+      },
+      { type: "separator" }
+    );
+  } else {
+    template.push(
+      {
+        label: "Start Daemon",
+        click: () => {
+          onStartDaemonRequested?.();
+        }
+      },
+      { type: "separator" }
+    );
+  }
+
+  template.push({
+    label: "Quit",
+    click: () => {
+      onQuitRequested?.();
+    }
+  });
+
+  return Menu.buildFromTemplate(template);
 }
 
 export function createTray(): Tray {
@@ -16,22 +61,38 @@ export function createTray(): Tray {
   tray = new Tray(icon);
   tray.setToolTip("mcpx");
 
-  const contextMenu = Menu.buildFromTemplate([
-    {
-      label: "Quit",
-      click: () => {
-        onQuitRequested?.();
-      }
-    }
-  ]);
+  // Start with daemon not running
+  let daemonRunning = false;
+  tray.setContextMenu(buildContextMenu(daemonRunning));
 
   tray.on("click", () => {
     openDashboard();
   });
 
   tray.on("right-click", () => {
-    tray!.popUpContextMenu(contextMenu);
+    tray!.popUpContextMenu(buildContextMenu(daemonRunning));
   });
 
   return tray;
+}
+
+export function updateTrayForDaemonStatus(running: boolean): void {
+  if (!tray) return;
+  
+  const tooltip = running ? "mcpx - Daemon running" : "mcpx - Daemon stopped";
+  tray.setToolTip(tooltip);
+  tray.setContextMenu(buildContextMenu(running));
+}
+
+export function hideTray(): void {
+  if (tray) {
+    tray.destroy();
+    tray = null;
+  }
+}
+
+export function showTray(): void {
+  if (!tray) {
+    createTray();
+  }
 }

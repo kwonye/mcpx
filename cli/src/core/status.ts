@@ -3,7 +3,7 @@ import { getGatewayUrl } from "./sync.js";
 import { listAuthBindings, secretRefName } from "./server-auth.js";
 import type { ClientId, ClientStatus, ManagedIndex, McpxConfig, UpstreamServerSpec } from "../types.js";
 
-export const STATUS_CLIENTS: ClientId[] = ["claude", "codex", "cursor", "cline", "opencode", "kiro", "vscode"];
+export const STATUS_CLIENTS: ClientId[] = ["claude", "codex", "cursor", "cline", "opencode", "kiro", "vscode", "qwen"];
 
 export interface StatusAuthBinding {
   kind: "header" | "env";

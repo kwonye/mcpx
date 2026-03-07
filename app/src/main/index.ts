@@ -2,14 +2,20 @@ import { app } from "electron";
 import {
   loadConfig,
   startDaemon,
+  stopDaemon,
+  getDaemonStatus,
   SecretsManager
 } from "@mcpx/core";
-import { createTray } from "./tray";
+import { createTray, setQuitHandler, setStartDaemonHandler, setStopDaemonHandler, updateTrayForDaemonStatus } from "./tray";
+import { openDashboard, hideDashboard, closeDashboard } from "./dashboard";
 import { registerIpcHandlers } from "./ipc-handlers";
 import { runDaemonChildIfRequested } from "./daemon-child";
 import { loadDesktopSettings } from "./settings-store";
 import { applyStartOnLoginSetting, wasOpenedAtLogin } from "./login-item";
 import { setAutoUpdateEnabled } from "./update-manager";
+
+let allowQuit = false;
+let daemonRunning = false;
 
 function daemonEntrypointArg(): string {
   return process.argv[1] ?? app.getAppPath();
@@ -24,6 +30,30 @@ async function maybeStartDaemonForLoginLaunch(): Promise<void> {
   const config = loadConfig();
   const secrets = new SecretsManager();
   await startDaemon(config, daemonEntrypointArg(), secrets);
+  daemonRunning = true;
+  updateTrayForDaemonStatus(true);
+}
+
+async function handleStartDaemon(): Promise<void> {
+  try {
+    const config = loadConfig();
+    const secrets = new SecretsManager();
+    await startDaemon(config, daemonEntrypointArg(), secrets);
+    daemonRunning = true;
+    updateTrayForDaemonStatus(true);
+  } catch (error) {
+    console.error("[main] failed to start daemon:", error);
+  }
+}
+
+async function handleStopDaemon(): Promise<void> {
+  try {
+    await stopDaemon();
+    daemonRunning = false;
+    updateTrayForDaemonStatus(false);
+  } catch (error) {
+    console.error("[main] failed to stop daemon:", error);
+  }
 }
 
 export async function startMainProcess(): Promise<void> {
@@ -31,21 +61,69 @@ export async function startMainProcess(): Promise<void> {
     return;
   }
 
-  app.dock?.hide(); // Hide dock icon — menubar app
-
   await app.whenReady();
 
   const settings = loadDesktopSettings();
   applyStartOnLoginSetting(settings.startOnLoginEnabled);
   setAutoUpdateEnabled(settings.autoUpdateEnabled);
 
-  registerIpcHandlers();
+  // Create tray (starts with daemon stopped)
   createTray();
+  updateTrayForDaemonStatus(false);
 
+  // Register IPC handlers
+  registerIpcHandlers();
+
+  // Set up quit handler from tray menu
+  setQuitHandler(() => {
+    allowQuit = true;
+    closeDashboard();
+    app.quit();
+  });
+
+  // Set up daemon start/stop handlers from tray
+  setStartDaemonHandler(() => {
+    void handleStartDaemon();
+  });
+  setStopDaemonHandler(() => {
+    void handleStopDaemon();
+  });
+
+  // Cmd+Q quits the entire app (dashboard + daemon + tray)
+  app.on("before-quit", (e) => {
+    if (!allowQuit) {
+      e.preventDefault();
+      closeDashboard();
+      app.hide();
+      return;
+    }
+    // Allow quit to proceed
+  });
+
+  // Clicking dock icon opens dashboard
+  app.on("activate", () => {
+    openDashboard();
+  });
+
+  // When all windows are closed, hide dock but keep app running (for tray)
+  app.on("window-all-closed", () => {
+    if (process.platform !== "darwin") {
+      app.quit();
+    }
+  });
+
+  // Check daemon status on startup and auto-start if needed
   try {
-    await maybeStartDaemonForLoginLaunch();
+    const status = getDaemonStatus();
+    daemonRunning = status.running;
+    updateTrayForDaemonStatus(daemonRunning);
+    
+    // Auto-start daemon if it was running before or if login launch
+    if (daemonRunning || wasOpenedAtLogin()) {
+      await maybeStartDaemonForLoginLaunch();
+    }
   } catch (error) {
-    console.error("[main] failed to auto-start daemon on login launch:", error);
+    console.error("[main] failed to check daemon status:", error);
   }
 }
 

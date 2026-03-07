@@ -5,6 +5,7 @@ import { ServerDetail } from "./ServerDetail";
 import { BrowseTab } from "./BrowseTab";
 import { DaemonControls } from "./DaemonControls";
 import { SettingsPanel } from "./SettingsPanel";
+import { CliCommandInput } from "./CliCommandInput";
 
 type Tab = "servers" | "browse" | "settings";
 
@@ -80,7 +81,10 @@ export function Dashboard() {
                   <h1 className="page-title">My Servers</h1>
                   <p className="page-subtitle">Manage your local and remote MCP integrations.</p>
                 </div>
-                <DaemonControls daemon={report.daemon} onRefresh={refresh} />
+                <div className="servers-controls-container">
+                  <CliCommandInput onServerAdded={refresh} />
+                  <DaemonControls daemon={report.daemon} onRefresh={refresh} />
+                </div>
                 <div className="server-grid">
                   {report.servers.map((server) => (
                     <ServerCard

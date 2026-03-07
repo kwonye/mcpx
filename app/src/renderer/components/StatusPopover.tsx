@@ -17,9 +17,15 @@ export function StatusPopover(): JSX.Element {
     return count + server.clients.filter((c) => c.managed && c.status === "ERROR").length;
   }, 0);
 
-  const syncedCount = report.servers.reduce((count, server) => {
-    return count + server.clients.filter((c) => c.managed && c.status === "SYNCED").length;
-  }, 0);
+  const syncedClients = new Set<string>();
+  report.servers.forEach((server) => {
+    server.clients.forEach((c) => {
+      if (c.managed && c.status === "SYNCED") {
+        syncedClients.add(c.clientId);
+      }
+    });
+  });
+  const syncedCount = syncedClients.size;
 
   return (
     <div className="popover">

@@ -35,15 +35,21 @@ beforeEach(() => {
   Object.defineProperty(window, "mcpx", { value: mockMcpx, writable: true });
 });
 
+const mockStatus = {
+  servers: [
+    { name: "existing-server" }
+  ]
+};
+
 describe("BrowseTab", () => {
   it("renders search input", async () => {
-    render(<BrowseTab onServerAdded={() => {}} />);
+    render(<BrowseTab onServerAdded={() => {}} status={mockStatus} />);
     expect(screen.getByPlaceholderText("Search for tools, databases, APIs...")).toBeDefined();
     await screen.findByText("Brave Search");
   });
 
   it("shows registry results after search", async () => {
-    render(<BrowseTab onServerAdded={() => {}} />);
+    render(<BrowseTab onServerAdded={() => {}} status={mockStatus} />);
     const searchButton = screen.getByText("Search");
     fireEvent.click(searchButton);
     expect(await screen.findByText("Brave Search")).toBeDefined();
@@ -51,7 +57,7 @@ describe("BrowseTab", () => {
   });
 
   it("shows add form with required inputs when adding server", async () => {
-    render(<BrowseTab onServerAdded={() => {}} />);
+    render(<BrowseTab onServerAdded={() => {}} status={mockStatus} />);
     fireEvent.click(screen.getByText("Search"));
     const addButtons = await screen.findAllByText("Add Server");
     fireEvent.click(addButtons[0]);
@@ -60,7 +66,7 @@ describe("BrowseTab", () => {
   });
 
   it("passes trimmed search query to registry list", async () => {
-    render(<BrowseTab onServerAdded={() => {}} />);
+    render(<BrowseTab onServerAdded={() => {}} status={mockStatus} />);
     fireEvent.change(screen.getByPlaceholderText("Search for tools, databases, APIs..."), {
       target: { value: "  context  " }
     });
@@ -85,7 +91,7 @@ describe("BrowseTab", () => {
       });
     });
 
-    render(<BrowseTab onServerAdded={() => {}} />);
+    render(<BrowseTab onServerAdded={() => {}} status={mockStatus} />);
     fireEvent.change(screen.getByPlaceholderText("Search for tools, databases, APIs..."), {
       target: { value: "context" }
     });
@@ -120,7 +126,7 @@ describe("BrowseTab", () => {
       return defaultRegistryResponse;
     });
 
-    render(<BrowseTab onServerAdded={() => {}} />);
+    render(<BrowseTab onServerAdded={() => {}} status={mockStatus} />);
     fireEvent.change(screen.getByPlaceholderText("Search for tools, databases, APIs..."), {
       target: { value: "nomatch" }
     });

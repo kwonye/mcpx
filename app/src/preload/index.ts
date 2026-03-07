@@ -17,7 +17,8 @@ const api = {
   registryGet: (name: string) => ipcRenderer.invoke(IPC.REGISTRY_GET, name),
   registryPrepareAdd: (registryName: string) => ipcRenderer.invoke(IPC.REGISTRY_PREPARE_ADD, registryName),
   registryConfirmAdd: (resolvedValues: Record<string, string>) => ipcRenderer.invoke(IPC.REGISTRY_CONFIRM_ADD, resolvedValues),
-  openDashboard: () => ipcRenderer.invoke(IPC.OPEN_DASHBOARD)
+  openDashboard: () => ipcRenderer.invoke(IPC.OPEN_DASHBOARD),
+  invoke: (channel: string, ...args: unknown[]) => ipcRenderer.invoke(channel, ...args)
 };
 
 contextBridge.exposeInMainWorld("mcpx", api);

@@ -1,4 +1,4 @@
-export type ClientId = "claude" | "codex" | "cursor" | "cline" | "opencode" | "kiro" | "vscode";
+export type ClientId = "claude" | "codex" | "cursor" | "cline" | "opencode" | "kiro" | "vscode" | "qwen";
 
 export interface HttpServerSpec {
   transport: "http";

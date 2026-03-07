@@ -6,6 +6,7 @@ import { ClineAdapter } from "./cline.js";
 import { KiroAdapter } from "./kiro.js";
 import { OpenCodeAdapter } from "./opencode.js";
 import { VsCodeAdapter } from "./vscode.js";
+import { QwenAdapter } from "./qwen.js";
 
 export function getAdapters(): ClientAdapter[] {
   return [
@@ -15,6 +16,7 @@ export function getAdapters(): ClientAdapter[] {
     new ClineAdapter(),
     new OpenCodeAdapter(),
     new KiroAdapter(),
-    new VsCodeAdapter()
+    new VsCodeAdapter(),
+    new QwenAdapter()
   ];
 }

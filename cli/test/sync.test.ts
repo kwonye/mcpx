@@ -188,4 +188,42 @@ describe("sync engine", () => {
     expect(projectServers.project_only?.type).toBe("stdio");
     expect(projectServers["vercel (mcpx)"]).toBeUndefined();
   });
+
+  it("syncs Qwen config successfully", () => {
+    const env = setupTempEnv("mcpx-sync-qwen-");
+    cleanups.push(env.restore);
+
+    const config = defaultConfig();
+    config.servers.vercel = {
+      transport: "http",
+      url: "https://mcp.vercel.com"
+    };
+    saveConfig(config);
+
+    const qwenDir = path.join(env.root, ".qwen");
+    fs.mkdirSync(qwenDir, { recursive: true });
+    const qwenPath = path.join(qwenDir, "settings.json");
+    const initialQwen = {
+      mcpServers: {
+        existing_qwen_mcp: {
+          type: "stdio",
+          command: "python",
+          args: ["-m", "my_mcp"]
+        }
+      }
+    };
+    fs.writeFileSync(qwenPath, JSON.stringify(initialQwen, null, 2));
+
+    const summary = syncAllClients(config, new SecretsManager());
+    expect(summary.hasErrors).toBe(false);
+    expect(summary.results.some((result) => result.clientId === "qwen" && result.status === "SYNCED")).toBe(true);
+
+    const syncedQwen = JSON.parse(fs.readFileSync(qwenPath, "utf8")) as {
+      mcpServers: Record<string, { httpUrl?: string; headers?: Record<string, string> }>;
+    };
+
+    expect(syncedQwen.mcpServers["vercel (mcpx)"]?.httpUrl).toContain("127.0.0.1");
+    expect(syncedQwen.mcpServers["vercel (mcpx)"]?.headers?.["x-mcpx-local-token"]).toBeDefined();
+    expect(syncedQwen.mcpServers["existing_qwen_mcp"]).toBeDefined();
+  });
 });

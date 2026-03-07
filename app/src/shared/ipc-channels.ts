@@ -13,5 +13,6 @@ export const IPC = {
   REGISTRY_GET: "mcpx:registry-get",
   REGISTRY_PREPARE_ADD: "mcpx:registry-prepare-add",
   REGISTRY_CONFIRM_ADD: "mcpx:registry-confirm-add",
-  OPEN_DASHBOARD: "mcpx:open-dashboard"
+  OPEN_DASHBOARD: "mcpx:open-dashboard",
+  EXECUTE_CLI_COMMAND: "mcpx:execute-cli-command"
 } as const;
