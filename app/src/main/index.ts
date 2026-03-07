@@ -10,6 +10,7 @@ import { runDaemonChildIfRequested } from "./daemon-child";
 import { loadDesktopSettings } from "./settings-store";
 import { applyStartOnLoginSetting, wasOpenedAtLogin } from "./login-item";
 import { setAutoUpdateEnabled } from "./update-manager";
+import { openDashboard } from "./dashboard";
 
 function daemonEntrypointArg(): string {
   return process.argv[1] ?? app.getAppPath();
@@ -30,6 +31,16 @@ export async function startMainProcess(): Promise<void> {
   if (await runDaemonChildIfRequested()) {
     return;
   }
+
+  const gotTheLock = app.requestSingleInstanceLock();
+  if (!gotTheLock) {
+    app.quit();
+    return;
+  }
+
+  app.on("second-instance", () => {
+    openDashboard();
+  });
 
   app.dock?.hide(); // Hide dock icon — menubar app
 
