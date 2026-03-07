@@ -352,8 +352,8 @@ export function registerIpcHandlers(): void {
     return restartDaemon(config, daemonEntrypointArg(), secrets);
   });
 
-  ipcMain.handle(IPC.REGISTRY_LIST, (_event, cursor?: string, query?: string) => {
-    return fetchRegistryServers(cursor, query);
+  ipcMain.handle(IPC.REGISTRY_LIST, (_event, cursor?: string, query?: string, limit?: number) => {
+    return fetchRegistryServers(cursor, query, limit);
   });
 
   ipcMain.handle(IPC.REGISTRY_GET, (_event, name: string) => {

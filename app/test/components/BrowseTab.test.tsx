@@ -73,7 +73,7 @@ describe("BrowseTab", () => {
     fireEvent.click(screen.getByText("Search"));
 
     await waitFor(() => {
-      expect(mockMcpx.registryList).toHaveBeenCalledWith(undefined, "context");
+      expect(mockMcpx.registryList).toHaveBeenCalledWith(undefined, "context", 200);
     });
   });
 
@@ -81,7 +81,7 @@ describe("BrowseTab", () => {
     const initialResolvers: Array<(value: typeof defaultRegistryResponse) => void> = [];
     let searchResolver: ((value: typeof defaultRegistryResponse) => void) | undefined;
 
-    mockMcpx.registryList.mockImplementation((_cursor?: string, query?: string) => {
+    mockMcpx.registryList.mockImplementation((_cursor?: string, query?: string, _limit?: number) => {
       return new Promise((resolve) => {
         if (query === "context") {
           searchResolver = resolve as (value: typeof defaultRegistryResponse) => void;

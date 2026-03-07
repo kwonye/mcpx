@@ -27,17 +27,19 @@ export function useRegistryList() {
   const [cursor, setCursor] = useState<string | undefined>();
   const [loading, setLoading] = useState(false);
   const requestIdRef = useRef(0);
+  const currentQueryRef = useRef<string | undefined>();
 
   const search = useCallback(async (query?: string) => {
     const normalizedQuery = query?.trim();
     const requestId = ++requestIdRef.current;
+    currentQueryRef.current = normalizedQuery;
     setLoading(true);
     try {
-      const result = await window.mcpx.registryList(undefined, normalizedQuery || undefined);
+      const limit = normalizedQuery ? 200 : 100;
+      const result = await window.mcpx.registryList(undefined, normalizedQuery || undefined, limit);
       if (requestId !== requestIdRef.current) return;
       
       const newServers = result.servers ?? [];
-      // Deduplicate by name just in case
       const seen = new Set();
       const deduped = newServers.filter((s: any) => {
         if (seen.has(s.server.name)) return false;
@@ -58,11 +60,12 @@ export function useRegistryList() {
 
   const loadMore = useCallback(async (query?: string) => {
     if (!cursor || loading) return;
-    const normalizedQuery = query?.trim();
+    const normalizedQuery = query?.trim() || currentQueryRef.current;
     const requestId = ++requestIdRef.current;
     setLoading(true);
     try {
-      const result = await window.mcpx.registryList(cursor, normalizedQuery || undefined);
+      const limit = normalizedQuery ? 200 : 100;
+      const result = await window.mcpx.registryList(cursor, normalizedQuery || undefined, limit);
       if (requestId !== requestIdRef.current) return;
       
       setServers((prev) => {

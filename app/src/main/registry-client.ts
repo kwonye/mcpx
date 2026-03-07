@@ -1,5 +1,8 @@
+import { filterServersByQuery, sortServersByRelevance } from "./search-utils";
+
 const REGISTRY_BASE = "https://registry.modelcontextprotocol.io";
-const DEFAULT_LIMIT = 30;
+const DEFAULT_LIMIT = 100;
+const SEARCH_LIMIT = 200;
 
 export interface RegistryServerEntry {
   server: {
@@ -76,9 +79,7 @@ export async function fetchRegistryServers(
   const normalizedQuery = query?.trim();
   if (cursor) params.set("cursor", cursor);
   if (normalizedQuery) {
-    // Keep compatibility with registry deployments that still expect `q`.
     params.set("search", normalizedQuery);
-    params.set("q", normalizedQuery);
   }
 
   console.log("[fetchRegistryServers] fetching URL:", `${REGISTRY_BASE}/v0.1/servers?${params}`);
@@ -91,7 +92,21 @@ export async function fetchRegistryServers(
     throw new Error(`Registry API error: ${response.status}`);
   }
 
-  return response.json();
+  const data = await response.json();
+
+  if (normalizedQuery) {
+    const filtered = filterServersByQuery(data.servers || [], normalizedQuery);
+    const sorted = sortServersByRelevance(filtered, normalizedQuery);
+    return {
+      servers: sorted,
+      metadata: {
+        count: sorted.length,
+        nextCursor: null
+      }
+    };
+  }
+
+  return data;
 }
 
 export async function fetchServerDetail(name: string): Promise<RegistryDetailResponse> {

@@ -1,33 +1,27 @@
 # Desktop App Overview
 
-The `mcpx` desktop app provides a visual interface for managing MCP servers, featuring a menubar tray icon, a dashboard, and discovery tools.
-
-## Technologies
-- **Framework:** Electron
-- **UI:** React 19 + TypeScript
-- **Styling:** Vanilla CSS
-- **Build Tool:** electron-vite
-- **Testing:** 
-  - Vitest + React Testing Library (Unit/Component)
-  - Playwright (E2E)
+The `mcpx` desktop app provides a visual interface for managing MCP servers, featuring a menubar tray icon, a comprehensive dashboard, and a discovery "Browse" tab.
 
 ## Architecture
 
-The desktop app is integrated with the CLI core logic. It uses a TypeScript path alias `@mcpx/core` to import business logic directly from `cli/src/core/index.ts`.
+The app is built with **Electron + React** and is designed to be a lightweight wrapper around the `mcpx` core library.
 
-- **Main Process (`src/main/`):** Handles IPC, tray management, window lifecycle, and bridges core logic.
-- **Preload (`src/preload/`):** Exposes a typed API to the renderer via `contextBridge`.
-- **Renderer (`src/renderer/`):** React-based UI.
-- **Shared (`src/shared/`):** IPC channel constants and shared types.
+### Main Process (`src/main/`)
+- **Lifecycle:** Manages the Electron app lifecycle and window state.
+- **Tray:** Implements a macOS-native menubar tray with a quick-status popover.
+- **Daemon Management:** Controls the background `mcpx` gateway.
+- **IPC Handlers:** Bridges the renderer to the core CLI logic via `@mcpx/core`.
+- **Daemon-Child Mode:** Includes logic to run the gateway as a dedicated child process (`src/main/daemon-child.ts`), ensuring the gateway stays alive even if the dashboard is closed.
 
-## Development Conventions
+### Preload (`src/preload/`)
+- Exposes a secure, typed API to the renderer process via `contextBridge`.
+- Maps core CLI operations (add, sync, status) to frontend-friendly promises.
 
-- **State Management:** Uses React hooks (`useMcpx`) to interact with the Electron backend.
-- **IPC Communication:** Strictly defined channels in `src/shared/ipc-channels.ts`.
-- **Building:** 
-  - `npm run dev`: Starts the development server.
-  - `npm run build`: Bundles the app for production.
-- **Packaging:** Uses `electron-builder` (via the release workflow or manual trigger).
+### Renderer (`src/renderer/`)
+- **UI Framework:** React 19.
+- **State Management:** Custom `useMcpx` hook for interacting with the backend.
+- **Dashboard:** Server list, detail views, and real-time logs.
+- **Browse Tab:** Discovery interface for finding and installing servers from the official MCP Registry.
 
 ## Building and Installing Locally
 
@@ -70,7 +64,28 @@ open /Applications/mcpx.app
 
 **Note:** The app is a menubar-only app (no dock icon). Look for the tray icon in the menubar.
 
+## Technologies
+- **Styling:** Pure Vanilla CSS (no Tailwind/Bootstrap).
+- **Build Tool:** `electron-vite` for optimized dev/build cycles.
+- **Testing:** 
+  - **Unit:** Vitest + React Testing Library for components.
+  - **E2E:** Playwright for Electron-specific integration tests.
+
 ## Integration with Core
 
-The app resolves the `@mcpx/core` alias in `electron.vite.config.ts`. Any changes to the core library in the `cli/` directory are immediately available to the desktop app during development.
-\n<!-- trigger mixed release -->
+## Development
+
+### Setup
+```bash
+cd app
+npm install
+```
+
+### Key Commands
+- `npm run dev`: Starts the development environment with Electron HMR.
+- `npm run build`: Bundles the main, preload, and renderer processes.
+- `npm test`: Executes component and unit tests.
+- `npm run e2e`: Runs Playwright end-to-end tests against the built app.
+
+## Integration with CLI
+The app imports business logic directly from `../cli/src/core/index.ts` using the `@mcpx/core` TypeScript alias. This ensures that the CLI and Desktop app always share identical configuration parsing, sync logic, and secret management.
