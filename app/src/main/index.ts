@@ -61,6 +61,16 @@ export async function startMainProcess(): Promise<void> {
     return;
   }
 
+  const gotTheLock = app.requestSingleInstanceLock();
+  if (!gotTheLock) {
+    app.quit();
+    return;
+  }
+
+  app.on("second-instance", () => {
+    openDashboard();
+  });
+
   await app.whenReady();
 
   const settings = loadDesktopSettings();
