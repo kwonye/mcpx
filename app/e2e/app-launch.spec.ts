@@ -14,6 +14,26 @@ test.describe("app launch", () => {
 
     await app.close();
   });
+
+  test("app launches 10 consecutive times without crashing", async () => {
+    const launchAttempts = 10;
+    
+    for (let i = 0; i < launchAttempts; i++) {
+      // Launch the app
+      const app = await electron.launch({ args: [mainPath] });
+      
+      // Verify the app process is running
+      const isRunning = app.process().pid !== undefined;
+      expect(isRunning).toBe(true);
+      
+      // Verify the app has a valid PID
+      expect(app.process().pid).toBeDefined();
+      expect(app.process().pid).toBeGreaterThan(0);
+      
+      // Close the app before next attempt
+      await app.close();
+    }
+  });
 });
 
 test.describe("dashboard window", () => {
