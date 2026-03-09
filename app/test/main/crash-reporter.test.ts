@@ -1,69 +1,179 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-
-// Mock Electron app object
-const mockApp = {
-  on: vi.fn(),
-  quit: vi.fn(),
-  hide: vi.fn(),
-  exit: vi.fn(),
-  dock: {
-    show: vi.fn(),
-    hide: vi.fn(),
-  },
-  whenReady: vi.fn().mockResolvedValue(undefined),
-  requestSingleInstanceLock: vi.fn().mockReturnValue(true),
-};
-
-const mockCrashReporter = {
-  start: vi.fn(),
-};
-
-const mockDialog = {
-  showErrorBox: vi.fn(),
-};
-
-vi.mock("electron", () => ({
-  app: mockApp,
-  crashReporter: mockCrashReporter,
-  dialog: mockDialog,
-}));
+// @vitest-environment node
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 describe("crashReporter initialization", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
-    // Reset module to get fresh imports
     vi.resetModules();
+    vi.clearAllMocks();
+    delete process.env.VITEST;
+  });
+
+  afterEach(() => {
+    delete process.env.VITEST;
   });
 
   it("should call crashReporter.start() before any Electron API calls", async () => {
-    // Import after mocks are set up
-    const { startMainProcess } = await import("../../src/main/index.js");
+    const mockCrashReporterStart = vi.fn();
+    const mockRequestSingleInstanceLock = vi.fn().mockReturnValue(true);
+    const mockWhenReady = vi.fn().mockResolvedValue(undefined);
+    const mockAppOn = vi.fn();
+    const mockAppQuit = vi.fn();
+    const mockAppExit = vi.fn();
 
+    vi.doMock("electron", () => ({
+      app: {
+        on: mockAppOn,
+        quit: mockAppQuit,
+        exit: mockAppExit,
+        dock: { hide: vi.fn() },
+        whenReady: mockWhenReady,
+        requestSingleInstanceLock: mockRequestSingleInstanceLock,
+        getAppPath: () => "/tmp/app",
+      },
+      crashReporter: {
+        start: mockCrashReporterStart,
+      },
+      dialog: {
+        showErrorBox: vi.fn(),
+      },
+    }));
+
+    vi.doMock("@mcpx/core", () => ({
+      loadConfig: vi.fn(),
+      startDaemon: vi.fn(),
+      stopDaemon: vi.fn(),
+      getDaemonStatus: vi.fn().mockReturnValue({ running: false }),
+      SecretsManager: vi.fn(),
+    }));
+
+    vi.doMock("../../src/main/tray", () => ({
+      createTray: vi.fn(),
+      setQuitHandler: vi.fn(),
+      setStartDaemonHandler: vi.fn(),
+      setStopDaemonHandler: vi.fn(),
+      updateTrayForDaemonStatus: vi.fn(),
+    }));
+
+    vi.doMock("../../src/main/dashboard", () => ({
+      openDashboard: vi.fn(),
+      hideDashboard: vi.fn(),
+      closeDashboard: vi.fn(),
+    }));
+
+    vi.doMock("../../src/main/ipc-handlers", () => ({
+      registerIpcHandlers: vi.fn(),
+    }));
+
+    vi.doMock("../../src/main/daemon-child", () => ({
+      runDaemonChildIfRequested: vi.fn().mockResolvedValue(false),
+    }));
+
+    vi.doMock("../../src/main/settings-store", () => ({
+      loadDesktopSettings: vi.fn().mockReturnValue({
+        startOnLoginEnabled: false,
+        autoUpdateEnabled: true,
+      }),
+    }));
+
+    vi.doMock("../../src/main/login-item", () => ({
+      applyStartOnLoginSetting: vi.fn(),
+      wasOpenedAtLogin: vi.fn().mockReturnValue(false),
+    }));
+
+    vi.doMock("../../src/main/update-manager", () => ({
+      setAutoUpdateEnabled: vi.fn(),
+    }));
+
+    const { startMainProcess } = await import("../../src/main/index");
     await startMainProcess();
 
     // crashReporter.start() should be called FIRST, before any other Electron API
-    expect(mockCrashReporter.start).toHaveBeenCalledBefore(mockApp.requestSingleInstanceLock);
-    expect(mockCrashReporter.start).toHaveBeenCalledWith({
+    expect(mockCrashReporterStart).toHaveBeenCalledBefore(mockRequestSingleInstanceLock);
+    expect(mockCrashReporterStart).toHaveBeenCalledWith({
       productName: "mcpx",
       uploadToServer: false,
     });
   });
 
   it("should show error dialog and exit on startup failure", async () => {
-    // Simulate a startup error by making whenReady throw
-    mockApp.whenReady.mockRejectedValueOnce(new Error("Test startup error"));
+    const mockShowErrorBox = vi.fn();
+    const mockAppExit = vi.fn();
+    const startupError = new Error("Test startup error");
 
-    const { startMainProcess } = await import("../../src/main/index.js");
+    vi.doMock("electron", () => ({
+      app: {
+        on: vi.fn(),
+        quit: vi.fn(),
+        exit: mockAppExit,
+        dock: { hide: vi.fn() },
+        whenReady: vi.fn().mockRejectedValue(startupError),
+        requestSingleInstanceLock: vi.fn().mockReturnValue(true),
+        getAppPath: () => "/tmp/app",
+      },
+      crashReporter: {
+        start: vi.fn(),
+      },
+      dialog: {
+        showErrorBox: mockShowErrorBox,
+      },
+    }));
 
-    await startMainProcess();
+    vi.doMock("@mcpx/core", () => ({
+      loadConfig: vi.fn(),
+      startDaemon: vi.fn(),
+      stopDaemon: vi.fn(),
+      getDaemonStatus: vi.fn(),
+      SecretsManager: vi.fn(),
+    }));
+
+    vi.doMock("../../src/main/tray", () => ({
+      createTray: vi.fn(),
+      setQuitHandler: vi.fn(),
+      setStartDaemonHandler: vi.fn(),
+      setStopDaemonHandler: vi.fn(),
+      updateTrayForDaemonStatus: vi.fn(),
+    }));
+
+    vi.doMock("../../src/main/dashboard", () => ({
+      openDashboard: vi.fn(),
+      hideDashboard: vi.fn(),
+      closeDashboard: vi.fn(),
+    }));
+
+    vi.doMock("../../src/main/ipc-handlers", () => ({
+      registerIpcHandlers: vi.fn(),
+    }));
+
+    vi.doMock("../../src/main/daemon-child", () => ({
+      runDaemonChildIfRequested: vi.fn().mockResolvedValue(false),
+    }));
+
+    vi.doMock("../../src/main/settings-store", () => ({
+      loadDesktopSettings: vi.fn(),
+    }));
+
+    vi.doMock("../../src/main/login-item", () => ({
+      applyStartOnLoginSetting: vi.fn(),
+      wasOpenedAtLogin: vi.fn(),
+    }));
+
+    vi.doMock("../../src/main/update-manager", () => ({
+      setAutoUpdateEnabled: vi.fn(),
+    }));
+
+    const { startMainProcess } = await import("../../src/main/index");
+    
+    // The error should be caught by the global error handler in index.ts
+    // We need to await the promise and catch the error
+    await expect(startMainProcess()).rejects.toThrow("Test startup error");
 
     // Should show error dialog
-    expect(mockDialog.showErrorBox).toHaveBeenCalledWith(
+    expect(mockShowErrorBox).toHaveBeenCalledWith(
       "Startup Error",
       expect.stringContaining("Test startup error")
     );
 
     // Should exit with code 1
-    expect(mockApp.exit).toHaveBeenCalledWith(1);
+    expect(mockAppExit).toHaveBeenCalledWith(1);
   });
 });
