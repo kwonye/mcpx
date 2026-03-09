@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 current_phase: Phase 1 — Launch Stability
-current_plan: 1
+current_plan: 2
 status: in_progress
-last_updated: "2026-03-09T17:37:11Z"
+last_updated: "2026-03-09T17:50:48Z"
 progress:
   total_phases: 4
   completed_phases: 0
   total_plans: 4
-  completed_plans: 2
+  completed_plans: 3
 ---
 
 # mcpx Desktop App Fixes — Project State
@@ -25,8 +25,8 @@ progress:
 **Core Value:** A reliable, polished desktop app that makes MCP server management effortless and intuitive.
 
 **Current Phase:** Phase 1 — Launch Stability
-**Current Plan:** 2 (Wave 1 complete)
-**Status:** Plans 00-01 executed — crashReporter configured, 10-launch test added
+**Current Plan:** 3 (Wave 2 complete)
+**Status:** Plans 00-02 executed — lifecycle handlers documented, E2E tests passing
 
 **Progress:**
 ```
@@ -47,6 +47,7 @@ progress:
 ---
 | Phase 01-launch-stability P00 | 2min | 3 tasks | 4 files |
 | Phase 01-launch-stability P01 | 3min | 2 tasks | 3 files |
+| Phase 01-launch-stability P02 | 16min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -58,10 +59,12 @@ progress:
 | macOS template tray icons | 2026-03-09 | Required for automatic light/dark mode adaptation |
 | Vanilla CSS for styling | Existing | Maintain existing stack, avoid heavy frameworks |
 | 4-phase structure | 2026-03-09 | Natural grouping from requirement categories |
+| Lifecycle handler documentation | 2026-03-09 | Added inline comments documenting macOS-specific behavior |
+| E2E lifecycle test patterns | 2026-03-09 | Menu bar app testing: use app.emit('activate'), cleanup with app.exit(0) |
 
 ### Open Todos
 
-- [ ] Wave 2: Implement lifecycle and render tests
+- [ ] Wave 3: Execute Plan 03 (tray icon dark mode support)
 - [ ] Design tray icon asset (SF Symbol or custom design)
 - [ ] Validate dark mode on physical Retina display
 
@@ -95,12 +98,12 @@ See `research/SUMMARY.md` for full details.
 
 ### Next Session
 
-**Next action:** Execute Plan 02 (Wave 2) — Implement lifecycle and render tests
+**Next action:** Execute Plan 03 (Wave 3) — Tray icon dark mode support
 
 **Expected focus:** 
-- Implement lifecycle E2E tests for window-all-closed, activate, before-quit handlers
-- Verify dashboard render test covers LAUNCH-02 requirement
-- Ensure crashReporter captures diagnostic info on failure
+- Verify tray icon uses macOS template format (*Template.png naming)
+- Test automatic light/dark mode adaptation
+- Ensure tray icon module-level reference prevents GC
 
 ---
 
@@ -108,7 +111,7 @@ See `research/SUMMARY.md` for full details.
 
 | Phase | Planned | Started | Completed | Notes |
 |-------|---------|---------|-----------|-------|
-| 1. Launch Stability | ✓ | ✓ | - | Plans 00-01 complete (Wave 0-1) |
+| 1. Launch Stability | ✓ | ✓ | - | Plans 00-02 complete (Wave 0-2) |
 | 2. Fuzzy Search | - | - | - | Awaiting Phase 1 |
 | 3. Tray Icon | - | - | - | Awaiting Phase 1 |
 | 4. macOS UI Polish | - | - | - | Awaiting Phase 1 |

@@ -29,11 +29,12 @@
   2. Main window renders full UI content (not blank/white screen)
   3. App respects macOS lifecycle (doesn't quit when window closes, responds to reopen)
 
-**Plans:** 3 plans
+**Plans:** 4 plans
 
 **Plans:**
-- [ ] 01-launch-stability-01-PLAN.md — Add crash diagnostics and 10-launch E2E test
-- [ ] 01-launch-stability-02-PLAN.md — Verify macOS lifecycle handlers and create lifecycle E2E tests
+- [x] 01-launch-stability-00-PLAN.md — Research and validate Electron lifecycle patterns
+- [x] 01-launch-stability-01-PLAN.md — Add crash diagnostics and 10-launch E2E test
+- [x] 01-launch-stability-02-PLAN.md — Verify macOS lifecycle handlers and create lifecycle E2E tests
 - [ ] 01-launch-stability-03-PLAN.md — Create render verification and lifecycle unit tests
 
 ---
@@ -96,7 +97,7 @@
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Launch Stability | 0/3 | Planned | - |
+| 1. Launch Stability | 2/4 | In Progress | - |
 | 2. Fuzzy Search | 0/0 | Not started | - |
 | 3. Tray Icon | 0/0 | Not started | - |
 | 4. macOS UI Polish | 0/0 | Not started | - |
