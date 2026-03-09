@@ -80,6 +80,12 @@
 - Mapped to phases: 15
 - Unmapped: 0 ✓
 
+**Phase Breakdown:**
+- Phase 1 (Launch Stability): 3 requirements
+- Phase 2 (Fuzzy Search): 4 requirements
+- Phase 3 (Tray Icon): 4 requirements
+- Phase 4 (macOS UI Polish): 4 requirements
+
 ---
 *Requirements defined: Mon Mar 09 2026*
 *Last updated: Mon Mar 09 2026 after initial definition*
