@@ -1,4 +1,4 @@
-import { app } from "electron";
+import { app, crashReporter, dialog } from "electron";
 import {
   loadConfig,
   startDaemon,
@@ -57,6 +57,12 @@ async function handleStopDaemon(): Promise<void> {
 }
 
 export async function startMainProcess(): Promise<void> {
+  // Initialize crash reporter BEFORE any Electron API calls
+  crashReporter.start({
+    productName: "mcpx",
+    uploadToServer: false,
+  });
+
   if (await runDaemonChildIfRequested()) {
     return;
   }
@@ -145,8 +151,16 @@ export async function startMainProcess(): Promise<void> {
 }
 
 if (process.env.VITEST !== "true") {
-  void startMainProcess().catch((error) => {
-    console.error("[main] startup failed:", error);
-    app.exit(1);
-  });
+  (async () => {
+    try {
+      await startMainProcess();
+    } catch (error) {
+      console.error("[main] startup failed:", error);
+      dialog.showErrorBox(
+        "Startup Error",
+        `mcpx failed to start: ${error instanceof Error ? error.message : String(error)}`
+      );
+      app.exit(1);
+    }
+  })();
 }
