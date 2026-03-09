@@ -2,8 +2,8 @@
 phase: 1
 slug: launch-stability
 status: draft
-nyquist_compliant: false
-wave_0_complete: false
+nyquist_compliant: true
+wave_0_complete: true
 created: 2026-03-09
 ---
 
@@ -38,9 +38,11 @@ created: 2026-03-09
 
 | Task ID | Plan | Wave | Requirement | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|-----------|-------------------|-------------|--------|
-| 01-01-01 | 01 | 1 | LAUNCH-01 | E2E | `npm run e2e -- launch.spec.ts` | ❌ W0 | ⬜ pending |
-| 01-01-02 | 01 | 1 | LAUNCH-02 | E2E | `npm run e2e -- render.spec.ts` | ❌ W0 | ⬜ pending |
-| 01-01-03 | 01 | 1 | LAUNCH-03 | E2E | `npm run e2e -- lifecycle.spec.ts` | ❌ W0 | ⬜ pending |
+| 00-01-01 | 00 | 0 | LAUNCH-01,02,03 | E2E/Unit scaffolding | `npm run build --prefix app` | ✅ W0 | ⬜ pending |
+| 01-01-01 | 01 | 1 | LAUNCH-01 | E2E | `npm run e2e -- launch.spec.ts` | ✅ W0 | ⬜ pending |
+| 01-01-02 | 01 | 1 | LAUNCH-02 | E2E | `npm run e2e -- render.spec.ts` | ✅ W0 | ⬜ pending |
+| 01-02-01 | 02 | 1 | LAUNCH-03 | E2E | `npm run e2e -- lifecycle.spec.ts` | ✅ W0 | ⬜ pending |
+| 01-02-02 | 02 | 1 | LAUNCH-03 | Unit | `npm test -- lifecycle.test.ts` | ✅ W0 | ⬜ pending |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 

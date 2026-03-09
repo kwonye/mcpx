@@ -3,7 +3,7 @@ phase: 01-launch-stability
 plan: 03
 type: execute
 wave: 2
-depends_on: [01, 02]
+depends_on: ["00", "01", "02"]
 files_modified: [app/e2e/render.spec.ts, app/test/main/lifecycle.test.ts]
 autonomous: true
 requirements: [LAUNCH-02]
@@ -114,24 +114,53 @@ app.on("before-quit", handler);
   <action>
     Create new file app/test/main/lifecycle.test.ts using Vitest:
 
-    Mock Electron's app object with vi.mock() or manual mock:
-    - Mock app.on(event, handler) to capture handlers
-    - Mock app.quit(), app.hide(), app.dock.show/hide
-    - Mock BrowserWindow.getAllWindows() to return [] or [window]
+    1. Import specific functions to test:
+    ```typescript
+    import { startMainProcess } from "../../src/main/index";
+    import { openDashboard, closeDashboard } from "../../src/main/dashboard";
+    ```
 
-    Import startMainProcess or manually invoke lifecycle setup. Trigger captured handlers and verify:
-    1. window-all-closed on macOS: expect(app.quit).not.toHaveBeenCalled()
-    2. window-all-closed on non-macOS: expect(app.quit).toHaveBeenCalled()
-    3. activate with no windows: expect(openDashboard).toHaveBeenCalled()
-    4. activate with existing windows: expect(openDashboard).not.toHaveBeenCalled() (or verify show/focus called)
+    2. Mock Electron's app object with vi.mock():
+    ```typescript
+    vi.mock("electron", () => ({
+      app: {
+        on: vi.fn((event, handler) => {
+          // Store handlers for later triggering
+          handlers[event] = handler;
+        }),
+        quit: vi.fn(),
+        hide: vi.fn(),
+        exit: vi.fn(),
+        dock: { show: vi.fn(), hide: vi.fn() },
+        whenReady: vi.fn(),
+        requestSingleInstanceLock: vi.fn(),
+      },
+      crashReporter: { start: vi.fn() },
+      dialog: { showErrorBox: vi.fn() },
+    }));
+    ```
 
-    Use process.platform mock to test macOS vs non-macOS behavior.
+    3. Mock dashboard module to track openDashboard calls:
+    ```typescript
+    vi.mock("../../src/main/dashboard", () => ({
+      openDashboard: vi.fn(),
+      closeDashboard: vi.fn(),
+    }));
+    ```
+
+    4. Trigger captured handlers and verify:
+    - window-all-closed on macOS (process.platform = "darwin"): expect(app.quit).not.toHaveBeenCalled()
+    - window-all-closed on non-macOS (process.platform = "linux"): expect(app.quit).toHaveBeenCalled()
+    - activate with no windows: expect(openDashboard).toHaveBeenCalled()
+    - activate with existing windows: verify window management logic
+
+    Use Object.defineProperty(process, "platform", { value: "darwin" }) to mock platform.
   </action>
   <verify>
     <automated>npm test --prefix app -- lifecycle.test.ts</automated>
   </verify>
   <done>
-    Unit tests created for lifecycle handlers. All tests pass when run with vitest. Mocks properly isolate Electron APIs.
+    Unit tests created for lifecycle handlers with explicit imports: { startMainProcess } from src/main/index.ts, { openDashboard, closeDashboard } from src/main/dashboard.ts. All tests pass when run with vitest. Mocks properly isolate Electron APIs.
   </done>
 </task>
 

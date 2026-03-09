@@ -3,7 +3,7 @@ phase: 01-launch-stability
 plan: 02
 type: execute
 wave: 1
-depends_on: []
+depends_on: ["00"]
 files_modified: [app/src/main/index.ts, app/src/main/dashboard.ts, app/e2e/lifecycle.spec.ts]
 autonomous: true
 requirements: [LAUNCH-03]
