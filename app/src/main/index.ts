@@ -99,7 +99,11 @@ export async function startMainProcess(): Promise<void> {
     void handleStopDaemon();
   });
 
+  // ============================================================================
+  // macOS Lifecycle Handlers
+  // ============================================================================
   // Cmd+Q quits the entire app (dashboard + daemon + tray)
+  // Prevents quit from window close, allows quit only via tray menu (allowQuit flag)
   app.on("before-quit", (e) => {
     if (!allowQuit) {
       e.preventDefault();
@@ -110,17 +114,20 @@ export async function startMainProcess(): Promise<void> {
     // Allow quit to proceed
   });
 
-  // Clicking dock icon opens dashboard
+  // Clicking dock icon reopens dashboard window (macOS activate event)
+  // Ensures app responds to dock clicks even when window is closed
   app.on("activate", () => {
     openDashboard();
   });
 
-  // When all windows are closed, hide dock but keep app running (for tray)
+  // When all windows are closed, app stays running on macOS (menu bar app pattern)
+  // Only quits on non-macOS platforms where menu bar is not available
   app.on("window-all-closed", () => {
     if (process.platform !== "darwin") {
       app.quit();
     }
   });
+  // ============================================================================
 
   // Check daemon status on startup and auto-start if needed
   try {
