@@ -1,3 +1,18 @@
+---
+gsd_state_version: 1.0
+milestone: v1.0
+milestone_name: milestone
+current_phase: Phase 1 — Launch Stability
+current_plan: 1
+status: in_progress
+last_updated: "2026-03-09T17:35:37.299Z"
+progress:
+  total_phases: 4
+  completed_phases: 0
+  total_plans: 4
+  completed_plans: 1
+---
+
 # mcpx Desktop App Fixes — Project State
 
 **Last Updated:** Mon Mar 09 2026
@@ -10,8 +25,8 @@
 **Core Value:** A reliable, polished desktop app that makes MCP server management effortless and intuitive.
 
 **Current Phase:** Phase 1 — Launch Stability
-**Current Plan:** Not yet planned
-**Status:** Roadmap created, awaiting Phase 1 planning
+**Current Plan:** 1 (Wave 0 complete)
+**Status:** Plan 00 executed — test infrastructure scaffolded
 
 **Progress:**
 ```
@@ -30,6 +45,7 @@
 | macOS native feel | HIG compliant | No | Pending Phase 4 |
 
 ---
+| Phase 01-launch-stability P00 | 2min | 3 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -44,7 +60,8 @@
 
 ### Open Todos
 
-- [ ] Plan Phase 1 (Launch Stability) — `/gsd-plan-phase 1`
+- [ ] Wave 1: Implement 10x consecutive launch test
+- [ ] Wave 2: Implement lifecycle and render tests
 - [ ] Design tray icon asset (SF Symbol or custom design)
 - [ ] Validate dark mode on physical Retina display
 
@@ -78,13 +95,12 @@ See `research/SUMMARY.md` for full details.
 
 ### Next Session
 
-**Next action:** `/gsd-plan-phase 1` to decompose Phase 1 into executable plans
+**Next action:** Execute Plan 01 (Wave 1) — Implement 10x consecutive launch test
 
 **Expected focus:** 
-- Diagnose crash causes (check main process initialization timing)
+- Implement launch.spec.ts loop: launch app, verify pid, close app (10 iterations)
+- Diagnose crash causes if any (check main process initialization timing)
 - Fix `app.whenReady()` wrapping for all Electron API calls
-- Ensure window renders content correctly
-- Handle macOS lifecycle events
 
 ---
 
@@ -92,7 +108,7 @@ See `research/SUMMARY.md` for full details.
 
 | Phase | Planned | Started | Completed | Notes |
 |-------|---------|---------|-----------|-------|
-| 1. Launch Stability | - | - | - | Roadmap created |
+| 1. Launch Stability | ✓ | ✓ | - | Plan 00 (Wave 0) complete |
 | 2. Fuzzy Search | - | - | - | Awaiting Phase 1 |
 | 3. Tray Icon | - | - | - | Awaiting Phase 1 |
 | 4. macOS UI Polish | - | - | - | Awaiting Phase 1 |
