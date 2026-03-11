@@ -19,6 +19,10 @@ jobs:
   cli-release:
     if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
+    outputs:
+      include_desktop: ${{ steps.release_meta.outputs.include_desktop }}
+      version: ${{ steps.release_meta.outputs.version }}
+      tag: ${{ steps.release_meta.outputs.tag }}
 
     steps:
       - name: Check out repository
@@ -36,23 +40,10 @@ jobs:
       - name: Refresh tags
         run: git fetch --tags --force
 
-      - name: Detect changed paths
-        id: changed_paths
-        uses: dorny/paths-filter@v3
-        with:
-          filters: |
-            app:
-              - 'app/**'
-
       - name: Compute release metadata
         id: release_meta
-        env:
-          APP_CHANGED: ${{ steps.changed_paths.outputs.app }}
         run: |
-          INCLUDE_DESKTOP=false
-          if [ "$APP_CHANGED" = "true" ]; then
-            INCLUDE_DESKTOP=true
-          fi
+          INCLUDE_DESKTOP=true
           VERSION=$(node .github/scripts/release-coordinator.mjs next-version --include-cli true --include-desktop "$INCLUDE_DESKTOP")
           TAG="v${VERSION}"
           RELEASE_BODY=$(node .github/scripts/release-coordinator.mjs release-body --include-cli true --include-desktop "$INCLUDE_DESKTOP" --version "$VERSION")
@@ -123,3 +114,13 @@ jobs:
           tag_name: ${{ steps.release_meta.outputs.tag }}
           body: ${{ steps.release_meta.outputs.release_body }}
           overwrite_files: true
+
+  desktop-release:
+    needs: cli-release
+    if: needs.cli-release.outputs.include_desktop == 'true'
+    uses: ./.github/workflows/desktop-release.yml
+    with:
+      release_tag: ${{ needs.cli-release.outputs.tag }}
+      build_version: ${{ needs.cli-release.outputs.version }}
+      include_cli: true
+    secrets: inherit
