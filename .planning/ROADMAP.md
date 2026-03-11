@@ -29,13 +29,14 @@
   2. Main window renders full UI content (not blank/white screen)
   3. App respects macOS lifecycle (doesn't quit when window closes, responds to reopen)
 
-**Plans:** 4 plans
+**Plans:** 5 plans
 
 **Plans:**
 - [x] 01-launch-stability-00-PLAN.md — Research and validate Electron lifecycle patterns
 - [x] 01-launch-stability-01-PLAN.md — Add crash diagnostics and 10-launch E2E test
 - [x] 01-launch-stability-02-PLAN.md — Verify macOS lifecycle handlers and create lifecycle E2E tests
-- [ ] 01-launch-stability-03-PLAN.md — Create render verification and lifecycle unit tests
+- [x] 01-launch-stability-03-PLAN.md — Create render verification and lifecycle unit tests
+- [ ] 01-launch-stability-04-PLAN.md — Fix lifecycle unit tests for ESM compatibility (gap closure)
 
 ---
 
