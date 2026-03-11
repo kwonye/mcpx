@@ -3,14 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 current_phase: Phase 1 — Launch Stability
-current_plan: 2
-status: in_progress
-last_updated: "2026-03-09T17:50:48Z"
+current_plan: 3 (Wave 2 complete)
+status: Plans 00-02 executed — lifecycle handlers documented, E2E tests passing
+last_updated: "2026-03-11T21:47:05.464Z"
 progress:
   total_phases: 4
   completed_phases: 0
-  total_plans: 4
-  completed_plans: 3
+  total_plans: 5
+  completed_plans: 4
+  percent: 80
 ---
 
 # mcpx Desktop App Fixes — Project State
@@ -29,7 +30,7 @@ progress:
 **Status:** Plans 00-02 executed — lifecycle handlers documented, E2E tests passing
 
 **Progress:**
-```
+[████████░░] 80%
 [          ] 0/4 phases complete
 ```
 
@@ -61,6 +62,7 @@ progress:
 | 4-phase structure | 2026-03-09 | Natural grouping from requirement categories |
 | Lifecycle handler documentation | 2026-03-09 | Added inline comments documenting macOS-specific behavior |
 | E2E lifecycle test patterns | 2026-03-09 | Menu bar app testing: use app.emit('activate'), cleanup with app.exit(0) |
+- [Phase 01-launch-stability]: Add @mcpx/core alias to vitest.config.ts — Ensures consistent module resolution between build and test environments
 
 ### Open Todos
 
@@ -119,3 +121,4 @@ See `research/SUMMARY.md` for full details.
 ---
 
 *State file initialized: Mon Mar 09 2026*
+ Mar 09 2026*
