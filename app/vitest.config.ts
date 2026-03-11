@@ -1,5 +1,6 @@
 import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
+import { resolve } from "node:path";
 
 export default defineConfig({
   plugins: [react()],
@@ -7,5 +8,10 @@ export default defineConfig({
     environment: "jsdom",
     globals: true,
     exclude: ["e2e/**", "node_modules/**"]
+  },
+  resolve: {
+    alias: {
+      "@mcpx/core": resolve(__dirname, "../cli/src/core/index.ts")
+    }
   }
 });
