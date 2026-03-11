@@ -14,8 +14,46 @@ import { loadDesktopSettings } from "./settings-store";
 import { applyStartOnLoginSetting, wasOpenedAtLogin } from "./login-item";
 import { setAutoUpdateEnabled } from "./update-manager";
 
-let allowQuit = false;
+// Export mutable state for testing lifecycle handlers
+export const lifecycleState = { allowQuit: false };
+
 let daemonRunning = false;
+
+/**
+ * Register macOS lifecycle event handlers.
+ * Extracted into a separate function for testability.
+ */
+export function registerLifecycleHandlers(deps: {
+  app: typeof import("electron").app;
+  openDashboard: () => void;
+  closeDashboard: () => void;
+}): void {
+  // Cmd+Q quits the entire app (dashboard + daemon + tray)
+  // Prevents quit from window close, allows quit only via tray menu (allowQuit flag)
+  deps.app.on("before-quit", (e) => {
+    if (!lifecycleState.allowQuit) {
+      e.preventDefault();
+      deps.closeDashboard();
+      deps.app.hide();
+      return;
+    }
+    // Allow quit to proceed
+  });
+
+  // Clicking dock icon reopens dashboard window (macOS activate event)
+  // Ensures app responds to dock clicks even when window is closed
+  deps.app.on("activate", () => {
+    deps.openDashboard();
+  });
+
+  // When all windows are closed, app stays running on macOS (menu bar app pattern)
+  // Only quits on non-macOS platforms where menu bar is not available
+  deps.app.on("window-all-closed", () => {
+    if (process.platform !== "darwin") {
+      deps.app.quit();
+    }
+  });
+}
 
 function daemonEntrypointArg(): string {
   return process.argv[1] ?? app.getAppPath();
@@ -92,7 +130,7 @@ export async function startMainProcess(): Promise<void> {
 
   // Set up quit handler from tray menu
   setQuitHandler(() => {
-    allowQuit = true;
+    lifecycleState.allowQuit = true;
     closeDashboard();
     app.quit();
   });
@@ -108,31 +146,8 @@ export async function startMainProcess(): Promise<void> {
   // ============================================================================
   // macOS Lifecycle Handlers
   // ============================================================================
-  // Cmd+Q quits the entire app (dashboard + daemon + tray)
-  // Prevents quit from window close, allows quit only via tray menu (allowQuit flag)
-  app.on("before-quit", (e) => {
-    if (!allowQuit) {
-      e.preventDefault();
-      closeDashboard();
-      app.hide();
-      return;
-    }
-    // Allow quit to proceed
-  });
-
-  // Clicking dock icon reopens dashboard window (macOS activate event)
-  // Ensures app responds to dock clicks even when window is closed
-  app.on("activate", () => {
-    openDashboard();
-  });
-
-  // When all windows are closed, app stays running on macOS (menu bar app pattern)
-  // Only quits on non-macOS platforms where menu bar is not available
-  app.on("window-all-closed", () => {
-    if (process.platform !== "darwin") {
-      app.quit();
-    }
-  });
+  // Register lifecycle handlers using the extracted function for testability
+  registerLifecycleHandlers({ app, openDashboard, closeDashboard });
   // ============================================================================
 
   // Check daemon status on startup and auto-start if needed
