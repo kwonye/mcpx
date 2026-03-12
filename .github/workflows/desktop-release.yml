@@ -269,7 +269,7 @@ jobs:
           if-no-files-found: warn
 
       - name: Upload desktop artifacts to release
-        if: steps.flow.outputs.build_desktop == 'true' && steps.flow.outputs.publish_release == 'true' && steps.flow.outputs.include_body != 'true'
+        if: steps.flow.outputs.build_desktop == 'true' && steps.flow.outputs.publish_release == 'true' && steps.flow.outputs.include_body != 'true' && github.event_name != 'workflow_call'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.flow.outputs.publish_tag }}
@@ -282,7 +282,7 @@ jobs:
           fail_on_unmatched_files: true
 
       - name: Upload desktop artifacts to release with scoped body
-        if: steps.flow.outputs.build_desktop == 'true' && steps.flow.outputs.publish_release == 'true' && steps.flow.outputs.include_body == 'true'
+        if: steps.flow.outputs.build_desktop == 'true' && steps.flow.outputs.publish_release == 'true' && steps.flow.outputs.include_body == 'true' && github.event_name != 'workflow_call'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.flow.outputs.publish_tag }}

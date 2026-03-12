@@ -1,0 +1,5 @@
+# Use ubuntu-latest image which has better compatibility
+-P ubuntu-latest=catthehacker/ubuntu:act-latest
+
+# Remove containers after execution
+--rm

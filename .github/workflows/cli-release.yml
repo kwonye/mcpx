@@ -108,12 +108,12 @@ jobs:
       - name: Publish to npm
         run: npm publish -w cli --provenance --access public
 
-      - name: Create or update GitHub Release
-        uses: softprops/action-gh-release@v2
+      - name: Upload CLI artifacts
+        uses: actions/upload-artifact@v4
         with:
-          tag_name: ${{ steps.release_meta.outputs.tag }}
-          body: ${{ steps.release_meta.outputs.release_body }}
-          overwrite_files: true
+          name: cli-dist
+          path: cli/dist/
+          if-no-files-found: warn
 
   desktop-release:
     needs: cli-release
@@ -124,3 +124,41 @@ jobs:
       build_version: ${{ needs.cli-release.outputs.version }}
       include_cli: true
     secrets: inherit
+
+  create-release:
+    needs: [cli-release, desktop-release]
+    if: always() && needs.cli-release.result == 'success' && (needs.desktop-release.result == 'success' || needs.desktop-release.result == 'skipped')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download CLI artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: cli-dist
+          path: cli-dist/
+
+      - name: Download desktop artifacts
+        if: needs.desktop-release.result == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          name: desktop-macos-universal
+          path: desktop-dist/
+
+      - name: Create GitHub Release with all assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.cli-release.outputs.tag }}
+          body: ${{ needs.cli-release.outputs.release_body }}
+          overwrite_files: true
+          files: |
+            cli-dist/**/*
+            desktop-dist/**/*.dmg
+            desktop-dist/**/*.zip
+            desktop-dist/**/*.blockmap
+            desktop-dist/**/latest*.yml
+          fail_on_unmatched_files: false
