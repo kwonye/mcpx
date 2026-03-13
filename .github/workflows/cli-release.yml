@@ -115,6 +115,10 @@ jobs:
           echo ""
           echo "Expected npm subject claim format:"
           echo "repo:kwonye/mcpx:ref:refs/heads/main"
+          echo ""
+          echo "Checking OIDC environment variables:"
+          echo "ACTIONS_ID_TOKEN_REQUEST_TOKEN exists: ${ACTIONS_ID_TOKEN_REQUEST_TOKEN:+yes}"
+          echo "ACTIONS_ID_TOKEN_REQUEST_URL: ${ACTIONS_ID_TOKEN_REQUEST_URL}"
 
       - name: Publish to npm
         run: npm publish --provenance --access public
