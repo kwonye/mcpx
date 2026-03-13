@@ -106,6 +106,10 @@ jobs:
       - name: Push release tag
         run: git push origin "${{ steps.release_meta.outputs.tag }}"
 
+      - name: Set up npm authentication
+        run: |
+          echo "//registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}" > ~/.npmrc
+
       - name: Publish to npm
         run: npm publish --provenance --access public
         working-directory: cli
