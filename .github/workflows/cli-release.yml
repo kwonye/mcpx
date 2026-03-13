@@ -107,7 +107,8 @@ jobs:
         run: git push origin "${{ steps.release_meta.outputs.tag }}"
 
       - name: Publish to npm
-        run: npm publish -w cli --provenance --access public
+        run: npm publish --provenance --access public
+        working-directory: cli
 
       - name: Upload CLI artifacts
         uses: actions/upload-artifact@v4
