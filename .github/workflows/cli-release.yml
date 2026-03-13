@@ -23,6 +23,7 @@ jobs:
       include_desktop: ${{ steps.release_meta.outputs.include_desktop }}
       version: ${{ steps.release_meta.outputs.version }}
       tag: ${{ steps.release_meta.outputs.tag }}
+      release_body: ${{ steps.release_meta.outputs.release_body }}
 
     steps:
       - name: Check out repository
