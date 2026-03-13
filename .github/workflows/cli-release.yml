@@ -112,18 +112,9 @@ jobs:
           echo "Workflow: ${{ github.workflow }}"
           echo "Ref: ${{ github.ref }}"
           echo "Event name: ${{ github.event_name }}"
-
-      - name: Get OIDC token
-        id: oidc
-        run: |
-          echo "token=$(curl -s -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=npmjs.org" | jq -r '.value')" >> $GITHUB_OUTPUT
-
-      - name: Decode OIDC token
-        run: |
-          TOKEN="${{ steps.oidc.outputs.token }}"
-          PAYLOAD=$(echo $TOKEN | cut -d'.' -f2 | base64 -d 2>/dev/null || echo "$TOKEN" | cut -d'.' -f2 | base64 -d)
-          echo "OIDC Payload:"
-          echo $PAYLOAD | jq .
+          echo ""
+          echo "Expected npm subject claim format:"
+          echo "repo:kwonye/mcpx:ref:refs/heads/main"
 
       - name: Publish to npm
         run: npm publish --provenance --access public
