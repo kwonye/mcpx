@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+/**
+ * mcpx CLI - HTTP-first Model Context Protocol gateway
+ */
 import { Command } from "commander";
 import fs from "node:fs";
 import { execFileSync } from "node:child_process";
