@@ -61,7 +61,8 @@ describe("daemon child mode", () => {
         whenReady: whenReadyMock,
         getAppPath: () => "/tmp/app",
         exit: vi.fn()
-      }
+      },
+      crashReporter: { start: vi.fn() }
     }));
     vi.doMock("../../src/main/daemon-child", () => ({
       runDaemonChildIfRequested: runDaemonChildIfRequestedMock
