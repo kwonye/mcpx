@@ -13,24 +13,24 @@
 
 ### Search
 
-- [ ] **SEARCH-01**: Search returns partial/fuzzy matches (not exact match only)
-- [ ] **SEARCH-02**: Search results ranked by priority/popularity
-- [ ] **SEARCH-03**: Search input debounced to prevent UI freezing
-- [ ] **SEARCH-04**: Search supports typo tolerance
+- [x] **SEARCH-01**: Search returns partial/fuzzy matches (not exact match only)
+- [x] **SEARCH-02**: Search results ranked by priority/popularity
+- [x] **SEARCH-03**: Search input debounced to prevent UI freezing
+- [x] **SEARCH-04**: Search supports typo tolerance
 
 ### Tray Icon
 
-- [ ] **ICON-01**: New menu bar tray icon designed and implemented
-- [ ] **ICON-02**: Tray icon uses macOS template format (auto-inverts for dark mode)
-- [ ] **ICON-03**: Tray icon provided at 16x16 and 32x32@2x resolutions
-- [ ] **ICON-04**: Tray reference held at module level (prevents garbage collection)
+- [x] **ICON-01**: New menu bar tray icon designed and implemented
+- [x] **ICON-02**: Tray icon uses macOS template format (auto-inverts for dark mode)
+- [x] **ICON-03**: Tray icon provided at 16x16 and 32x32@2x resolutions
+- [x] **ICON-04**: Tray reference held at module level (prevents garbage collection)
 
 ### UI Polish
 
-- [ ] **UI-01**: UI follows macOS Human Interface Guidelines
-- [ ] **UI-02**: Visual polish applied to all components (spacing, fonts, colors)
-- [ ] **UI-03**: Dark mode support verified
-- [ ] **UI-04**: Window uses hiddenInset title bar for native macOS controls
+- [x] **UI-01**: UI follows macOS Human Interface Guidelines
+- [x] **UI-02**: Visual polish applied to all components (spacing, fonts, colors)
+- [x] **UI-03**: Dark mode support verified
+- [x] **UI-04**: Window uses hiddenInset title bar for native macOS controls
 
 ## v2 Requirements
 
@@ -62,31 +62,31 @@
 | LAUNCH-01 | Phase 1 | ✓ Complete |
 | LAUNCH-02 | Phase 1 | ✓ Complete |
 | LAUNCH-03 | Phase 1 | ✓ Complete |
-| SEARCH-01 | Phase 2 | Planned |
-| SEARCH-02 | Phase 2 | Planned |
-| SEARCH-03 | Phase 2 | Planned |
-| SEARCH-04 | Phase 2 | Planned |
-| ICON-01 | Phase 3 | Pending |
-| ICON-02 | Phase 3 | Pending |
-| ICON-03 | Phase 3 | Pending |
-| ICON-04 | Phase 3 | Pending |
-| UI-01 | Phase 4 | Pending |
-| UI-02 | Phase 4 | Pending |
-| UI-03 | Phase 4 | Pending |
-| UI-04 | Phase 4 | Pending |
+| SEARCH-01 | Phase 2 | ✓ Complete |
+| SEARCH-02 | Phase 2 | ✓ Complete |
+| SEARCH-03 | Phase 2 | ✓ Complete |
+| SEARCH-04 | Phase 2 | ✓ Complete |
+| ICON-01 | Phase 3 | ✓ Complete |
+| ICON-02 | Phase 3 | ✓ Complete |
+| ICON-03 | Phase 3 | ✓ Complete |
+| ICON-04 | Phase 3 | ✓ Complete |
+| UI-01 | Phase 4 | ✓ Complete |
+| UI-02 | Phase 4 | ✓ Complete |
+| UI-03 | Phase 4 | ✓ Complete |
+| UI-04 | Phase 4 | ✓ Complete |
 
 **Coverage:**
 - v1 requirements: 15 total
 - Mapped to phases: 15
 - Unmapped: 0 ✓
-- Completed: 3/15 (20%)
+- Completed: 15/15 (100%)
 
 **Phase Breakdown:**
 - Phase 1 (Launch Stability): 3 requirements ✓ COMPLETE
-- Phase 2 (Fuzzy Search): 4 requirements — Planned
-- Phase 3 (Tray Icon): 4 requirements — Pending
-- Phase 4 (macOS UI Polish): 4 requirements — Pending
+- Phase 2 (Fuzzy Search): 4 requirements ✓ COMPLETE
+- Phase 3 (Tray Icon): 4 requirements ✓ COMPLETE
+- Phase 4 (macOS UI Polish): 4 requirements ✓ COMPLETE
 
 ---
 *Requirements defined: Mon Mar 09 2026*
-*Last updated: Sun Mar 12 2026 after Phase 1 completion*
+*Completed: Sun Mar 12 2026*

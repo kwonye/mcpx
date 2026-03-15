@@ -8,9 +8,9 @@
 ## Phases
 
 - [x] **Phase 1: Launch Stability** — App launches and renders reliably without crashes ✓
-- [ ] **Phase 2: Fuzzy Search** — Search handles typos and ranks results by relevance
-- [ ] **Phase 3: Tray Icon** — Menu bar icon with macOS template format and dark mode support
-- [ ] **Phase 4: macOS UI Polish** — Native macOS feel with proper spacing, fonts, and dark mode
+- [x] **Phase 2: Fuzzy Search** — Search handles typos and ranks results by relevance ✓
+- [x] **Phase 3: Tray Icon** — Menu bar icon with macOS template format and dark mode support ✓
+- [x] **Phase 4: macOS UI Polish** — Native macOS feel with proper spacing, fonts, and dark mode ✓
 
 ---
 
@@ -106,9 +106,9 @@
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Launch Stability | 5/5 | ✓ Complete | 2026-03-12 |
-| 2. Fuzzy Search | 0/3 | Planned | - |
-| 3. Tray Icon | 0/0 | Not started | - |
-| 4. macOS UI Polish | 0/0 | Not started | - |
+| 2. Fuzzy Search | 3/3 | ✓ Complete | 2026-03-12 |
+| 3. Tray Icon | 1/1 | ✓ Complete | 2026-03-12 |
+| 4. macOS UI Polish | 1/1 | ✓ Complete | 2026-03-12 |
 
 ---
 
@@ -119,21 +119,25 @@
 | LAUNCH-01 | Phase 1 | ✓ Complete |
 | LAUNCH-02 | Phase 1 | ✓ Complete |
 | LAUNCH-03 | Phase 1 | ✓ Complete |
-| SEARCH-01 | Phase 2 | Planned |
-| SEARCH-02 | Phase 2 | Planned |
-| SEARCH-03 | Phase 2 | Planned |
-| SEARCH-04 | Phase 2 | Planned |
-| ICON-01 | Phase 3 | Pending |
-| ICON-02 | Phase 3 | Pending |
-| ICON-03 | Phase 3 | Pending |
-| ICON-04 | Phase 3 | Pending |
-| UI-01 | Phase 4 | Pending |
-| UI-02 | Phase 4 | Pending |
-| UI-03 | Phase 4 | Pending |
-| UI-04 | Phase 4 | Pending |
+| SEARCH-01 | Phase 2 | ✓ Complete |
+| SEARCH-02 | Phase 2 | ✓ Complete |
+| SEARCH-03 | Phase 2 | ✓ Complete |
+| SEARCH-04 | Phase 2 | ✓ Complete |
+| ICON-01 | Phase 3 | ✓ Complete |
+| ICON-02 | Phase 3 | ✓ Complete |
+| ICON-03 | Phase 3 | ✓ Complete |
+| ICON-04 | Phase 3 | ✓ Complete |
+| UI-01 | Phase 4 | ✓ Complete |
+| UI-02 | Phase 4 | ✓ Complete |
+| UI-03 | Phase 4 | ✓ Complete |
+| UI-04 | Phase 4 | ✓ Complete |
 
 **Coverage:** 15/15 requirements mapped ✓
-**Completed:** 3/15 requirements (20%)
+**Completed:** 15/15 requirements (100%)
+
+---
+*Roadmap created: Mon Mar 09 2026*
+*Completed: Sun Mar 12 2026*
 
 ---
 
