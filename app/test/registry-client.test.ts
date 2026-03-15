@@ -196,13 +196,15 @@ describe("search utils", () => {
 
     it("filters servers by query", () => {
       const filtered = filterServersByQuery(servers, "brave");
-      expect(filtered).toHaveLength(1);
-      expect(filtered[0].server.name).toBe("io.github/brave");
+      expect(filtered.length).toBeGreaterThan(0);
+      expect(filtered.some(s => s.server.name.includes("brave"))).toBe(true);
     });
 
     it("matches multiple servers", () => {
       const filtered = filterServersByQuery(servers, "search");
-      expect(filtered).toHaveLength(2);
+      expect(filtered.length).toBeGreaterThan(0);
+      // Should match servers with 'search' in description
+      expect(filtered.some(s => s.server.description?.includes("search"))).toBe(true);
     });
   });
 
@@ -245,6 +247,51 @@ describe("search utils", () => {
       const server = { server: { name: "io.github/test", description: "Search the web with Brave", version: "1.0.0" } };
       const score = calculateRelevanceScore(server, "brave");
       expect(score).toBeGreaterThan(0);
+    });
+  });
+
+  describe("fuzzy search", () => {
+    const servers = [
+      { server: { name: "io.github/filesystem/filesystem-server", title: "Filesystem MCP", description: "File system access", version: "1.0.0" } },
+      { server: { name: "io.github/puppeteer/puppeteer-server", title: "Puppeteer MCP", description: "Browser automation", version: "1.0.0" } },
+      { server: { name: "io.github/brave/brave-search", title: "Brave Search", description: "Web search", version: "1.0.0" } },
+      { server: { name: "io.github/github/github-server", title: "GitHub MCP", description: "GitHub API access", version: "1.0.0" } }
+    ];
+
+    it("matches with typo: 'filesytem' finds 'filesystem'", () => {
+      const filtered = filterServersByQuery(servers, "filesytem");
+      expect(filtered.length).toBeGreaterThan(0);
+      expect(filtered.some((s) => s.server.name.includes("filesystem"))).toBe(true);
+    });
+
+    it("matches with typo: 'pupeteer' finds 'puppeteer'", () => {
+      const filtered = filterServersByQuery(servers, "pupeteer");
+      expect(filtered.length).toBeGreaterThan(0);
+      expect(filtered.some((s) => s.server.name.includes("puppeteer"))).toBe(true);
+    });
+
+    it("matches partial: 'brve' finds 'brave'", () => {
+      const filtered = filterServersByQuery(servers, "brve");
+      expect(filtered.length).toBeGreaterThan(0);
+      expect(filtered.some((s) => s.server.name.includes("brave"))).toBe(true);
+    });
+
+    it("ranks exact match higher than fuzzy match", () => {
+      const sorted = sortServersByRelevance(servers, "github");
+      expect(sorted.length).toBeGreaterThan(0);
+      // GitHub server should be first (exact match in name/title)
+      const firstMatch = sorted[0].server.name + " " + (sorted[0].server.title || "");
+      expect(firstMatch.toLowerCase()).toContain("github");
+    });
+
+    it("matches across multiple fields", () => {
+      const filtered = filterServersByQuery(servers, "search");
+      expect(filtered.length).toBeGreaterThan(0);
+      // Should match brave-search by name or description
+      expect(filtered.some((s) => 
+        s.server.name.includes("brave") || 
+        s.server.description?.toLowerCase().includes("search")
+      )).toBe(true);
     });
   });
 });

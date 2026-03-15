@@ -1,3 +1,4 @@
+import Fuse from "fuse.js";
 import type { RegistryServerEntry } from "./registry-client";
 
 export interface SearchOptions {
@@ -13,53 +14,52 @@ const DEFAULT_FIELDS: SearchOptions["fields"] = [
   "packages"
 ];
 
+function createFuseIndex(
+  servers: RegistryServerEntry[],
+  options: SearchOptions = {}
+): Fuse<RegistryServerEntry> {
+  const { fields = DEFAULT_FIELDS } = options;
+  
+  const keys: Fuse.FuseOptionKey<RegistryServerEntry>[] = [];
+  
+  if (fields.includes("name")) {
+    keys.push({ name: "server.name", weight: 0.7 });
+  }
+  if (fields.includes("title")) {
+    keys.push({ name: "server.title", weight: 0.5 });
+  }
+  if (fields.includes("description")) {
+    keys.push({ name: "server.description", weight: 0.3 });
+  }
+  if (fields.includes("repository")) {
+    keys.push({ name: "server.repository.url", weight: 0.2 });
+  }
+  if (fields.includes("packages")) {
+    keys.push({ name: "server.packages.identifier", weight: 0.4 });
+  }
+
+  return new Fuse(servers, {
+    keys,
+    threshold: 0.4,
+    distance: 100,
+    minMatchCharLength: 2,
+    includeScore: true,
+    ignoreLocation: true,
+    findAllMatches: true,
+    isCaseSensitive: options.caseSensitive ?? false,
+  });
+}
+
 export function matchSearchQuery(
   server: RegistryServerEntry,
   query: string,
   options: SearchOptions = {}
 ): boolean {
-  const {
-    fields = DEFAULT_FIELDS,
-    caseSensitive = false
-  } = options;
-
-  const searchText = query.toLowerCase();
+  if (!query?.trim()) return true;
   
-  const searchableTexts: string[] = [];
-
-  if (fields.includes("name")) {
-    searchableTexts.push(server.server.name);
-  }
-
-  if (fields.includes("title") && server.server.title) {
-    searchableTexts.push(server.server.title);
-  }
-
-  if (fields.includes("description") && server.server.description) {
-    searchableTexts.push(server.server.description);
-  }
-
-  if (fields.includes("repository") && server.server.repository?.url) {
-    searchableTexts.push(server.server.repository.url);
-    if (server.server.repository.subfolder) {
-      searchableTexts.push(server.server.repository.subfolder);
-    }
-  }
-
-  if (fields.includes("packages") && server.server.packages) {
-    for (const pkg of server.server.packages) {
-      searchableTexts.push(pkg.identifier);
-      if (pkg.runtimeHint) {
-        searchableTexts.push(pkg.runtimeHint);
-      }
-    }
-  }
-
-  return searchableTexts.some(text => 
-    caseSensitive 
-      ? text.includes(query)
-      : text.toLowerCase().includes(searchText)
-  );
+  const fuse = createFuseIndex([server], options);
+  const results = fuse.search(query);
+  return results.length > 0;
 }
 
 export function filterServersByQuery(
@@ -67,81 +67,37 @@ export function filterServersByQuery(
   query: string,
   options?: SearchOptions
 ): RegistryServerEntry[] {
-  if (!query || !query.trim()) {
-    return servers;
-  }
-
-  return servers.filter(server => 
-    matchSearchQuery(server, query, options)
-  );
+  if (!query?.trim()) return servers;
+  
+  const fuse = createFuseIndex(servers, options);
+  const results = fuse.search(query, { limit: 50 });
+  return results.map((r) => r.item);
 }
 
 export function calculateRelevanceScore(
   server: RegistryServerEntry,
   query: string
 ): number {
-  const searchText = query.toLowerCase();
-  let score = 0;
-
-  const nameLower = server.server.name.toLowerCase();
-  const titleLower = (server.server.title || "").toLowerCase();
-  const descriptionLower = (server.server.description || "").toLowerCase();
-
-  if (nameLower === searchText) {
-    score += 100;
-  } else if (nameLower.startsWith(searchText)) {
-    score += 50;
-  } else if (nameLower.includes(searchText)) {
-    score += 30;
-  }
-
-  if (titleLower === searchText) {
-    score += 80;
-  } else if (titleLower.startsWith(searchText)) {
-    score += 40;
-  } else if (titleLower.includes(searchText)) {
-    score += 20;
-  }
-
-  if (descriptionLower.includes(searchText)) {
-    score += 10;
-    const words = descriptionLower.split(/\s+/);
-    if (words.some(word => word.startsWith(searchText))) {
-      score += 5;
-    }
-  }
-
-  if (server.server.repository?.url) {
-    const repoUrl = server.server.repository.url.toLowerCase();
-    if (repoUrl.includes(searchText)) {
-      score += 15;
-    }
-  }
-
-  if (server.server.packages) {
-    for (const pkg of server.server.packages) {
-      const identifier = pkg.identifier.toLowerCase();
-      if (identifier.includes(searchText)) {
-        score += 25;
-        break;
-      }
-    }
-  }
-
-  return score;
+  if (!query?.trim()) return 0;
+  
+  const fuse = createFuseIndex([server]);
+  const results = fuse.search(query);
+  if (results.length === 0) return 0;
+  
+  // Fuse.js score is 0 (perfect match) to 1 (no match)
+  // Convert to our scale: higher = better
+  const fuseScore = results[0].score ?? 1;
+  return Math.round((1 - fuseScore) * 100);
 }
 
 export function sortServersByRelevance(
   servers: RegistryServerEntry[],
   query: string
 ): RegistryServerEntry[] {
-  if (!query || !query.trim()) {
-    return servers;
-  }
-
-  return [...servers].sort((a, b) => {
-    const scoreA = calculateRelevanceScore(a, query);
-    const scoreB = calculateRelevanceScore(b, query);
-    return scoreB - scoreA;
-  });
+  if (!query?.trim()) return servers;
+  
+  const fuse = createFuseIndex(servers);
+  const results = fuse.search(query);
+  // Results are already sorted by score (lower fuse score = better match)
+  return results.map((r) => r.item);
 }
