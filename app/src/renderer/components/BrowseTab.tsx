@@ -25,7 +25,7 @@ const CATEGORIES = [
 ];
 
 export function BrowseTab({ onServerAdded, status }: BrowseTabProps) {
-  const { servers, loading, search, loadMore, hasMore } = useRegistryList();
+  const { servers, loading, search, debouncedSearch, loadMore, hasMore } = useRegistryList();
   const [searchInput, setSearchInput] = useState("");
   const [activeQuery, setActiveQuery] = useState("");
   const [activeCategory, setActiveCategory] = useState("all");
@@ -44,7 +44,14 @@ export function BrowseTab({ onServerAdded, status }: BrowseTabProps) {
     const normalizedQuery = searchInput.trim();
     setActiveCategory("");
     setActiveQuery(normalizedQuery);
-    search(normalizedQuery);
+    search(normalizedQuery);  // Immediate search on form submit
+  };
+
+  const handleSearchInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    setSearchInput(value);
+    setActiveCategory("");
+    debouncedSearch(value);  // Debounced real-time search
   };
 
   const handleCategoryClick = (categoryId: string, categoryQuery: string) => {
@@ -131,7 +138,7 @@ export function BrowseTab({ onServerAdded, status }: BrowseTabProps) {
             type="text"
             placeholder="Search for tools, databases, APIs..."
             value={searchInput}
-            onChange={(e) => setSearchInput(e.target.value)}
+            onChange={handleSearchInputChange}
           />
           <button type="submit">Search</button>
         </form>

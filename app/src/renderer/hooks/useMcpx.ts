@@ -1,4 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { debounce } from "../utils/debounce";
+
+const SEARCH_DEBOUNCE_MS = 300;
 
 export function useStatus() {
   const [status, setStatus] = useState<unknown>(null);
@@ -92,10 +95,20 @@ export function useRegistryList() {
     search(undefined);
   }, [search]);
 
+  // Debounced search for real-time input
+  const debouncedSearchRef = useRef(debounce((query: string) => {
+    search(query);
+  }, SEARCH_DEBOUNCE_MS));
+
+  const debouncedSearch = useCallback((query: string) => {
+    debouncedSearchRef.current(query);
+  }, []);
+
   return { 
     servers, 
     loading, 
     search, 
+    debouncedSearch,
     loadMore, 
     hasMore: Boolean(cursor) 
   };
