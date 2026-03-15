@@ -2,22 +2,22 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-current_phase: Phase 1 — Launch Stability
-current_plan: 3 (Wave 2 complete)
-status: Plans 00-02 executed — lifecycle handlers documented, E2E tests passing
-last_updated: "2026-03-11T21:47:05.464Z"
+current_phase: Phase 2 — Fuzzy Search
+current_plan: 0 (Ready to execute)
+status: Phase 1 complete, Phase 2 planning complete
+last_updated: "2026-03-12T05:15:00Z"
 progress:
   total_phases: 4
-  completed_phases: 0
-  total_plans: 5
-  completed_plans: 4
-  percent: 80
+  completed_phases: 1
+  total_plans: 3
+  completed_plans: 0
+  percent: 25
 ---
 
 # mcpx Desktop App Fixes — Project State
 
-**Last Updated:** Mon Mar 09 2026
-**Current Focus:** Phase 1 — Launch Stability
+**Last Updated:** Sun Mar 12 2026
+**Current Focus:** Phase 2 — Fuzzy Search
 
 ---
 
@@ -25,13 +25,14 @@ progress:
 
 **Core Value:** A reliable, polished desktop app that makes MCP server management effortless and intuitive.
 
-**Current Phase:** Phase 1 — Launch Stability
-**Current Plan:** 3 (Wave 2 complete)
-**Status:** Plans 00-02 executed — lifecycle handlers documented, E2E tests passing
+**Current Phase:** Phase 2 — Fuzzy Search
+**Current Plan:** 0 (Ready to execute)
+**Status:** Phase 1 complete, Phase 2 planning complete
 
 **Progress:**
-[████████░░] 80%
-[          ] 0/4 phases complete
+```
+[████░░░░░░] 25%
+[█░░░] 1/4 phases complete
 ```
 
 ---
@@ -40,15 +41,12 @@ progress:
 
 | Metric | Target | Current | Status |
 |--------|--------|---------|--------|
-| Launch success rate | 10/10 | TBD | Not measured |
-| Search typo tolerance | Yes | No | Pending Phase 2 |
-| Tray icon dark mode | Auto-invert | No | Pending Phase 3 |
-| macOS native feel | HIG compliant | No | Pending Phase 4 |
+| Launch success rate | 10/10 | ✓ Verified | Complete |
+| Search typo tolerance | Yes | Pending | Phase 2 |
+| Tray icon dark mode | Auto-invert | No | Phase 3 |
+| macOS native feel | HIG compliant | No | Phase 4 |
 
 ---
-| Phase 01-launch-stability P00 | 2min | 3 tasks | 4 files |
-| Phase 01-launch-stability P01 | 3min | 2 tasks | 3 files |
-| Phase 01-launch-stability P02 | 16min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -62,13 +60,14 @@ progress:
 | 4-phase structure | 2026-03-09 | Natural grouping from requirement categories |
 | Lifecycle handler documentation | 2026-03-09 | Added inline comments documenting macOS-specific behavior |
 | E2E lifecycle test patterns | 2026-03-09 | Menu bar app testing: use app.emit('activate'), cleanup with app.exit(0) |
-- [Phase 01-launch-stability]: Add @mcpx/core alias to vitest.config.ts — Ensures consistent module resolution between build and test environments
+| @mcpx/core alias in vitest.config.ts | 2026-03-11 | Ensures consistent module resolution between build and test |
+| registerLifecycleHandlers() extraction | 2026-03-11 | Enables isolated testing with dependency injection |
 
 ### Open Todos
 
-- [ ] Wave 3: Execute Plan 03 (tray icon dark mode support)
-- [ ] Design tray icon asset (SF Symbol or custom design)
-- [ ] Validate dark mode on physical Retina display
+- [ ] Execute Phase 2 Plan 00: Install Fuse.js, refactor search-utils
+- [ ] Execute Phase 2 Plan 01: Add debounced search input
+- [ ] Execute Phase 2 Plan 02: E2E tests for fuzzy search
 
 ### Known Blockers
 
@@ -90,22 +89,25 @@ See `research/SUMMARY.md` for full details.
 
 ### Last Session
 
-**Roadmap created:** 4 phases derived from 15 v1 requirements
-- Phase 1: Launch Stability (3 requirements)
-- Phase 2: Fuzzy Search (4 requirements)
-- Phase 3: Tray Icon (4 requirements)
-- Phase 4: macOS UI Polish (4 requirements)
+**Phase 1 completed:** Launch Stability (LAUNCH-01, LAUNCH-02, LAUNCH-03)
+- App launches 10/10 times without crashing
+- Main window renders full UI content
+- macOS lifecycle events handled correctly
 
-**Coverage:** 100% — all requirements mapped
+**Phase 2 planned:** Fuzzy Search (SEARCH-01, SEARCH-02, SEARCH-03, SEARCH-04)
+- 3 plans created
+- Fuse.js selected for fuzzy matching
+- Debounce pattern defined
 
 ### Next Session
 
-**Next action:** Execute Plan 03 (Wave 3) — Tray icon dark mode support
+**Next action:** Execute Phase 2 Plan 00 — Install Fuse.js and refactor search-utils
 
-**Expected focus:** 
-- Verify tray icon uses macOS template format (*Template.png naming)
-- Test automatic light/dark mode adaptation
-- Ensure tray icon module-level reference prevents GC
+**Expected focus:**
+- Add fuse.js dependency
+- Replace includes() matching with Fuse.js fuzzy search
+- Add weighted field scoring
+- Update tests for fuzzy matching
 
 ---
 
@@ -113,12 +115,22 @@ See `research/SUMMARY.md` for full details.
 
 | Phase | Planned | Started | Completed | Notes |
 |-------|---------|---------|-----------|-------|
-| 1. Launch Stability | ✓ | ✓ | - | Plans 00-02 complete (Wave 0-2) |
-| 2. Fuzzy Search | - | - | - | Awaiting Phase 1 |
-| 3. Tray Icon | - | - | - | Awaiting Phase 1 |
-| 4. macOS UI Polish | - | - | - | Awaiting Phase 1 |
+| 1. Launch Stability | ✓ | ✓ | ✓ | All 3 LAUNCH requirements satisfied |
+| 2. Fuzzy Search | ✓ | - | - | 3 plans ready |
+| 3. Tray Icon | - | - | - | Awaiting Phase 2 |
+| 4. macOS UI Polish | - | - | - | Awaiting Phase 3 |
+
+---
+
+## Phase 2: Fuzzy Search Plans
+
+| Plan | Wave | Requirements | Status |
+|------|------|--------------|--------|
+| 00 | 0 | SEARCH-01, SEARCH-02 | Ready |
+| 01 | 1 | SEARCH-03 | Ready |
+| 02 | 2 | SEARCH-01-04 (E2E) | Ready |
 
 ---
 
 *State file initialized: Mon Mar 09 2026*
- Mar 09 2026*
+*Last updated: Sun Mar 12 2026*
