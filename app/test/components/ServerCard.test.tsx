@@ -16,7 +16,7 @@ describe("ServerCard", () => {
       />
     );
     expect(screen.getByText("vercel")).toBeDefined();
-    expect(screen.getByText("http")).toBeDefined();
+    expect(screen.getByText("public")).toBeDefined(); // the http icon
   });
 
   it("shows error indicator when errors exist", () => {
@@ -31,7 +31,7 @@ describe("ServerCard", () => {
         onClick={() => {}}
       />
     );
-    expect(screen.getByText(/2 errors/i)).toBeDefined();
+    expect(screen.getByText(/2 Errors/i)).toBeDefined();
   });
 
   it("shows synced count", () => {
@@ -46,6 +46,6 @@ describe("ServerCard", () => {
         onClick={() => {}}
       />
     );
-    expect(screen.getByText(/5 synced/i)).toBeDefined();
+    expect(screen.getByText("5")).toBeDefined();
   });
 });

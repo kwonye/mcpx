@@ -24,7 +24,7 @@ beforeAll(() => {
 describe("StatusPopover", () => {
   it("shows daemon status when running", async () => {
     render(<StatusPopover />);
-    expect(await screen.findByText(/running/i)).toBeDefined();
+    expect(await screen.findByText(/Local Daemon/i)).toBeDefined();
     expect(await screen.findByText(/37373/)).toBeDefined();
   });
 
@@ -44,12 +44,12 @@ describe("StatusPopover", () => {
 
   it("keeps the Open Dashboard action available", async () => {
     render(<StatusPopover />);
-    expect(await screen.findByRole("button", { name: "Open Dashboard" })).toBeDefined();
+    expect(await screen.findByRole("button", { name: /Open Dashboard/i })).toBeDefined();
   });
 
   it("shows Stop Daemon when running", async () => {
     render(<StatusPopover />);
-    expect(await screen.findByRole("button", { name: "Stop Daemon" })).toBeDefined();
+    expect(await screen.findByTitle("Stop Daemon")).toBeDefined();
   });
 
   it("shows Start Daemon when stopped", async () => {
@@ -60,6 +60,6 @@ describe("StatusPopover", () => {
     });
 
     render(<StatusPopover />);
-    expect(await screen.findByRole("button", { name: "Start Daemon" })).toBeDefined();
+    expect(await screen.findByTitle("Start Daemon")).toBeDefined();
   });
 });

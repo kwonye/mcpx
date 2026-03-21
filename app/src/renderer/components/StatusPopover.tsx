@@ -1,16 +1,16 @@
 import { useStatus } from "../hooks/useMcpx";
 
-export function StatusPopover(): JSX.Element {
+export function StatusPopover() {
   const { status, loading, refresh } = useStatus();
 
   if (loading || !status) {
-    return <div className="popover">Loading...</div>;
+    return <div className="popover glass-panel">Loading...</div>;
   }
 
   const report = status as {
     daemon: { running: boolean; pid?: number; port: number };
     upstreamCount: number;
-    servers: Array<{ name: string; clients: Array<{ status: string; managed: boolean }> }>;
+    servers: Array<{ name: string; clients: Array<{ clientId: string; status: string; managed: boolean }> }>;
   };
 
   const errorCount = report.servers.reduce((count, server) => {
@@ -37,42 +37,74 @@ export function StatusPopover(): JSX.Element {
   }
 
   return (
-    <div className="popover">
-      <div className="popover-header">
-        <div className="popover-status-indicator" data-running={report.daemon.running ? "true" : "false"}></div>
-        <div className="popover-status">
-          {report.daemon.running
-            ? `Gateway running on :${report.daemon.port}`
-            : "Gateway stopped"}
+    <div className="popover glass-panel" style={{ border: "none", boxShadow: "none" }}>
+      <header className="popover-header" style={{ justifyContent: "space-between", borderBottom: "1px solid rgba(255, 255, 255, 0.4)", paddingBottom: "12px" }}>
+        <div style={{ display: "flex", flexDirection: "column" }}>
+          <span style={{ fontSize: "14px", fontWeight: 700, color: "var(--text-main)", letterSpacing: "-0.015em" }}>MCP Hub</span>
+          <span style={{ fontSize: "10px", fontWeight: 600, color: "var(--primary)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+            {report.upstreamCount} Active
+          </span>
         </div>
-      </div>
+        <div style={{ display: "flex", gap: "8px" }}>
+          <button style={{ padding: "4px", borderRadius: "8px", color: "var(--text-muted)", transition: "all 0.15s" }} onClick={() => window.mcpx.openDashboard()} title="Settings">
+            <span className="material-symbols-outlined" style={{ fontSize: "18px" }}>settings</span>
+          </button>
+          <button style={{ padding: "4px", borderRadius: "8px", color: "var(--text-muted)", transition: "all 0.15s" }} onClick={handleDaemonToggle} title={report.daemon.running ? "Stop Daemon" : "Start Daemon"}>
+            <span className="material-symbols-outlined" style={{ fontSize: "18px", color: report.daemon.running ? "inherit" : "var(--error)" }}>
+              power_settings_new
+            </span>
+          </button>
+        </div>
+      </header>
 
-      <div className="popover-summary">
-        <div className="popover-summary-stat">
-          <span>Configured Servers</span>
-          <span className="value">{report.upstreamCount}</span>
-        </div>
-        <div className="popover-summary-stat">
-          <span>Synced Clients</span>
-          <span className="value">{syncedCount}</span>
-        </div>
-        <div className="popover-summary-stat">
-          <span>Sync Errors</span>
-          <span className={`value ${errorCount > 0 ? "error" : ""}`}>{errorCount}</span>
-        </div>
-      </div>
+      <main style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: "16px", marginTop: "4px" }}>
+        <section style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+          <h2 style={{ fontSize: "11px", fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.05em", padding: "0 4px" }}>
+            Gateway Status
+          </h2>
+          <div className="glass-panel" style={{ padding: "12px", borderRadius: "12px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+              <div className={`status-dot ${report.daemon.running ? 'status-online' : 'status-offline'}`} style={{ width: "10px", height: "10px" }} />
+              <div style={{ display: "flex", flexDirection: "column" }}>
+                <span style={{ fontSize: "13px", fontWeight: 600, color: "var(--text-main)" }}>Local Daemon</span>
+                <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>
+                  {report.daemon.running ? `Port: ${report.daemon.port}` : "Offline"}
+                </span>
+              </div>
+            </div>
+          </div>
+        </section>
 
-      <div className="popover-actions">
-        <button className="popover-btn primary" onClick={() => window.mcpx.openDashboard()}>
-          Open Dashboard
+        <section style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+          <h2 style={{ fontSize: "11px", fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.05em", padding: "0 4px" }}>
+            System Health
+          </h2>
+          <div className="popover-summary glass-panel" style={{ border: "1px solid rgba(255,255,255,0.4)" }}>
+            <div className="popover-summary-stat">
+              <span>Configured Servers</span>
+              <span className="value">{report.upstreamCount}</span>
+            </div>
+            <div className="popover-summary-stat">
+              <span>Synced Clients</span>
+              <span className="value">{syncedCount}</span>
+            </div>
+            <div className="popover-summary-stat">
+              <span>Sync Errors</span>
+              <span className={`value ${errorCount > 0 ? "error" : ""}`}>{errorCount}</span>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <footer className="popover-actions">
+        <button className="popover-btn primary" onClick={() => window.mcpx.openDashboard()} style={{ display: "flex", justifyContent: "center", gap: "8px" }}>
+          <span>Open Dashboard</span>
+          <span className="material-symbols-outlined" style={{ fontSize: "16px" }}>open_in_new</span>
         </button>
         <button className="popover-btn" onClick={() => window.mcpx.syncAll()}>
           Sync All Clients
         </button>
-        <button className={`popover-btn ${report.daemon.running ? "" : "primary"}`} onClick={handleDaemonToggle}>
-          {report.daemon.running ? "Stop Daemon" : "Start Daemon"}
-        </button>
-      </div>
+      </footer>
     </div>
   );
 }

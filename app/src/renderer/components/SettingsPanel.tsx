@@ -50,52 +50,57 @@ export function SettingsPanel() {
   };
 
   if (!settings) {
-    return <div className="settings-panel">Loading settings...</div>;
+    return <div style={{ color: "var(--text-secondary)", textAlign: "center", padding: "40px" }}>Loading settings...</div>;
   }
 
   const busy = savingKey !== null;
 
   return (
-    <section className="settings-panel">
-      <div className="settings-row">
-        <div className="settings-copy">
-          <div className="settings-label">Auto-update</div>
-          <div className="settings-description">Automatically download updates from GitHub Releases.</div>
+    <section className="glass-panel" style={{ borderRadius: "16px", padding: "32px", maxWidth: "800px", display: "flex", flexDirection: "column", gap: "24px" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "8px" }}>
+        <span className="material-symbols-outlined" style={{ color: "var(--primary)" }}>tune</span>
+        <h2 style={{ fontSize: "20px", fontWeight: 600, color: "var(--text-main)" }}>General Settings</h2>
+      </div>
+
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "16px", paddingBottom: "24px", borderBottom: "1px solid rgba(255, 255, 255, 0.4)" }}>
+        <div style={{ flex: 1 }}>
+          <span style={{ display: "block", fontSize: "16px", fontWeight: 500, color: "var(--text-main)", marginBottom: "4px" }}>Auto-update</span>
+          <p style={{ fontSize: "12px", color: "var(--text-muted)" }}>Automatically download updates from GitHub Releases.</p>
         </div>
-        <label className="settings-toggle">
+        <div style={{ position: "relative", display: "inline-block", width: "44px", marginRight: "8px", verticalAlign: "middle", userSelect: "none", transition: "duration 200ms ease-in" }}>
           <input
             type="checkbox"
-            aria-label="Auto-update"
+            className="toggle-checkbox"
+            id="toggle-autoUpdate"
+            style={{ position: "absolute", display: "block", width: "24px", height: "24px", borderRadius: "50%", background: "white", border: "4px solid transparent", appearance: "none", cursor: "pointer", zIndex: 10, top: 0, left: 0, transition: "all 150ms ease-out", opacity: 0 }}
             checked={settings.autoUpdateEnabled}
             onChange={(event) => onToggle("autoUpdateEnabled", event.target.checked)}
             disabled={busy}
           />
-          <span className="settings-toggle-track">
-            <span className="settings-toggle-thumb" />
-          </span>
-        </label>
+          <label className="toggle-label" htmlFor="toggle-autoUpdate" style={{ display: "block", overflow: "hidden", height: "24px", borderRadius: "9999px", cursor: "pointer", transition: "colors 150ms ease-out" }}></label>
+        </div>
       </div>
 
-      <div className="settings-row">
-        <div className="settings-copy">
-          <div className="settings-label">Start on login</div>
-          <div className="settings-description">Launch in the tray when you log in.</div>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "16px", paddingBottom: "8px" }}>
+        <div style={{ flex: 1 }}>
+          <span style={{ display: "block", fontSize: "16px", fontWeight: 500, color: "var(--text-main)", marginBottom: "4px" }}>Start on login</span>
+          <p style={{ fontSize: "12px", color: "var(--text-muted)" }}>Launch in the tray when you log in.</p>
         </div>
-        <label className="settings-toggle">
+        <div style={{ position: "relative", display: "inline-block", width: "44px", marginRight: "8px", verticalAlign: "middle", userSelect: "none", transition: "duration 200ms ease-in" }}>
           <input
             type="checkbox"
-            aria-label="Start on login"
+            className="toggle-checkbox"
+            id="toggle-startOnLogin"
+            style={{ position: "absolute", display: "block", width: "24px", height: "24px", borderRadius: "50%", background: "white", border: "4px solid transparent", appearance: "none", cursor: "pointer", zIndex: 10, top: 0, left: 0, transition: "all 150ms ease-out", opacity: 0 }}
             checked={settings.startOnLoginEnabled}
             onChange={(event) => onToggle("startOnLoginEnabled", event.target.checked)}
             disabled={busy}
           />
-          <span className="settings-toggle-track">
-            <span className="settings-toggle-thumb" />
-          </span>
-        </label>
+          <label className="toggle-label" htmlFor="toggle-startOnLogin" style={{ display: "block", overflow: "hidden", height: "24px", borderRadius: "9999px", cursor: "pointer", transition: "colors 150ms ease-out" }}></label>
+        </div>
       </div>
 
-      {error && <div className="settings-error">{error}</div>}
+      {error && <div style={{ color: "var(--error)", fontSize: "14px", padding: "12px", background: "rgba(239, 68, 68, 0.1)", borderRadius: "8px", border: "1px solid rgba(239, 68, 68, 0.2)" }}>{error}</div>}
     </section>
   );
 }

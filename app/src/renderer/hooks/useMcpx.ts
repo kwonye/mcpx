@@ -13,6 +13,8 @@ export function useStatus() {
     try {
       const result = await window.mcpx.getStatus();
       setStatus(result);
+    } catch (e) {
+      console.error(e);
     } finally {
       setLoading(false);
     }

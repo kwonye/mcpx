@@ -52,7 +52,7 @@ describe("dashboard window configuration", () => {
         "utf-8"
       );
       
-      expect(css).toContain("-apple-system");
+      expect(css).toContain("Inter");
     });
 
     it("enables font antialiasing", async () => {
@@ -102,8 +102,8 @@ describe("dashboard window configuration", () => {
         "utf-8"
       );
       
-      expect(css).toContain("--shadow-sm:");
-      expect(css).toContain("--shadow-md:");
+      expect(css).toContain("--shadow-glass:");
+      expect(css).toContain("--shadow-glass-hover:");
     });
 
     it("applies consistent spacing in sidebar", async () => {
@@ -125,9 +125,9 @@ describe("dashboard window configuration", () => {
       );
       
       expect(css).toContain("--bg-dark:");
-      expect(css).toContain("--bg-card:");
-      expect(css).toContain("--text-primary:");
-      expect(css).toContain("--text-secondary:");
+      expect(css).toContain("--bg-light:");
+      expect(css).toContain("--text-main:");
+      expect(css).toContain("--text-muted:");
     });
 
     it("uses CSS variables for theming", async () => {
@@ -145,7 +145,7 @@ describe("dashboard window configuration", () => {
         "utf-8"
       );
       
-      expect(css).toContain("--accent-primary:");
+      expect(css).toContain("--primary:");
     });
 
     it("defines semantic colors (success, error)", async () => {

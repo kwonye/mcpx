@@ -22,13 +22,18 @@ describe("SettingsPanel", () => {
       startOnLoginEnabled: false
     });
 
-    render(<SettingsPanel />);
+    const { container } = render(<SettingsPanel />);
+    // wait for loading to finish
+    await screen.findByText("General Settings");
 
-    const autoUpdate = await screen.findByLabelText("Auto-update");
-    const startOnLogin = await screen.findByLabelText("Start on login");
+    const autoUpdate = container.querySelector('#toggle-autoUpdate') as HTMLInputElement;
+    const startOnLogin = container.querySelector('#toggle-startOnLogin') as HTMLInputElement;
 
-    expect((autoUpdate as HTMLInputElement).checked).toBe(true);
-    expect((startOnLogin as HTMLInputElement).checked).toBe(false);
+    expect(autoUpdate).toBeDefined();
+    expect(autoUpdate.checked).toBe(true);
+
+    expect(startOnLogin).toBeDefined();
+    expect(startOnLogin.checked).toBe(false);
   });
 
   it("sends update patch when toggle is changed", async () => {
@@ -41,8 +46,10 @@ describe("SettingsPanel", () => {
       startOnLoginEnabled: false
     });
 
-    render(<SettingsPanel />);
-    const startOnLogin = await screen.findByLabelText("Start on login");
+    const { container } = render(<SettingsPanel />);
+    await screen.findByText("General Settings");
+
+    const startOnLogin = container.querySelector('#toggle-startOnLogin') as HTMLInputElement;
     fireEvent.click(startOnLogin);
 
     await waitFor(() => {
@@ -59,8 +66,10 @@ describe("SettingsPanel", () => {
     });
     mockMcpx.updateDesktopSettings.mockRejectedValue(new Error("save failed"));
 
-    render(<SettingsPanel />);
-    const autoUpdate = await screen.findByLabelText("Auto-update");
+    const { container } = render(<SettingsPanel />);
+    await screen.findByText("General Settings");
+
+    const autoUpdate = container.querySelector('#toggle-autoUpdate') as HTMLInputElement;
     fireEvent.click(autoUpdate);
 
     expect(await screen.findByText("save failed")).toBeDefined();

@@ -130,17 +130,19 @@ export function BrowseTab({ onServerAdded, status }: BrowseTabProps) {
 
   return (
     <div className="browse-tab">
-      <div className="browse-hero">
-        <h2>Discover MCP Servers</h2>
-        <p>Enhance your AI with powerful context and tools from the official registry.</p>
-        <form className="browse-search" onSubmit={handleSearch}>
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center", marginBottom: "32px", marginTop: "16px" }}>
+        <h2 style={{ fontSize: "32px", fontWeight: 700, color: "var(--text-main)", letterSpacing: "-0.02em", marginBottom: "12px" }}>Discover MCP Servers</h2>
+        <p style={{ color: "var(--text-muted)", fontSize: "15px", maxWidth: "500px", marginBottom: "32px" }}>Enhance your AI with powerful context and tools from the official registry.</p>
+        <form className="glass-panel" onSubmit={handleSearch} style={{ display: "flex", alignItems: "center", width: "100%", maxWidth: "600px", height: "56px", borderRadius: "28px", padding: "0 8px 0 20px", transition: "all 0.2s ease", position: "relative" }}>
+          <span className="material-symbols-outlined" style={{ color: "var(--text-muted)", fontSize: "24px" }}>search</span>
           <input
             type="text"
             placeholder="Search for tools, databases, APIs..."
             value={searchInput}
             onChange={handleSearchInputChange}
+            style={{ flex: 1, background: "transparent", border: "none", outline: "none", color: "var(--text-main)", fontSize: "15px", padding: "0 16px" }}
           />
-          <button type="submit">Search</button>
+          <button type="submit" className="btn btn-primary" style={{ height: "40px", borderRadius: "20px", padding: "0 24px", fontWeight: 600 }}>Search</button>
         </form>
       </div>
 
@@ -162,34 +164,42 @@ export function BrowseTab({ onServerAdded, status }: BrowseTabProps) {
 
       {loading && <div style={{ color: "var(--text-secondary)", textAlign: "center", padding: "40px" }}>Loading registry...</div>}
 
-      <div className="browse-results">
+      <div style={{ display: "flex", flexDirection: "column", gap: "12px", paddingBottom: "48px" }}>
         {serverEntries.map((entry) => {
           const shortName = entry.server.name.split("/").pop() ?? entry.server.name;
           const isInstalled = installedServerNames.has(shortName);
 
           return (
-            <div key={entry.server.name} className="browse-card">
-              <div className="browse-card-header">
-                <span className="browse-card-name">{entry.server.title ?? entry.server.name}</span>
-                {isInstalled ? (
-                  <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                    <span style={{ fontSize: "0.85rem", color: "var(--success)", fontWeight: 500 }}>Added</span>
-                    <button 
-                      className="browse-card-add" 
-                      style={{ background: "rgba(239, 68, 68, 0.1)", color: "var(--error)", borderColor: "rgba(239, 68, 68, 0.2)" }}
-                      onClick={() => handleRemove(shortName)}
-                    >
-                      Remove
-                    </button>
-                  </div>
-                ) : (
-                  <button className="browse-card-add" onClick={() => handleAdd(entry.server.name)}>
-                    Add Server
-                  </button>
-                )}
+            <div key={entry.server.name} className="glass-card" style={{ minHeight: "80px", width: "100%", borderRadius: "16px", display: "flex", alignItems: "center", padding: "16px 20px", cursor: "pointer", transition: "all 0.15s ease-in-out" }}>
+              <div style={{ width: "40px", height: "40px", borderRadius: "12px", background: "rgba(83, 80, 241, 0.1)", border: "1px solid rgba(255, 255, 255, 0.5)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                <span className="material-symbols-outlined" style={{ color: "var(--primary)" }}>extension</span>
               </div>
-              {entry.server.description && (
-                <div className="browse-card-description">{entry.server.description}</div>
+              <div style={{ marginLeft: "16px", flex: 1, minWidth: 0, paddingRight: "16px" }}>
+                <h3 style={{ fontSize: "15px", fontWeight: 600, color: "var(--text-main)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{entry.server.title ?? entry.server.name}</h3>
+                <p style={{ fontSize: "13px", color: "var(--text-muted)", marginTop: "2px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{entry.server.description || entry.server.name}</p>
+              </div>
+
+              {isInstalled ? (
+                <div style={{ display: "flex", alignItems: "center", gap: "12px", flexShrink: 0 }}>
+                  <span style={{ fontSize: "13px", color: "var(--success)", fontWeight: 600 }}>Added</span>
+                  <button
+                    className="btn btn-danger"
+                    style={{ height: "32px", padding: "0 16px", fontSize: "13px", fontWeight: 600 }}
+                    onClick={() => handleRemove(shortName)}
+                  >
+                    Remove
+                  </button>
+                </div>
+              ) : (
+                <button
+                  className="btn"
+                  style={{ flexShrink: 0, height: "32px", padding: "0 16px", borderRadius: "8px", background: "rgba(83, 80, 241, 0.1)", color: "var(--primary)", fontSize: "13px", fontWeight: 600, transition: "all 0.2s" }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = "var(--primary)"; e.currentTarget.style.color = "white"; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(83, 80, 241, 0.1)"; e.currentTarget.style.color = "var(--primary)"; }}
+                  onClick={() => handleAdd(entry.server.name)}
+                >
+                  Install
+                </button>
               )}
             </div>
           );
