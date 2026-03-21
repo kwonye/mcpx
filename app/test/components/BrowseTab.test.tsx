@@ -59,7 +59,7 @@ describe("BrowseTab", () => {
   it("shows add form with required inputs when adding server", async () => {
     render(<BrowseTab onServerAdded={() => {}} status={mockStatus} />);
     fireEvent.click(screen.getByText("Search"));
-    const addButtons = await screen.findAllByText("Add Server");
+    const addButtons = await screen.findAllByText("Install");
     fireEvent.click(addButtons[0]);
     expect(await screen.findByText("Configure brave-search")).toBeDefined();
     expect(screen.getByLabelText(/^BRAVE_API_KEY/)).toBeDefined();
