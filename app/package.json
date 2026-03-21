@@ -9,6 +9,9 @@
     "productName": "mcpx",
     "mac": {
       "category": "public.app-category.developer-tools",
+      "extendInfo": {
+        "LSUIElement": true
+      },
       "target": [
         "dmg",
         "zip"

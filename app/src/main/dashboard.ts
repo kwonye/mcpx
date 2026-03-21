@@ -1,15 +1,32 @@
 import { BrowserWindow, app } from "electron";
-import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { hidePopover } from "./popover";
 
 let dashboard: BrowserWindow | null = null;
 
+function rendererEntryPath(): string {
+  return fileURLToPath(new URL("../renderer/index.html", import.meta.url));
+}
+
+function revealDashboard(window: BrowserWindow): void {
+  if (process.platform === "darwin") {
+    app.focus({ steal: true });
+  }
+
+  if (!window.isVisible()) {
+    window.show();
+  }
+
+  window.setAlwaysOnTop(true);
+  window.setAlwaysOnTop(false);
+  window.focus();
+}
+
 export function openDashboard(): BrowserWindow {
+  hidePopover();
+
   if (dashboard && !dashboard.isDestroyed()) {
-    dashboard.show();
-    dashboard.setAlwaysOnTop(false);
-    dashboard.focus();
-    // Show dock icon when dashboard is opened
-    app.dock?.show();
+    revealDashboard(dashboard);
     return dashboard;
   }
 
@@ -18,23 +35,31 @@ export function openDashboard(): BrowserWindow {
     height: 650,
     titleBarStyle: "hiddenInset",
     trafficLightPosition: { x: 16, y: 16 },
-    show: true,
+    show: false,
     webPreferences: {
-      preload: join(__dirname, "../preload/index.js"),
+      preload: fileURLToPath(new URL("../preload/index.js", import.meta.url)),
       sandbox: false
     }
   });
 
-  if (process.env.ELECTRON_RENDERER_URL) {
-    dashboard.loadURL(`${process.env.ELECTRON_RENDERER_URL}#dashboard`);
-  } else {
-    dashboard.loadFile(join(__dirname, "../renderer/index.html"), { hash: "dashboard" });
-  }
+  dashboard.webContents.on("did-fail-load", (_event, code, description, validatedUrl) => {
+    console.error("[renderer] failed to load dashboard:", {
+      code,
+      description,
+      validatedUrl
+    });
+  });
 
-  // Hide dock icon when window is closed
+  dashboard.loadFile(rendererEntryPath(), { hash: "dashboard" });
+
+  dashboard.once("ready-to-show", () => {
+    if (dashboard && !dashboard.isDestroyed()) {
+      revealDashboard(dashboard);
+    }
+  });
+
   dashboard.on("closed", () => {
     dashboard = null;
-    app.dock?.hide();
   });
 
   return dashboard;

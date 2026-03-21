@@ -1,8 +1,9 @@
 import { Tray, nativeImage, Menu, app } from "electron";
 import { join } from "node:path";
-import { openDashboard } from "./dashboard";
+import { hidePopover, togglePopover } from "./popover";
 
 let tray: Tray | null = null;
+let daemonRunning = false;
 let onQuitRequested: (() => void) | null = null;
 let onStartDaemonRequested: (() => void) | null = null;
 let onStopDaemonRequested: (() => void) | null = null;
@@ -61,15 +62,12 @@ export function createTray(): Tray {
   tray = new Tray(icon);
   tray.setToolTip("mcpx");
 
-  // Start with daemon not running
-  let daemonRunning = false;
-  tray.setContextMenu(buildContextMenu(daemonRunning));
-
   tray.on("click", () => {
-    openDashboard();
+    togglePopover(tray);
   });
 
   tray.on("right-click", () => {
+    hidePopover();
     tray!.popUpContextMenu(buildContextMenu(daemonRunning));
   });
 
@@ -78,10 +76,10 @@ export function createTray(): Tray {
 
 export function updateTrayForDaemonStatus(running: boolean): void {
   if (!tray) return;
-  
+
+  daemonRunning = running;
   const tooltip = running ? "mcpx - Daemon running" : "mcpx - Daemon stopped";
   tray.setToolTip(tooltip);
-  tray.setContextMenu(buildContextMenu(running));
 }
 
 export function hideTray(): void {

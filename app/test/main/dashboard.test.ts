@@ -21,6 +21,28 @@ describe("dashboard window configuration", () => {
       
       expect(source).toContain("trafficLightPosition");
     });
+
+    it("does not toggle the dock icon when opening or closing the dashboard", async () => {
+      const source = await readFile(
+        join(__dirname, "../../src/main/dashboard.ts"),
+        "utf-8"
+      );
+
+      expect(source).not.toContain("app.dock?.show()");
+      expect(source).not.toContain("app.dock?.hide()");
+    });
+
+    it("reveals the dashboard without relying on the dock", async () => {
+      const source = await readFile(
+        join(__dirname, "../../src/main/dashboard.ts"),
+        "utf-8"
+      );
+
+      expect(source).toContain('app.focus({ steal: true })');
+      expect(source).toContain('show: false');
+      expect(source).toContain('dashboard.once("ready-to-show"');
+      expect(source).toContain('dashboard.loadFile(rendererEntryPath(), { hash: "dashboard" })');
+    });
   });
 
   describe("UI-01: macOS HIG compliance", () => {

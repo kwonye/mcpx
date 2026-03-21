@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { registerLifecycleHandlers, lifecycleState } from "../../src/main/index";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 
 // Mock @mcpx/core to prevent module resolution errors
 vi.mock("@mcpx/core", () => ({
@@ -15,6 +17,27 @@ describe("lifecycle handlers", () => {
     vi.clearAllMocks();
     // Reset allowQuit to false before each test
     lifecycleState.allowQuit = false;
+  });
+
+  describe("dock visibility", () => {
+    it("starts the app in accessory mode on macOS", async () => {
+      const source = await readFile(
+        join(__dirname, "../../src/main/index.ts"),
+        "utf-8"
+      );
+
+      expect(source).toContain('app.setActivationPolicy("accessory")');
+      expect(source).toContain("app.dock?.hide()");
+    });
+
+    it("marks the packaged app as a UI element so it stays out of the dock", async () => {
+      const packageJson = await readFile(
+        join(__dirname, "../../package.json"),
+        "utf-8"
+      );
+
+      expect(packageJson).toContain('"LSUIElement": true');
+    });
   });
 
   describe("window-all-closed", () => {

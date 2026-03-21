@@ -4,6 +4,15 @@ interface DaemonControlsProps {
 }
 
 export function DaemonControls({ daemon, onRefresh }: DaemonControlsProps) {
+  function handleToggle(): void {
+    if (daemon.running) {
+      void window.mcpx.daemonStop().then(onRefresh);
+      return;
+    }
+
+    void window.mcpx.daemonStart().then(onRefresh);
+  }
+
   return (
     <div className="daemon-controls">
       <div className="daemon-status">
@@ -16,14 +25,12 @@ export function DaemonControls({ daemon, onRefresh }: DaemonControlsProps) {
         </div>
       </div>
       <div className="daemon-actions">
-        {daemon.running ? (
-          <>
-            <button className="btn btn-secondary" onClick={() => window.mcpx.daemonRestart().then(onRefresh)}>Restart</button>
-            <button className="btn btn-danger" onClick={() => window.mcpx.daemonStop().then(onRefresh)}>Stop</button>
-          </>
-        ) : (
-          <button className="btn btn-primary" onClick={() => window.mcpx.daemonStart().then(onRefresh)}>Start</button>
-        )}
+        <button
+          className={`btn ${daemon.running ? "btn-danger" : "btn-primary"}`}
+          onClick={handleToggle}
+        >
+          {daemon.running ? "Stop" : "Start"}
+        </button>
       </div>
     </div>
   );

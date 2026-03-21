@@ -66,4 +66,39 @@ test.describe("tray icon", () => {
       await app.close();
     }
   });
+
+  test("popover opens from tray flow and can launch the dashboard", async () => {
+    const app = await electron.launch({ args: [mainPath] });
+
+    try {
+      await app.evaluate(async () => {
+        const path = require("node:path");
+        const { togglePopover } = require(path.join(__dirname, "popover.js"));
+
+        togglePopover({
+          getBounds: () => ({ x: 120, y: 0, width: 24, height: 24 })
+        });
+      });
+
+      await expect.poll(async () => (await app.windows()).length).toBe(1);
+
+      const popover = (await app.windows())[0];
+      await popover.waitForLoadState("domcontentloaded");
+      await expect(popover.getByRole("button", { name: "Open Dashboard" })).toBeVisible();
+
+      await popover.getByRole("button", { name: "Open Dashboard" }).click();
+
+      await expect.poll(async () => {
+        const windows = await app.windows();
+        for (const window of windows) {
+          if ((await window.locator(".sidebar").count()) > 0) {
+            return true;
+          }
+        }
+        return false;
+      }).toBe(true);
+    } finally {
+      await app.close();
+    }
+  });
 });

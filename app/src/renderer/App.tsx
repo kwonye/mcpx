@@ -1,16 +1,12 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { StatusPopover } from "./components/StatusPopover";
 import { Dashboard } from "./components/Dashboard";
 
 export function App(): JSX.Element {
-  const [view, setView] = useState<"popover" | "dashboard">("dashboard");
-
-  useEffect(() => {
+  const [view] = useState<"popover" | "dashboard">(() => {
     const hash = window.location.hash.replace("#", "");
-    if (hash === "popover") {
-      setView("popover");
-    }
-  }, []);
+    return hash === "popover" ? "popover" : "dashboard";
+  });
 
   if (view === "popover") {
     return <StatusPopover />;

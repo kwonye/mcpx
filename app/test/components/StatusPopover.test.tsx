@@ -12,7 +12,8 @@ const mockMcpx = {
     ]
   }),
   syncAll: vi.fn(),
-  daemonRestart: vi.fn(),
+  daemonStart: vi.fn().mockResolvedValue(undefined),
+  daemonStop: vi.fn().mockResolvedValue(undefined),
   openDashboard: vi.fn()
 };
 
@@ -39,5 +40,26 @@ describe("StatusPopover", () => {
     const label = await screen.findByText("Sync Errors");
     const row = label.parentElement as HTMLElement;
     expect(within(row).getByText("1")).toBeDefined();
+  });
+
+  it("keeps the Open Dashboard action available", async () => {
+    render(<StatusPopover />);
+    expect(await screen.findByRole("button", { name: "Open Dashboard" })).toBeDefined();
+  });
+
+  it("shows Stop Daemon when running", async () => {
+    render(<StatusPopover />);
+    expect(await screen.findByRole("button", { name: "Stop Daemon" })).toBeDefined();
+  });
+
+  it("shows Start Daemon when stopped", async () => {
+    mockMcpx.getStatus.mockResolvedValueOnce({
+      daemon: { running: false, pid: undefined, pidFile: "", logFile: "", port: 37373 },
+      upstreamCount: 3,
+      servers: []
+    });
+
+    render(<StatusPopover />);
+    expect(await screen.findByRole("button", { name: "Start Daemon" })).toBeDefined();
   });
 });

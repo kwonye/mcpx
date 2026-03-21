@@ -101,6 +101,10 @@ export async function startMainProcess(): Promise<void> {
     uploadToServer: false,
   });
 
+  if (process.platform === "darwin") {
+    app.setActivationPolicy("accessory");
+  }
+
   if (await runDaemonChildIfRequested()) {
     return;
   }
@@ -116,6 +120,10 @@ export async function startMainProcess(): Promise<void> {
   });
 
   await app.whenReady();
+
+  if (process.platform === "darwin") {
+    app.dock?.hide();
+  }
 
   const settings = loadDesktopSettings();
   applyStartOnLoginSetting(settings.startOnLoginEnabled);

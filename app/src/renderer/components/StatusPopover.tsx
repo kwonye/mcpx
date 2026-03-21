@@ -1,7 +1,7 @@
 import { useStatus } from "../hooks/useMcpx";
 
 export function StatusPopover(): JSX.Element {
-  const { status, loading } = useStatus();
+  const { status, loading, refresh } = useStatus();
 
   if (loading || !status) {
     return <div className="popover">Loading...</div>;
@@ -26,6 +26,15 @@ export function StatusPopover(): JSX.Element {
     });
   });
   const syncedCount = syncedClients.size;
+
+  function handleDaemonToggle(): void {
+    if (report.daemon.running) {
+      void window.mcpx.daemonStop().then(() => refresh());
+      return;
+    }
+
+    void window.mcpx.daemonStart().then(() => refresh());
+  }
 
   return (
     <div className="popover">
@@ -60,8 +69,8 @@ export function StatusPopover(): JSX.Element {
         <button className="popover-btn" onClick={() => window.mcpx.syncAll()}>
           Sync All Clients
         </button>
-        <button className="popover-btn" onClick={() => window.mcpx.daemonRestart()}>
-          Restart Daemon
+        <button className={`popover-btn ${report.daemon.running ? "" : "primary"}`} onClick={handleDaemonToggle}>
+          {report.daemon.running ? "Stop Daemon" : "Start Daemon"}
         </button>
       </div>
     </div>
