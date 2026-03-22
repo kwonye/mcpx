@@ -53,6 +53,65 @@ export interface ManagedIndex {
   managed: Record<string, ManagedClientState>;
 }
 
+export interface ClientImportCandidate {
+  clientId: ClientId;
+  configPath?: string;
+  sourceEntryName: string;
+  serverName: string;
+  spec: UpstreamServerSpec;
+}
+
+export interface ClientImportSkippedEntry {
+  clientId: ClientId;
+  configPath?: string;
+  sourceEntryName: string;
+  serverName: string;
+  reason: string;
+}
+
+export interface ClientImportScanResult {
+  clientId: ClientId;
+  configPath?: string;
+  candidates: ClientImportCandidate[];
+  skipped: ClientImportSkippedEntry[];
+}
+
+export interface SyncImportedEntry {
+  clientId: ClientId;
+  configPath?: string;
+  sourceEntryName: string;
+  serverName: string;
+}
+
+export interface SyncDuplicateImportEntry {
+  clientId: ClientId;
+  configPath?: string;
+  sourceEntryName: string;
+  serverName: string;
+}
+
+export interface SyncImportConflictEntry {
+  clientId: ClientId;
+  configPath?: string;
+  sourceEntryName: string;
+  serverName: string;
+  message: string;
+}
+
+export interface SyncImportErrorEntry {
+  clientId: ClientId;
+  configPath?: string;
+  message: string;
+}
+
+export interface SyncImportReport {
+  imported: SyncImportedEntry[];
+  duplicates: SyncDuplicateImportEntry[];
+  skipped: ClientImportSkippedEntry[];
+  conflicts: SyncImportConflictEntry[];
+  errors: SyncImportErrorEntry[];
+}
+
 export interface SyncResult {
   clientId: ClientId;
   status: ClientStatus;
@@ -64,6 +123,7 @@ export interface ClientAdapter {
   id: ClientId;
   detectConfigPath(): string | null;
   supportsHttp(): boolean;
+  scanForImports(config: McpxConfig, managedIndex: ManagedIndex): ClientImportScanResult;
   syncGateway(config: McpxConfig, options: SyncClientOptions): SyncResult;
 }
 
@@ -71,6 +131,7 @@ export interface SyncClientOptions {
   managedEntries: ManagedGatewayEntry[];
   managedIndex: ManagedIndex;
   managedIndexPath: string;
+  sourceEntriesToRemove?: string[];
 }
 
 export interface ManagedGatewayEntry {

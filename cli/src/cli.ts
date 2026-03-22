@@ -203,6 +203,35 @@ function printSyncSummary(summary: ReturnType<typeof syncAllClients>, asJson = f
     return;
   }
 
+  if (
+    summary.imports.imported.length > 0
+    || summary.imports.duplicates.length > 0
+    || summary.imports.skipped.length > 0
+    || summary.imports.conflicts.length > 0
+    || summary.imports.errors.length > 0
+  ) {
+    process.stdout.write("Imports:\n");
+    for (const entry of summary.imports.imported) {
+      process.stdout.write(`- imported ${entry.serverName} from ${entry.clientId}`);
+      if (entry.sourceEntryName !== entry.serverName) {
+        process.stdout.write(` (${entry.sourceEntryName})`);
+      }
+      process.stdout.write("\n");
+    }
+    for (const entry of summary.imports.duplicates) {
+      process.stdout.write(`- adopted existing ${entry.serverName} from ${entry.clientId}\n`);
+    }
+    for (const entry of summary.imports.skipped) {
+      process.stdout.write(`- skipped ${entry.serverName} from ${entry.clientId} - ${entry.reason}\n`);
+    }
+    for (const entry of summary.imports.conflicts) {
+      process.stdout.write(`- conflict ${entry.serverName} from ${entry.clientId} - ${entry.message}\n`);
+    }
+    for (const entry of summary.imports.errors) {
+      process.stdout.write(`- import error ${entry.clientId} - ${entry.message}\n`);
+    }
+  }
+
   process.stdout.write(`Gateway: ${summary.gatewayUrl}\n`);
   for (const result of summary.results) {
     process.stdout.write(`- ${result.clientId}: ${result.status}`);

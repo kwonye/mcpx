@@ -61,6 +61,14 @@ export type {
   ManagedIndex,
   ManagedEntry,
   ManagedClientState,
+  ClientImportCandidate,
+  ClientImportScanResult,
+  ClientImportSkippedEntry,
+  SyncImportReport,
+  SyncImportedEntry,
+  SyncDuplicateImportEntry,
+  SyncImportConflictEntry,
+  SyncImportErrorEntry,
   SyncResult,
   ManagedGatewayEntry
 } from "../types.js";

@@ -1,4 +1,11 @@
-import type { ClientId, ManagedIndex, SyncResult } from "../../types.js";
+import type {
+  ClientId,
+  ClientImportScanResult,
+  ClientImportSkippedEntry,
+  ManagedIndex,
+  SyncResult,
+  UpstreamServerSpec
+} from "../../types.js";
 import { sha256 } from "../../util/fs.js";
 
 export function getManagedEntryNames(managedIndex: ManagedIndex, clientId: ClientId): string[] {
@@ -95,4 +102,80 @@ export function skippedResult(clientId: ClientId, message: string): SyncResult {
     status: "SKIPPED",
     message
   };
+}
+
+export function managedGatewayEntryName(serverName: string): string {
+  return `${serverName} (mcpx)`;
+}
+
+export function isManagedGatewayProjection(entryName: string): boolean {
+  return entryName.endsWith(" (mcpx)");
+}
+
+function sortRecord(record: Record<string, string> | undefined): Record<string, string> | undefined {
+  if (!record || Object.keys(record).length === 0) {
+    return undefined;
+  }
+
+  return Object.fromEntries(
+    Object.entries(record)
+      .sort(([left], [right]) => left.localeCompare(right))
+  );
+}
+
+export function normalizeServerSpec(spec: UpstreamServerSpec): UpstreamServerSpec {
+  if (spec.transport === "http") {
+    return {
+      transport: "http",
+      url: spec.url,
+      headers: sortRecord(spec.headers)
+    };
+  }
+
+  return {
+    transport: "stdio",
+    command: spec.command,
+    args: spec.args && spec.args.length > 0 ? [...spec.args] : undefined,
+    env: sortRecord(spec.env),
+    cwd: spec.cwd
+  };
+}
+
+export function serializeServerSpec(spec: UpstreamServerSpec): string {
+  return JSON.stringify(normalizeServerSpec(spec));
+}
+
+export function serverSpecsEqual(left: UpstreamServerSpec, right: UpstreamServerSpec): boolean {
+  return serializeServerSpec(left) === serializeServerSpec(right);
+}
+
+export function emptyImportScan(clientId: ClientId, configPath?: string): ClientImportScanResult {
+  return {
+    clientId,
+    configPath,
+    candidates: [],
+    skipped: []
+  };
+}
+
+export function buildImportSkip(
+  clientId: ClientId,
+  sourceEntryName: string,
+  reason: string,
+  configPath?: string,
+  serverName = sourceEntryName
+): ClientImportSkippedEntry {
+  return {
+    clientId,
+    configPath,
+    sourceEntryName,
+    serverName,
+    reason
+  };
+}
+
+export function removeSourceEntries(entries: Record<string, unknown>, names: string[] | undefined): void {
+  for (const name of names ?? []) {
+    delete entries[name];
+  }
 }
