@@ -48,21 +48,30 @@ To build a production .app bundle and install it (replacing any existing):
 
 ```bash
 cd app
+npm install
 npm run build
 npx electron-builder --mac --dir  # Build without DMG (faster)
 
 # Kill any running instances
-pkill -f "mcpx" || true
+pkill -f "/Applications/mcpx.app" || true
+pkill -f "dist/mac-arm64/mcpx.app" || true
 
-# Replace old app
-rm -rf /Applications/mcpx.app
-cp -r dist/mac-arm64/mcpx.app /Applications/
+# Replace old app while preserving bundle metadata/signature
+ts=$(date +%Y%m%d-%H%M%S)
+if [ -d /Applications/mcpx.app ]; then
+  mv /Applications/mcpx.app "/Applications/mcpx.app.backup-$ts"
+fi
+ditto dist/mac-arm64/mcpx.app /Applications/mcpx.app
+codesign --verify --deep --strict /Applications/mcpx.app
 
 # Open the new app
 open /Applications/mcpx.app
 ```
 
-**Note:** The app is a menubar-only app (no dock icon). Look for the tray icon in the menubar.
+**Notes:**
+- Use `ditto`, not `cp -R`, to install the app bundle into `/Applications`; `cp -R` can break the app signature.
+- The local `--dir` build may still fail `spctl` because it is not notarized. For local installs, a passing `codesign --verify` and a successful `open` are the expected checks.
+- The app is a menubar-only app (no dock icon). Look for the tray icon in the menubar.
 
 ## Technologies
 - **Styling:** Pure Vanilla CSS (no Tailwind/Bootstrap).
