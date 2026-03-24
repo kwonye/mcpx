@@ -1,38 +1,37 @@
-# Requirements: mcpx Desktop App Fixes
+# Requirements: mcpx Desktop App v1.1 UI Fixes
 
-**Defined:** Mon Mar 09 2026
+**Defined:** 2026-03-24
 **Core Value:** A reliable, polished desktop app that makes MCP server management effortless and intuitive.
 
 ## v1 Requirements
 
-### Launch Stability
+### Popover
 
-- [x] **LAUNCH-01**: App launches successfully without crashing on startup
-- [x] **LAUNCH-02**: App window renders content correctly after launch
-- [x] **LAUNCH-03**: App handles macOS lifecycle events (window-all-closed prevents quit)
+- [ ] **POPOVER-01**: User can scroll popover content when it overflows
+- [ ] **POPOVER-02**: Popover has no duplicate functionality buttons (e.g., "Open Dashboard")
 
-### Search
+### Window
 
-- [x] **SEARCH-01**: Search returns partial/fuzzy matches (not exact match only)
-- [x] **SEARCH-02**: Search results ranked by priority/popularity
-- [x] **SEARCH-03**: Search input debounced to prevent UI freezing
-- [x] **SEARCH-04**: Search supports typo tolerance
+- [ ] **WIND-01**: User can drag window from title bar area
+- [ ] **WIND-02**: Dashboard padding and margins follow macOS conventions (16-20pt consistent spacing)
 
-### Tray Icon
+### Sidebar
 
-- [x] **ICON-01**: New menu bar tray icon designed and implemented
-- [x] **ICON-02**: Tray icon uses macOS template format (auto-inverts for dark mode)
-- [x] **ICON-03**: Tray icon provided at 16x16 and 32x32@2x resolutions
-- [x] **ICON-04**: Tray reference held at module level (prevents garbage collection)
+- [ ] **SIDE-01**: User sees daemon start/stop controls at top of sidebar (hero area)
 
-### UI Polish
+### Browse
 
-- [x] **UI-01**: UI follows macOS Human Interface Guidelines
-- [x] **UI-02**: Visual polish applied to all components (spacing, fonts, colors)
-- [x] **UI-03**: Dark mode support verified
-- [x] **UI-04**: Window uses hiddenInset title bar for native macOS controls
+- [ ] **BROWSE-01**: Browse registry layout is clean and organized
+- [ ] **BROWSE-02**: Fuzzy search returns matching results (e.g., searching "vercel" shows Vercel servers)
+- [ ] **BROWSE-03**: Search state persists between window opens
+
+### Paste Command
+
+- [ ] **PASTE-01**: Paste command UI uses multi-line layout instead of one long line
 
 ## v2 Requirements
+
+Deferred to future release. Tracked but not in current roadmap.
 
 ### Enhanced Search
 
@@ -44,49 +43,37 @@
 
 - **UI-05**: Window vibrancy effects (sidebar/material)
 - **UI-06**: Custom animations and transitions
-- **UI-07**: Touch Bar support
 
 ## Out of Scope
 
 | Feature | Reason |
 |---------|--------|
-| Windows/Linux support | Focus on macOS native experience first |
-| CLI functionality changes | Existing CLI works, focus on app UX |
-| New MCP server features | Fix existing app first, expand later |
-| Touch Bar support | Low priority, defer to v2 |
+| New MCP server features | Focus on fixing existing functionality |
+| Windows/Linux support | macOS only |
+| New features of any kind | Purely fixes and polish |
+| Full-text search in descriptions | Defer to v2+ |
+| Server-side category filtering | Defer to v2+ |
 
 ## Traceability
 
+Which phases cover which requirements. Updated during roadmap creation.
+
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| LAUNCH-01 | Phase 1 | ✓ Complete |
-| LAUNCH-02 | Phase 1 | ✓ Complete |
-| LAUNCH-03 | Phase 1 | ✓ Complete |
-| SEARCH-01 | Phase 2 | ✓ Complete |
-| SEARCH-02 | Phase 2 | ✓ Complete |
-| SEARCH-03 | Phase 2 | ✓ Complete |
-| SEARCH-04 | Phase 2 | ✓ Complete |
-| ICON-01 | Phase 3 | ✓ Complete |
-| ICON-02 | Phase 3 | ✓ Complete |
-| ICON-03 | Phase 3 | ✓ Complete |
-| ICON-04 | Phase 3 | ✓ Complete |
-| UI-01 | Phase 4 | ✓ Complete |
-| UI-02 | Phase 4 | ✓ Complete |
-| UI-03 | Phase 4 | ✓ Complete |
-| UI-04 | Phase 4 | ✓ Complete |
+| POPOVER-01 | — | Pending |
+| POPOVER-02 | — | Pending |
+| WIND-01 | — | Pending |
+| WIND-02 | — | Pending |
+| SIDE-01 | — | Pending |
+| BROWSE-01 | — | Pending |
+| BROWSE-02 | — | Pending |
+| BROWSE-03 | — | Pending |
+| PASTE-01 | — | Pending |
 
 **Coverage:**
-- v1 requirements: 15 total
-- Mapped to phases: 15
-- Unmapped: 0 ✓
-- Completed: 15/15 (100%)
-
-**Phase Breakdown:**
-- Phase 1 (Launch Stability): 3 requirements ✓ COMPLETE
-- Phase 2 (Fuzzy Search): 4 requirements ✓ COMPLETE
-- Phase 3 (Tray Icon): 4 requirements ✓ COMPLETE
-- Phase 4 (macOS UI Polish): 4 requirements ✓ COMPLETE
+- v1 requirements: 9 total
+- Mapped to phases: 0
+- Unmapped: 9 ⚠️
 
 ---
-*Requirements defined: Mon Mar 09 2026*
-*Completed: Sun Mar 12 2026*
+*Requirements defined: 2026-03-24*
