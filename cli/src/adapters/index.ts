@@ -1,5 +1,6 @@
 import type { ClientAdapter } from "../types.js";
 import { ClaudeAdapter } from "./claude.js";
+import { ClaudeDesktopAdapter } from "./claude-desktop.js";
 import { CodexAdapter } from "./codex.js";
 import { CursorAdapter } from "./cursor.js";
 import { ClineAdapter } from "./cline.js";
@@ -11,6 +12,7 @@ import { QwenAdapter } from "./qwen.js";
 export function getAdapters(): ClientAdapter[] {
   return [
     new ClaudeAdapter(),
+    new ClaudeDesktopAdapter(),
     new CodexAdapter(),
     new CursorAdapter(),
     new ClineAdapter(),

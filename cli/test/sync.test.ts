@@ -199,6 +199,53 @@ describe("sync engine", () => {
     expect(projectServers["vercel (mcpx)"]).toBeUndefined();
   });
 
+  it("syncs Claude Desktop config successfully", () => {
+    const env = setupTempEnv("mcpx-sync-claude-desktop-");
+    cleanups.push(env.restore);
+
+    const config = defaultConfig();
+    config.servers.vercel = {
+      transport: "http",
+      url: "https://mcp.vercel.com"
+    };
+    saveConfig(config);
+
+    const claudeDesktopPath = path.join(env.root, "Library", "Application Support", "Claude", "claude_desktop_config.json");
+    fs.mkdirSync(path.dirname(claudeDesktopPath), { recursive: true });
+    const initialClaudeDesktop = {
+      mcpServers: {
+        existing_mcp: {
+          type: "stdio",
+          command: "npx",
+          args: ["-y", "@example/existing-mcp"]
+        }
+      }
+    };
+    fs.writeFileSync(claudeDesktopPath, JSON.stringify(initialClaudeDesktop, null, 2));
+
+    const summary = syncAllClients(config, new SecretsManager());
+    expect(summary.hasErrors).toBe(false);
+    expect(summary.results.some((result) => result.clientId === "claude-desktop" && result.status === "SYNCED")).toBe(true);
+
+    const syncedClaudeDesktop = JSON.parse(fs.readFileSync(claudeDesktopPath, "utf8")) as {
+      mcpServers: Record<string, { type: string; url?: string; headers?: Record<string, string> }>;
+    };
+
+    expect(syncedClaudeDesktop.mcpServers["vercel (mcpx)"]?.type).toBe("http");
+    expect(syncedClaudeDesktop.mcpServers["vercel (mcpx)"]?.url).toContain("127.0.0.1");
+    expect(syncedClaudeDesktop.mcpServers["vercel (mcpx)"]?.url).toContain("upstream=vercel");
+    expect(typeof syncedClaudeDesktop.mcpServers["vercel (mcpx)"].headers?.["x-mcpx-local-token"]).toBe("string");
+    expect(syncedClaudeDesktop.mcpServers.existing_mcp).toBeUndefined();
+    expect(syncedClaudeDesktop.mcpServers["existing_mcp (mcpx)"]?.type).toBe("http");
+    expect(config.servers.existing_mcp).toEqual({
+      transport: "stdio",
+      command: "npx",
+      args: ["-y", "@example/existing-mcp"],
+      env: undefined,
+      cwd: undefined
+    });
+  });
+
   it("syncs Qwen config successfully", () => {
     const env = setupTempEnv("mcpx-sync-qwen-");
     cleanups.push(env.restore);
