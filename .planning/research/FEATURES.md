@@ -1,259 +1,364 @@
 # Feature Landscape
 
-**Domain:** Electron desktop app (macOS) — MCP server management
-**Researched:** 2026-03-09
-
-## Executive Summary
-
-This research covers three targeted features for the mcpx desktop app: fuzzy search with ranking, macOS native UI polish, and tray icon design. The app currently has basic substring matching for search but needs proper fuzzy search. The UI needs to follow macOS Human Interface Guidelines for a native feel. The tray icon needs to use macOS template image format for proper light/dark mode support.
+**Domain:** Electron/macOS Desktop App UI Patterns
+**Researched:** 2026-03-24 (updated for v1.1 UI fixes milestone)
+**Confidence:** MEDIUM (based on codebase analysis and standard macOS conventions; external search tools unavailable)
 
 ---
 
-## Table Stakes
+## Executive Summary
+
+This research covers four UI fix areas for the v1.1 milestone: menu bar popover scrolling, dashboard window dragging, padding/margins consistency, and browse/search state behavior. The app uses Electron with React and vanilla CSS, following a `-webkit-app-region: drag` pattern for frameless window dragging. Key issues include scroll container setup, drag region conflicts with interactive elements, and search state not persisting between window opens.
+
+---
+
+## Table Stakes (Users Expect These)
 
 Features users expect. Missing = product feels incomplete.
 
 | Feature | Why Expected | Complexity | Notes |
 |---------|--------------|------------|-------|
-| **Fuzzy search with typo tolerance** | Users expect search to find results even with typos or partial matches (e.g., "filesystem" → "file system") | Medium | Current implementation uses simple `includes()` — needs Fuse.js or similar |
-| **Relevance-ranked results** | Search results should be ordered by relevance, not just filtered | Low | Current `calculateRelevanceScore()` exists but doesn't use fuzzy matching |
-| **Template tray icon** | macOS menu bar icons must adapt to light/dark mode automatically | Low | Requires `*Template.png` naming convention + 16x16 + 32x32@2x assets |
-| **Native macOS UI feel** | Users expect apps to feel at home on macOS (system fonts, spacing, colors) | Medium | Requires vanilla CSS updates, no new dependencies |
-| **Responsive search** | Search should filter as user types without lag | Low | Current implementation is synchronous and fast, but needs Fuse.js indexing |
+| **Popover content scrolling** | Menu bar apps must scroll when content overflows; users expect smooth scroll with subtle scrollbar | LOW | Current implementation has `overflowY: auto` on main but CSS may need adjustment for proper flex container behavior |
+| **Window drag from title area** | Standard macOS behavior; users instinctively drag from top of window | LOW | Uses `-webkit-app-region: drag` but drag regions may conflict with interactive elements |
+| **Consistent padding/margins** | macOS apps have standard spacing (typically 16px); inconsistent padding feels "wrong" | LOW | Sidebar uses 16px, main content has asymmetric padding |
+| **Search returns matching results** | Searching "vercel" should show Vercel-related servers; broken search = broken feature | MEDIUM | Fuse.js fuzzy search with threshold 0.4; possible issue with search query handling or data format |
+| **Clear empty state** | Users need feedback when search finds nothing; silence is confusing | LOW | Has empty state message but may not display correctly |
+| **Interactive elements clickable** | Buttons in drag regions must work; non-clickable buttons feel broken | LOW | Requires `-webkit-app-region: no-drag` on interactive children |
 
 ---
 
-## Differentiators
+## Differentiators (Competitive Advantage)
 
 Features that set product apart. Not expected, but valued.
 
 | Feature | Value Proposition | Complexity | Notes |
 |---------|-------------------|------------|-------|
-| **Customizable search weights** | Power users can tune which fields matter most (name vs. description) | Low | Fuse.js supports weighted keys via `keys` option |
-| **Highlight matched terms** | Show users *why* a result matched by highlighting search terms in results | Medium | Requires Fuse.js result indices + React rendering logic |
-| **Keyboard-first navigation** | Full keyboard accessibility for search (arrow keys, Enter to select) | Medium | Expected by power users, often overlooked |
-| **SF Symbols integration** | Use Apple's SF Symbols for consistent iconography throughout the app | Low | Electron `nativeImage.createFromNamedImage()` supports SF Symbols |
+| **Search state persistence** | Remember search query between window opens for seamless UX | MEDIUM | Currently resets on window close; would require localStorage or URL state |
+| **Subtle macOS-native scrollbar** | Thin, semi-transparent scrollbar matches macOS aesthetic | LOW | CSS custom scrollbar exists but may need refinement |
+| **Category quick filters** | One-click access to server categories (Trending, Databases, etc.) | LOW | Already implemented; works correctly |
 
 ---
 
-## Anti-Features
+## Anti-Features (Commonly Requested, Often Problematic)
 
 Features to explicitly NOT build.
 
 | Anti-Feature | Why Avoid | What to Do Instead |
 |--------------|-----------|-------------------|
-| **Heavy UI frameworks (Tailwind, MUI, etc.)** | Violates project mandate for vanilla CSS; adds bundle size without proportional value | Use vanilla CSS with macOS system variables (`-apple-system`, `system-ui`) |
-| **Server-side search** | Overkill for <1000 registry entries; adds latency and complexity | Keep search client-side with Fuse.js |
-| **Complex search syntax (Boolean operators, regex)** | MCP server discovery is simple use case; complexity harms DX | Stick to simple fuzzy matching with field weights |
-| **Custom icon design tool** | Out of scope for MCP management app | Provide design spec for tray icon, use asset pipeline |
+| **Persistent search across app restarts** | Registry changes make old results stale; memory overhead | Persist only the query text, not results; re-fetch on window open |
+| **Auto-scroll to top on search** | Jarring if user was scrolling; disorients users | Scroll to top smoothly only if results change significantly |
+| **Drag from anywhere in sidebar** | Conflicts with navigation buttons; users accidentally drag when clicking nav | Keep drag region in title bar only, not sidebar |
+| **Heavy UI frameworks (Tailwind, MUI, etc.)** | Violates project mandate for vanilla CSS; adds bundle size | Use vanilla CSS with macOS system variables |
 
 ---
 
 ## Feature Dependencies
 
 ```
-Fuzzy Search (Fuse.js) → Relevance Ranking (existing scoring can use Fuse.js scores)
-Template Tray Icon → Proper macOS light/dark mode support
-macOS Native UI → System font adoption, native spacing, color palette
+Window Drag Region
+    └──requires──> Interactive elements have no-drag CSS
+        └──requires──> Buttons/inputs properly marked
+
+Search Functionality
+    └──requires──> Fuse.js configuration correct
+    └──requires──> Registry API returns expected data structure
+        └──requires──> IPC bridge working (mcpx.registryList)
+
+Popover Scrolling
+    └──requires──> Flex container with defined height
+    └──requires──> Content area has overflow-y: auto
+        └──requires──> Header/footer outside scroll area
 ```
+
+### Dependency Notes
+
+- **Window drag requires no-drag on interactive elements:** If buttons inside drag regions don't have `-webkit-app-region: no-drag`, clicking them will attempt to drag the window instead
+- **Search requires correct Fuse.js config:** Current threshold is 0.4 (fairly permissive). If results don't show, check if search query is being passed correctly to `registryList`
+- **Popover scrolling requires flex structure:** The popover must have a fixed height container with header/footer outside the scrollable area
 
 ---
 
 ## Detailed Feature Analysis
 
-### 1. Fuzzy Search with Ranking
+### 1. Menu Bar Popover Scrolling (POPOVER-01)
 
-**Current State:**
-- `app/src/main/search-utils.ts` implements `matchSearchQuery()` using `includes()` substring matching
-- `calculateRelevanceScore()` provides basic scoring but requires exact substring matches
-- No typo tolerance ("filesytem" won't match "filesystem")
+**Current Implementation:**
+- Window: 360x320px, frameless (`popover.ts`)
+- CSS: `.popover` with `height: 100vh`, `display: flex`, `flex-direction: column` (`index.css`)
+- Main content area: `overflowY: "auto"` (inline style in `StatusPopover.tsx`)
 
-**Expected Behavior (Electron/React apps):**
-- **Typo tolerance**: 1-2 character edits should still match (Levenshtein distance)
-- **Partial matching**: "filesys" should match "filesystem"
-- **Field weighting**: Matches in `name` field should rank higher than `description`
-- **Instant results**: Search should feel responsive (<50ms for <1000 items)
+**Expected Behavior:**
+- Popover has fixed height (320px from window dimensions)
+- Header remains at top (not scrollable)
+- Footer remains at bottom (not scrollable)
+- Main content area scrolls vertically when content exceeds available space
+- Scrollbar should be thin (6px) and semi-transparent (matches macOS style)
+- Mouse wheel/trackpad scrolling should work smoothly
+- Scroll should not affect window position
 
-**Recommended Implementation:**
-| Library | Why | Install |
-|---------|-----|---------|
-| **Fuse.js** (v7.1.0) | Industry standard, 20k+ stars, zero dependencies, TypeScript support | `npm install fuse.js` |
-| Alternative: `flexsearch` | Faster for very large datasets (>10k items), but mcpx registry is small | — Not recommended |
+**Common Pitfalls:**
+- `height: 100vh` on `.popover` inside a frameless window may not behave as expected
+- Parent container needs explicit height for `overflow-y: auto` to work
+- Missing `flex-shrink: 0` on header/footer can cause them to collapse
 
-**Fuse.js Integration Pattern:**
-```typescript
-import Fuse from 'fuse.js'
-import type { RegistryServerEntry } from './registry-client'
-
-const fuse = new Fuse(servers, {
-  keys: [
-    { name: 'server.name', weight: 3 },
-    { name: 'server.title', weight: 2 },
-    { name: 'server.description', weight: 1 },
-    { name: 'server.packages[].identifier', weight: 2 }
-  ],
-  threshold: 0.4, // 0 = exact match, 1 = match anything
-  ignoreLocation: true, // Don't require match at specific position
-  minMatchCharLength: 2
-})
-
-const results = fuse.search(query) // Returns scored, ranked results
-```
-
-**Migration Path:**
-1. Keep existing `search-utils.ts` API signature for backward compatibility
-2. Replace internal implementation with Fuse.js
-3. Use Fuse.js scores for ranking (replace `calculateRelevanceScore()`)
-4. Add `includeMatches: true` option if implementing highlight feature later
-
----
-
-### 2. macOS Native UI Polish
-
-**Current State:**
-- Vanilla CSS (per project mandate) — good foundation
-- Needs alignment with macOS Human Interface Guidelines
-
-**Expected Behavior (macOS apps):**
-| UI Element | macOS Standard | Implementation |
-|------------|----------------|----------------|
-| **System Font** | `-apple-system, BlinkMacSystemFont, sans-serif` | Update `font-family` in `app/src/renderer/index.css` |
-| **Window Controls** | Red/yellow/green traffic lights (left) | Electron `titleBarStyle: 'hiddenInset'` for native feel |
-| **Spacing** | 8px grid system (8, 16, 24, 32px) | Define CSS variables: `--spacing-xs: 8px`, etc. |
-| **Colors** | System semantic colors | Use CSS variables mapped to macOS colors |
-| **Sidebar** | Vibrancy/blur effect (optional) | Electron `vibrancy: 'sidebar'` or CSS backdrop-filter |
-| **Selection** | Blue highlight (`#0063E1`) | Update `::selection` and active states |
-
-**CSS Variables to Add:**
+**Fix Approach:**
 ```css
-:root {
-  /* Spacing */
-  --spacing-xs: 4px;
-  --spacing-sm: 8px;
-  --spacing-md: 16px;
-  --spacing-lg: 24px;
-  --spacing-xl: 32px;
-
-  /* Typography */
-  --font-system: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
-  --font-size-xs: 11px;
-  --font-size-sm: 13px;
-  --font-size-md: 15px;
-  --font-size-lg: 17px;
-
-  /* Colors (light mode) */
-  --color-bg: #ffffff;
-  --color-bg-secondary: #f5f5f7;
-  --color-text: #1d1d1f;
-  --color-text-secondary: #6e6e73;
-  --color-accent: #0063E1;
-  --color-border: #d2d2d7;
-
-  /* Dark mode (via @media) */
-  @media (prefers-color-scheme: dark) {
-    --color-bg: #1e1e1e;
-    --color-bg-secondary: #2c2c2e;
-    --color-text: #f5f5f7;
-    --color-text-secondary: #98989d;
-    --color-border: #3a3a3c;
-  }
+.popover {
+  height: 100%; /* Use 100% instead of 100vh */
+  display: flex;
+  flex-direction: column;
+}
+.popover-header {
+  flex-shrink: 0; /* Prevent collapse */
+}
+.popover main {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0; /* Critical for flex children to scroll */
+}
+.popover-actions {
+  flex-shrink: 0;
 }
 ```
 
-**Electron Window Configuration:**
+---
+
+### 2. Window Drag Behavior (DRAG-01)
+
+**Current Implementation:**
+- Dashboard: `titleBarStyle: "hiddenInset"` (native macOS traffic lights, hidden title bar) in `dashboard.ts`
+- CSS: `-webkit-app-region: drag` on `.sidebar` and `.page-header` (`index.css`)
+- CSS: `-webkit-app-region: no-drag` on `.sidebar-inner` and children
+
+**Expected Behavior:**
+- Users can drag window by clicking in the sidebar area (outside buttons)
+- Users can drag window by clicking in the page header area (outside interactive elements)
+- Traffic lights (close, minimize, maximize) work correctly at top-left (positioned at 16px, 16px)
+- All buttons, inputs, and clickable elements work normally (don't trigger drag)
+- Cursor remains default (not move cursor) over drag regions
+
+**Common Pitfalls:**
+- Applying `drag` to parent and not `no-drag` to children makes children unclickable
+- Overlapping drag regions can cause unexpected behavior
+- Elements with `pointer-events: none` cannot have their app-region overridden
+
+**Fix Approach:**
+1. Ensure `.sidebar` has `drag` but `.sidebar-inner` and all interactive children have `no-drag`
+2. Ensure `.page-header` has `drag` but all children have `no-drag`
+3. Verify traffic light position doesn't overlap with interactive elements
+
+**Current CSS Review (`index.css` lines 264-276):**
+```css
+.sidebar {
+    width: 240px;
+    flex-shrink: 0;
+    padding: 16px;
+    position: relative;
+    z-index: 10;
+    -webkit-app-region: drag;  /* Drag region */
+    display: flex;
+    flex-direction: column;
+}
+
+.sidebar-inner {
+    width: 100%;
+    height: 100%;
+    border-radius: var(--radius-md);
+    display: flex;
+    flex-direction: column;
+    padding: 16px;
+    -webkit-app-region: no-drag;  /* Interactive content */
+}
+```
+
+**Issue:** The `.sidebar-logo` area is inside `.sidebar-inner` and should be clickable for branding, but `.nav-button` elements need to remain clickable. Current implementation looks correct - verify at runtime.
+
+---
+
+### 3. macOS Padding/Margins (DRAG-02)
+
+**Current Implementation:**
+- Sidebar: `padding: 16px`
+- Main content: `padding: 16px 24px 16px 0` (asymmetric)
+- Page header: `height: 72px`, `margin-bottom: 16px`
+
+**macOS Conventions:**
+| Element | Standard | Current | Status |
+|---------|----------|---------|--------|
+| Sidebar padding | 16px | 16px | Correct |
+| Sidebar width | 200-260px | 240px | Correct |
+| Content padding | 16-24px | 16px 24px 16px 0 | Asymmetric - investigate |
+| Traffic light position | 12-20px from top-left | 16px, 16px | Correct |
+| Card/list padding | 12-16px | 16px | Correct |
+| Border radius | 8-16px | 8px/16px/24px | Correct |
+
+**Issues Found:**
+- Main content has `padding-right: 0` but no right padding on actual content
+- Asymmetric padding (16px left, 0 right) may cause alignment issues with the glass panel borders
+
+**Fix Approach:**
+```css
+.main-content {
+  padding: 16px 24px; /* Consistent padding */
+}
+```
+
+Or adjust per-component if the current asymmetry is intentional for visual balance with the sidebar.
+
+---
+
+### 4. Browse/Search State Behavior (BROWSE-01, BROWSE-02, BROWSE-03)
+
+**Current Implementation:**
+- Hook: `useRegistryList` in `hooks/useMcpx.ts` manages `servers`, `cursor`, `loading` state
+- Search: Debounced 300ms, calls `window.mcpx.registryList(undefined, query, limit)`
+- Fuse.js config: Threshold 0.4, searches `server.name`, `server.title`, `server.description`, `server.packages[].identifier`
+- State: React state only (no persistence)
+
+**Expected Behavior:**
+- Typing in search input triggers debounced search (300ms delay)
+- Results update to show matching servers
+- "vercel" search should return servers with "vercel" in name/title/description
+- Loading state shows while fetching
+- Empty state message shows when no results
+- Load more button appears if there are more results
+
+**Known Issues from CONCERNS.md:**
+- `repository` field accessed in `search-utils.ts` but not in `RegistryServerEntry` type definition
+- Debug `console.log` left in `registry-client.ts` (line 85)
+
+**Common Pitfalls:**
+- Fuse.js `server.name` path may not match actual data structure (nested `server.server.name`)
+- Registry API response format may differ from expected type
+- Search query not passed correctly through IPC
+
+**Fix Approach:**
+1. Verify `RegistryServerEntry` type matches actual API response structure
+2. Check Fuse.js key paths: `server.name` vs actual path in data
+3. Add `repository` field to `RegistryServerEntry["server"]` type if needed
+4. Remove debug `console.log` from `registry-client.ts`
+
+**Current Fuse.js Configuration (`search-utils.ts`):**
 ```typescript
-// app/src/main/dashboard.ts
-const win = new BrowserWindow({
-  width: 800,
-  height: 600,
-  titleBarStyle: 'hiddenInset', // Native macOS traffic light position
-  vibrancy: 'sidebar', // Optional: sidebar blur effect
-  visualEffectState: 'active', // Maintain vibrancy when focused
-  backgroundColor: '#ffffff'
-})
+const keys: Fuse.FuseOptionKey<RegistryServerEntry>[] = [];
+
+if (fields.includes("name")) {
+  keys.push({ name: "server.name", weight: 0.7 });
+}
+if (fields.includes("title")) {
+  keys.push({ name: "server.title", weight: 0.5 });
+}
+if (fields.includes("description")) {
+  keys.push({ name: "server.description", weight: 0.3 });
+}
+if (fields.includes("repository")) {
+  keys.push({ name: "server.repository.url", weight: 0.2 }); // Type mismatch!
+}
+if (fields.includes("packages")) {
+  keys.push({ name: "server.packages.identifier", weight: 0.4 });
+}
+```
+
+**Issue:** The `repository` field is accessed but not defined in the `RegistryServerEntry` type.
+
+---
+
+### 5. Search State Persistence (BROWSE-03)
+
+**Current Behavior:**
+- Search input value is React state (`searchInput`)
+- Resets to empty string when component mounts
+- No persistence between window opens/closes
+
+**Expected Behavior Options:**
+| Option | Behavior | Complexity |
+|--------|----------|------------|
+| **No persistence (current)** | Fresh state on each window open | N/A |
+| **Query-only persistence** | Save `searchInput` to localStorage, restore on mount | LOW |
+| **Full state persistence** | Save `searchInput`, `activeCategory`, `activeQuery` | MEDIUM |
+
+**Recommendation:** Query-only persistence - simple implementation, useful UX
+
+```typescript
+// In BrowseTab.tsx
+const [searchInput, setSearchInput] = useState(() => {
+  return localStorage.getItem("mcpx-browse-query") || "";
+});
+
+// On search input change
+const handleSearchInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const value = e.target.value;
+  setSearchInput(value);
+  localStorage.setItem("mcpx-browse-query", value);
+  debouncedSearch(value);
+};
 ```
 
 ---
 
-### 3. Tray Icon Design
+## MVP Definition
 
-**Current State:**
-- Existing tray icon in `app/resources/` (described as "ugly" in PROJECT.md)
-- Needs redesign with proper macOS template format
+### Launch With (v1.1 Fixes)
 
-**macOS Tray Icon Requirements:**
-| Requirement | Specification | Why |
-|-------------|---------------|-----|
-| **Template format** | Filename must end with `Template` (e.g., `iconTemplate.png`) | macOS auto-inverts for light/dark menu bar |
-| **Sizes** | 16x16 (72dpi) + 32x32@2x (144dpi) | Standard + Retina support |
-| **Colors** | Black (#000000) with alpha channel only | Template images ignore color, use alpha for shape |
-| **No filled areas** | Avoid large solid regions | Template images should be outline/drawing style |
+- [ ] **POPOVER-01: Fix menu bar popover scrolling** — Content must scroll within popover; header and footer should remain fixed
+- [ ] **DRAG-01: Fix dashboard window drag** — Title bar area must be draggable; interactive elements must not trigger drag
+- [ ] **DRAG-02: Fix dashboard padding** — Use consistent macOS-standard padding (16px for most elements)
+- [ ] **BROWSE-01: Fix browse registry layout** — Cards should be properly spaced and aligned
+- [ ] **BROWSE-02: Fix fuzzy search** — Searching "vercel" or other terms must return matching results
+- [ ] **BROWSE-03: Search state persistence** — Optionally persist search query between window opens
 
-**File Structure:**
-```
-app/resources/
-├── trayIconTemplate.png      # 16x16, 72dpi
-├── trayIconTemplate@2x.png   # 32x32, 144dpi
-└── trayIconTemplate@3x.png   # 48x48, 144dpi (optional, for high-DPI external displays)
-```
+### Add After Validation (v1.x)
 
-**Implementation:**
-```typescript
-// app/src/main/tray.ts
-import { nativeImage, Tray, Menu } from 'electron'
-import path from 'path'
+- [ ] **Advanced search state** — Persist search query to localStorage, restore on window reopen
+- [ ] **Keyboard shortcuts** — Cmd+F to focus search, Esc to clear
+- [ ] **Search history** — Show recent searches for quick access
 
-const iconPath = path.join(__dirname, '../../resources/trayIconTemplate.png')
-const trayIcon = nativeImage.createFromPath(iconPath)
-trayIcon.setTemplateImage(true) // Explicitly mark as template
+### Future Consideration (v2+)
 
-const tray = new Tray(trayIcon)
-```
-
-**Design Guidelines:**
-- **Style**: Simple, recognizable at 16x16 size
-- **Metaphor**: Server/gateway/connection visual (aligns with MCP gateway purpose)
-- **Avoid**: Text, gradients, shadows, complex details
-- **Reference Icons**: 
-  - Docker tray icon (whale silhouette)
-  - ngrok tray icon (arrow/forward symbol)
-  - Vercel CLI (triangle/vertex)
-
-**SF Symbol Alternative:**
-```typescript
-// Use Apple's built-in SF Symbols instead of custom assets
-const trayIcon = nativeImage.createFromNamedImage('server.rack')
-// Or: 'network', 'globe', 'cloud', 'connection.lan'
-trayIcon.setTemplateImage(true)
-```
-
-**Recommended SF Symbol**: `server.rack` or `network` — directly communicates server/gateway function.
+- [ ] **Full-text search** — Search within server descriptions and README content
+- [ ] **Filter by category** — Server-side category filtering instead of client-side query mapping
+- [ ] **Highlight matched terms** — Show users why a result matched
 
 ---
 
-## MVP Recommendation
+## Feature Prioritization Matrix
 
-**Phase 1: Foundation**
-1. Add Fuse.js dependency (`npm install fuse.js`)
-2. Replace search implementation in `search-utils.ts` with Fuse.js
-3. Design and implement tray icon with template format
+| Feature | User Value | Implementation Cost | Priority |
+|---------|------------|---------------------|----------|
+| Popover scrolling fix | HIGH | LOW | P1 |
+| Window drag fix | HIGH | LOW | P1 |
+| Padding fix | MEDIUM | LOW | P1 |
+| Search results fix | HIGH | MEDIUM | P1 |
+| Search state persistence | MEDIUM | MEDIUM | P2 |
+| Layout polish | MEDIUM | LOW | P1 |
 
-**Phase 2: Polish**
-4. Update CSS variables for macOS native feel
-5. Add keyboard navigation to search
-6. Implement search term highlighting (if Fuse.js `includeMatches` enabled)
+**Priority key:**
+- P1: Must have for this milestone
+- P2: Should have, add when possible
+- P3: Nice to have, future consideration
 
-**Defer:**
-- Custom search weight UI (power user feature)
-- SF Symbols throughout app (can use standard PNG assets first)
+---
+
+## Competitor Feature Analysis
+
+| Feature | Raycast | Bitbar/xbar | Our Approach |
+|---------|---------|-------------|--------------|
+| Popover scroll | Native scroll, fixed header/footer | Native scroll | Flex container with overflow-y: auto |
+| Window drag | Native title bar | N/A (menu bar only) | hiddenInset + CSS drag regions |
+| Search | Instant, persistent | Basic filter | Debounced fuzzy search |
+| Layout | Consistent 8px grid | Variable | CSS custom properties |
 
 ---
 
 ## Sources
 
-- **Fuse.js**: https://fusejs.io/ — Official documentation
-- **Fuse.js GitHub**: https://github.com/krisk/Fuse — 20k+ stars, v7.1.0 (Feb 2025)
-- **Electron Tray API**: https://www.electronjs.org/docs/latest/api/tray — Official Electron docs
-- **Electron Native Image**: https://www.electronjs.org/docs/latest/api/native-image — Template image specifications
-- **macOS Human Interface Guidelines**: https://developer.apple.com/design/human-interface-guidelines — Apple design standards
-- **Existing Codebase**: `app/src/main/search-utils.ts` — Current search implementation
+- Codebase analysis: `.planning/codebase/ARCHITECTURE.md`, `.planning/codebase/CONVENTIONS.md`, `.planning/codebase/CONCERNS.md`
+- Electron documentation: `-webkit-app-region` for drag regions (standard Electron pattern)
+- macOS Human Interface Guidelines: Standard padding (16px), title bar conventions
+- Fuse.js documentation: Fuzzy search configuration options
+- Existing E2E tests: `app/e2e/search.spec.ts`, `app/e2e/ui.spec.ts`
+
+---
+
+*Feature research for: Electron/macOS UI patterns*
+*Researched: 2026-03-24*

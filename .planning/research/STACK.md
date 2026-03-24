@@ -1,449 +1,476 @@
-# Technology Stack
+# Stack Research
 
-**Project:** mcpx Desktop App Fixes
-**Researched:** 2026-03-09
+**Domain:** Electron/macOS UI Fixes
+**Researched:** 2026-03-24
+**Confidence:** MEDIUM (based on codebase analysis and established Electron patterns; web search APIs unavailable for verification)
 
 ## Context
 
-This is a **subsequent milestone** for an existing Electron + React application. The base stack is established (Electron 35.x, React 19.1.x, TypeScript 5.9.3, vanilla CSS). This research focuses on 2025 best practices for specific problem areas: crash debugging, fuzzy search, macOS HIG compliance, and tray icon implementation.
+This research is scoped to specific UI fixes needed for the mcpx desktop app:
+- Menu bar popover scrolling
+- Dashboard window drag from title area
+- Dashboard padding/margins
+- Browse registry layout fixes
+- Fuzzy search debugging
+
+The base stack is validated (Electron 35.x, React 19.1.x, TypeScript 5.9.3, vanilla CSS, Fuse.js 7.1.0).
 
 ---
 
 ## Recommended Approaches
 
-### 1. Debugging Electron App Crashes on Launch
+### 1. Window Dragging in hiddenInset Windows
 
-| Technology/Tool | Purpose | Why |
-|-----------------|---------|-----|
-| VSCode Debugger | Main process debugging | Built-in support via V8 inspector protocol; no external tools needed |
-| `--inspect-brk` flag | Pause on startup | Breaks on first line, catching initialization crashes before they occur |
-| `ELECTRON_ENABLE_LOGGING=1` | Console logging | Enables Chromium logging to stderr for diagnosing startup failures |
-| `crashReporter` API | Crash reporting | Uses Crashpad (not Breakpad) to capture and submit crash dumps |
-| `webContents.openDevTools()` | Renderer debugging | Opens Chrome DevTools for renderer process issues |
+| API/Property | Purpose | Why |
+|--------------|---------|-----|
+| `-webkit-app-region: drag` | CSS property for draggable regions | Standard Electron mechanism for frameless/hiddenInset windows |
+| `-webkit-app-region: no-drag` | Exclude interactive elements from drag | Buttons, inputs must remain clickable |
+| `titleBarStyle: "hiddenInset"` | macOS native traffic lights in content | Gives macOS-native look while allowing custom layout |
+| `trafficLightPosition: { x, y }` | Position traffic lights | Adjusts where close/minimize/maximize appear |
 
-**Recommended Debugging Workflow:**
+**Current Implementation Analysis:**
 
+The dashboard (`app/src/main/dashboard.ts`) uses:
 ```typescript
-// 1. Add to app/src/main/index.ts (before app.whenReady())
-import { crashReporter } from 'electron'
-
-crashReporter.start({
-  productName: 'mcpx',
-  uploadToServer: false, // Store locally during development
-  extra: { version: app.getVersion() }
-})
-
-// 2. Create .vscode/launch.json
-{
-  "version": "0.2.0",
-  "configurations": [
-    {
-      "name": "Debug Main Process",
-      "type": "node",
-      "request": "launch",
-      "cwd": "${workspaceFolder}/app",
-      "runtimeExecutable": "${workspaceFolder}/app/node_modules/.bin/electron",
-      "windows": {
-        "runtimeExecutable": "${workspaceFolder}/app/node_modules/.bin/electron.cmd"
-      },
-      "args": ["."],
-      "env": {
-        "ELECTRON_ENABLE_LOGGING": "true",
-        "ELECTRON_ENABLE_STACK_DUMPING": "true"
-      },
-      "outputCapture": "std"
-    }
-  ]
-}
-
-// 3. Run with: code --inspect-brk=9229 app/
-// 4. Connect via chrome://inspect or VSCode debugger
+titleBarStyle: "hiddenInset",
+trafficLightPosition: { x: 16, y: 16 },
 ```
 
-**Crash Diagnosis Checklist:**
+The CSS (`app/src/renderer/index.css`) has:
+```css
+.sidebar {
+    -webkit-app-region: drag;  /* Sidebar is draggable */
+}
+.sidebar-inner {
+    -webkit-app-region: no-drag;  /* But contents are not */
+}
+.page-header {
+    -webkit-app-region: drag;  /* Header is draggable */
+}
+.page-header > * {
+    -webkit-app-region: no-drag;  /* But children are not */
+}
+```
 
-1. Check if crash occurs in main process (terminal output) or renderer (DevTools console)
-2. Enable `ELECTRON_ENABLE_LOGGING=1` environment variable
-3. Use `--inspect-brk=9229` to pause on startup
-4. Set breakpoints in `app.whenReady()` and IPC handlers
-5. Check `crashReporter.getLastCrashReport()` for crash metadata
-6. For renderer crashes: call `win.webContents.openDevTools()` immediately on window creation
+**Problem Diagnosis:**
 
-**Common Launch Crash Causes:**
+The traffic lights are positioned at `{ x: 16, y: 16 }`. With `hiddenInset`, the traffic lights appear inside the content area. The sidebar starts at `padding: 16px` from the edge, meaning the traffic lights likely overlap with the sidebar content.
 
-- Native module loading failures (check Node.js version compatibility)
-- File system access before `app.whenReady()` completes
-- Keychain access before app is ready
-- Tray icon created before `ready` event (tray can only be instantiated after ready)
-- Path resolution errors in `electron-vite` aliases
+**Recommended Fix:**
+
+1. **Account for traffic light area**: macOS traffic lights take approximately 52px width and are positioned from the left. The sidebar needs to start after this area.
+
+```css
+.sidebar {
+    /* Add left padding to account for traffic lights */
+    padding-left: 72px; /* 16px existing + ~52px for traffic lights + buffer */
+    /* OR use a drag region above the sidebar */
+}
+
+/* Alternative: Create dedicated drag region */
+.title-bar-drag-region {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 52px; /* macOS title bar height */
+    -webkit-app-region: drag;
+    z-index: 100;
+}
+```
+
+2. **Fix page-header drag region**: Currently the page-header is draggable but this conflicts with window controls. The title area should be draggable but account for traffic lights.
+
+**Verification Steps:**
+1. Check if traffic lights overlap sidebar logo
+2. Test dragging from various areas of the window
+3. Ensure buttons remain clickable (not consumed by drag region)
 
 ---
 
-### 2. Fuzzy Search in React Applications
+### 2. Menu Bar Popover Scrolling
 
-| Library | Version | Purpose | Why |
-|---------|---------|---------|-----|
-| **Fuse.js** | 7.1.0 (Feb 2025) | Fuzzy search engine | Industry standard; 20k stars; zero dependencies; 96% JavaScript |
-| **useFuse** (custom hook) | — | React integration | Wraps Fuse.js for idiomatic React usage with useMemo caching |
+| CSS Property | Value | Why |
+|--------------|-------|-----|
+| `overflow-y: auto` | Enable vertical scrolling | Standard overflow handling |
+| `flex: 1` with `min-height: 0` | Allow flex child to shrink | Critical for overflow in flex containers |
+| `height: 100vh` with `overflow: hidden` on parent | Constrain popover height | Prevents content from expanding beyond window |
 
-**Why Fuse.js:**
+**Current Implementation Analysis:**
 
-- **Zero dependencies** — No bloat, works in any environment
-- **Client-side only** — No backend setup required (unlike ElasticSearch, Algolia)
-- **Weighted search** — Support for nested keys and scoring
-- **Small bundle** — ~6KB gzipped
-- **Actively maintained** — v7.1.0 released February 2025
-
-**Recommended Implementation:**
-
+The popover window (`app/src/main/popover.ts`):
 ```typescript
-// app/src/main/search-utils.ts (main process)
-import Fuse from 'fuse.js'
-import type { RegistryServer } from '@mcpx/core'
+width: 360,
+height: 320,
+```
 
-export interface SearchOptions {
-  query: string
-  items: RegistryServer[]
-  keys?: (keyof RegistryServer)[]
-}
-
-export function searchServers(options: SearchOptions): RegistryServer[] {
-  const { query, items, keys = ['name', 'description', 'author'] } = options
-  
-  const fuse = new Fuse(items, {
-    keys,
-    threshold: 0.4, // 0 = exact match, 1 = match anything
-    includeScore: true,
-    shouldSort: true,
-    minMatchCharLength: 2,
-    // Priority weighting
-    keys: [
-      { name: 'name', weight: 0.7 },
-      { name: 'description', weight: 0.2 },
-      { name: 'author', weight: 0.1 }
-    ]
-  })
-  
-  const results = fuse.search(query)
-  return results.map(result => result.item)
-}
-
-// app/src/renderer/hooks/useFuseSearch.ts (renderer hook)
-import { useMemo } from 'react'
-import Fuse from 'fuse.js'
-
-export function useFuseSearch<T>(
-  items: T[],
-  query: string,
-  keys: (keyof T)[],
-  options?: Fuse.IFuseOptions<T>
-): T[] {
-  return useMemo(() => {
-    if (!query.trim()) return items
-    
-    const fuse = new Fuse(items, {
-      keys,
-      threshold: 0.4,
-      includeScore: true,
-      shouldSort: true,
-      ...options
-    })
-    
-    const results = fuse.search(query)
-    return results.map(r => r.item)
-  }, [items, query, keys, options])
+The CSS (`app/src/renderer/index.css`):
+```css
+.popover {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    padding: 16px;
+    gap: 16px;
+    -webkit-app-region: drag;
 }
 ```
 
-**Usage in BrowseTab:**
-
+The StatusPopover component (`app/src/renderer/components/StatusPopover.tsx`):
 ```tsx
-// app/src/renderer/components/BrowseTab.tsx
-const { data: servers } = useRegistryList()
-const [searchQuery, setSearchQuery] = useState('')
-
-const filteredServers = useFuseSearch(
-  servers || [],
-  searchQuery,
-  ['name', 'description', 'author'],
-  {
-    keys: [
-      { name: 'name', weight: 0.7 },
-      { name: 'description', weight: 0.2 },
-      { name: 'author', weight: 0.1 }
-    ]
-  }
-)
+<main style={{ flex: 1, overflowY: "auto", ... }}>
+    {/* Content */}
+</main>
 ```
 
-**Alternative Considered:**
+**Problem Diagnosis:**
 
-| Alternative | Why Not |
-|-------------|---------|
-| `fuzzaldrin-plus` | Less maintained, smaller community |
-| `ts-fuzzy` | More complex API, larger bundle |
-| Backend search (ElasticSearch) | Overkill for < 1000 items; adds infrastructure |
+1. **Missing `min-height: 0`**: In flexbox, children won't shrink below their content size by default. The `<main>` element needs `min-height: 0` to allow overflow scrolling.
 
----
+2. **Drag region interference**: The entire `.popover` has `-webkit-app-region: drag`, but the `<main>` content needs scrolling. The scroll events might be captured by the drag region.
 
-### 3. macOS Human Interface Guidelines for Electron Apps
+3. **Height constraint**: The `height: 100vh` on `.popover` is correct, but the flex layout might not be constraining children properly.
 
-**Key HIG Principles for Menu Bar Apps:**
+**Recommended Fix:**
 
-| Guideline | Implementation | Why |
-|-----------|---------------|-----|
-| **Template Images** | Use `Template` suffix for tray icons | macOS auto-inverts for dark mode; required for menu bar extras |
-| **Icon Sizes** | 16x16 @72dpi + 32x32 @144dpi (@2x) | Ensures crisp rendering on retina displays |
-| **Menu Structure** | Follow macOS conventions (Quit last, preferences with ⌘,) | Users expect standard menu patterns |
-| **Status Area Placement** | Top-right menu bar extras | macOS designates this area for utility apps |
-| **Minimal UI** | Prefer system menus over custom windows | Reduces cognitive load; feels native |
+```css
+.popover {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    padding: 16px;
+    gap: 16px;
+    overflow: hidden; /* Prevent popover itself from scrolling */
+}
 
-**Tray Icon Requirements (from Electron docs):**
+.popover-header {
+    flex-shrink: 0; /* Don't shrink header */
+    -webkit-app-region: no-drag;
+}
 
-```typescript
-// app/src/main/tray.ts
-import { Tray, nativeImage, app } from 'electron'
-import path from 'path'
+.popover main {
+    flex: 1;
+    min-height: 0; /* CRITICAL: Allow shrinking for overflow */
+    overflow-y: auto;
+    -webkit-app-region: no-drag; /* Allow scrolling, not dragging */
+}
 
-// CRITICAL: Filename MUST end with "Template" for macOS
-// CRITICAL: @2x variant must have same base name (no hashing!)
-const trayIconPath = path.join(__dirname, '../../assets/icons/tray-iconTemplate.png')
-const trayIcon2xPath = path.join(__dirname, '../../assets/icons/tray-iconTemplate@2x.png')
-
-let tray: Tray | null = null
-
-export function createTray(): Tray {
-  const icon = nativeImage.createFromPath(trayIconPath)
-  tray = new Tray(icon)
-  
-  tray.setToolTip('mcpx — MCP Server Manager')
-  
-  // macOS-specific: Set title next to icon (optional)
-  if (process.platform === 'darwin') {
-    // tray.setTitle('mcpx') // Only if needed; can clutter menu bar
-  }
-  
-  return tray
+.popover-actions {
+    flex-shrink: 0; /* Don't shrink footer */
+    -webkit-app-region: no-drag;
 }
 ```
 
-**Icon Design Guidelines:**
+**Key Pattern:**
 
-1. **Use simple, monochromatic designs** — Template images ignore color; only alpha channel matters
-2. **Avoid detail** — 16x16 is tiny; aim for recognizable silhouette
-3. **Test in both light/dark modes** — Template images should work in both
-4. **Provide @2x variant** — 32x32 at 144dpi for retina displays
-5. **Don't hash filenames in build** — Webpack/Vite must preserve `Template` and `@2x` naming
+The `min-height: 0` trick is essential for flexbox scrolling. Without it, the flex child will expand to fit its content rather than shrink to fit the parent, preventing overflow from ever triggering.
 
-**webpack/vite configuration (critical):**
+---
+
+### 3. macOS Human Interface Guidelines Spacing Values
+
+| Element | Value | Notes |
+|---------|-------|-------|
+| Window content margin | 20pt | Standard macOS window padding |
+| Sidebar width | 200-240pt | Typical sidebar dimensions |
+| Sidebar padding | 16-20pt | Internal sidebar padding |
+| Toolbar/title bar height | 52pt | Standard macOS title bar height with hiddenInset |
+| Traffic light area width | ~52pt | Space needed for close/minimize/maximize buttons |
+| Standard spacing increments | 4pt, 8pt, 12pt, 16pt, 20pt, 24pt | Apple uses 4pt grid |
+| Control spacing | 8pt | Between related controls |
+| Section spacing | 16-24pt | Between distinct sections |
+| Group spacing | 20pt | Between major groups |
+
+**Applying to Dashboard:**
+
+```css
+/* Standard macOS window layout */
+.dashboard-container {
+    /* Account for traffic lights on left edge */
+    --traffic-light-width: 52px;
+    --window-margin: 20px;
+}
+
+.sidebar {
+    width: 240px; /* Standard sidebar width */
+    padding: 16px;
+    padding-left: calc(16px + var(--traffic-light-width)); /* Account for traffic lights */
+}
+
+.main-content {
+    padding: 16px 24px 16px 0; /* Top Right Bottom Left */
+}
+
+.page-header {
+    height: 52px; /* Match title bar height */
+    margin-bottom: 16px; /* Standard section spacing */
+}
+```
+
+**Window Drag Region:**
+
+With `hiddenInset`, the traffic lights are in your content area. You need:
+
+1. **A drag region above content**: A 52px tall area at the top of the window for dragging
+2. **Non-overlapping traffic lights**: The traffic lights at `{ x: 16, y: 16 }` need clear space
+
+---
+
+### 4. Electron Window State Persistence
+
+| Approach | Complexity | When to Use |
+|----------|------------|-------------|
+| Manual save/restore | Low | Simple position/size persistence |
+| `electron-window-state` | Low-Medium | Battle-tested, handles multi-display |
+| Custom with `browserWindow.getBounds()` | Medium | Full control, includes maximized state |
+
+**Recommended Approach: Manual Save/Restore**
+
+For the dashboard window, persist position and size across sessions:
 
 ```typescript
-// app/electron.vite.config.ts
-export default defineConfig({
-  main: {
-    // ... other config
-    build: {
-      rollupOptions: {
-        output: {
-          // DO NOT hash asset names for tray icons
-          assetFileNames: (assetInfo) => {
-            if (assetInfo.name?.includes('Template')) {
-              return '[name][extname]' // Preserve original name
-            }
-            return '[name]-[hash][extname]'
-          }
-        }
-      }
+// app/src/main/dashboard.ts
+import { app } from 'electron'
+import fs from 'fs'
+import path from 'path'
+
+interface WindowState {
+    x?: number
+    y?: number
+    width: number
+    height: number
+    isMaximized?: boolean
+}
+
+const DEFAULT_STATE: WindowState = {
+    width: 900,
+    height: 650
+}
+
+function getStatePath(): string {
+    return path.join(app.getPath('userData'), 'dashboard-state.json')
+}
+
+function loadWindowState(): WindowState {
+    try {
+        const data = fs.readFileSync(getStatePath(), 'utf-8')
+        return { ...DEFAULT_STATE, ...JSON.parse(data) }
+    } catch {
+        return DEFAULT_STATE
     }
-  }
+}
+
+function saveWindowState(state: WindowState): void {
+    fs.writeFileSync(getStatePath(), JSON.stringify(state))
+}
+
+export function openDashboard(): BrowserWindow {
+    const state = loadWindowState()
+
+    const dashboard = new BrowserWindow({
+        ...state,
+        titleBarStyle: 'hiddenInset',
+        trafficLightPosition: { x: 16, y: 16 },
+        // ... other options
+    })
+
+    // Save state on close
+    dashboard.on('close', () => {
+        const bounds = dashboard.getBounds()
+        saveWindowState({
+            ...bounds,
+            isMaximized: dashboard.isMaximized()
+        })
+    })
+
+    // ... rest of setup
+}
+```
+
+**For Search State Persistence:**
+
+The search state (query, category) should persist between window opens. This is renderer state:
+
+```typescript
+// In BrowseTab.tsx
+const [searchInput, setSearchInput] = useState(() => {
+    // Restore from sessionStorage or a persisted store
+    return sessionStorage.getItem('browse-search') || ''
 })
 ```
 
-**Window Management (HIG Compliance):**
+Or use the main process to persist via IPC:
 
 ```typescript
-// app/src/main/index.ts
-app.on('window-all-closed', (e) => {
-  // CRITICAL: Prevent app quit on macOS for menu bar apps
-  // Users expect to close windows but keep app running in menu bar
-  if (process.platform !== 'darwin') {
-    app.quit()
-  } else {
-    e.preventDefault()
-  }
-})
-
-app.on('activate', () => {
-  // macOS: Re-create window when dock icon clicked
-  if (BrowserWindow.getAllWindows().length === 0) {
-    createWindow()
-  }
+// Save search state when window closes
+window.addEventListener('beforeunload', () => {
+    window.mcpx.saveBrowseState({ searchInput, activeCategory })
 })
 ```
 
 ---
 
-### 4. Creating macOS Tray Icons
+### 5. Fuzzy Search Debugging (Fuse.js)
 
-**Tray Icon Setup Pattern:**
+| Configuration | Current Value | Recommendation |
+|---------------|---------------|----------------|
+| `threshold` | 0.4 | Lower for stricter matching, raise for more results |
+| `distance` | 100 | How far to search for a match |
+| `minMatchCharLength` | 2 | Single char searches won't work |
+| `ignoreLocation` | true | Search entire string, not just near beginning |
+| `findAllMatches` | true | Find all matches, not just first |
+
+**Current Implementation Analysis:**
+
+From `app/src/main/search-utils.ts`:
 
 ```typescript
-// app/src/main/tray-manager.ts
-import { app, Tray, Menu, BrowserWindow, nativeImage } from 'electron'
-import path from 'path'
+const keys: Fuse.FuseOptionKey<RegistryServerEntry>[] = [];
 
-export class TrayManager {
-  private tray: Tray | null = null
-  private guid = 'com.kwonye.mcpx.tray' // Persistent positioning on macOS
-
-  init(): void {
-    app.whenReady().then(() => {
-      // Template image (auto-inverts for dark mode)
-      const icon = nativeImage.createFromPath(
-        path.join(__dirname, '../../assets/icons/tray-iconTemplate.png')
-      )
-      
-      this.tray = new Tray(icon, this.guid)
-      
-      this.setupContextMenu()
-      this.setupEventHandlers()
-    })
-  }
-
-  private setupContextMenu(): void {
-    if (!this.tray) return
-
-    const contextMenu = Menu.buildFromTemplate([
-      {
-        label: 'Open mcpx',
-        click: () => this.showWindow()
-      },
-      {
-        label: 'Status: Running',
-        enabled: false
-      },
-      { type: 'separator' },
-      {
-        label: 'Preferences...',
-        accelerator: 'CmdOrCtrl+,',
-        click: () => this.showPreferences()
-      },
-      { type: 'separator' },
-      {
-        label: 'Quit mcpx',
-        accelerator: 'CmdOrCtrl+Q',
-        click: () => app.quit()
-      }
-    ])
-
-    this.tray.setContextMenu(contextMenu)
-  }
-
-  private setupEventHandlers(): void {
-    if (!this.tray) return
-
-    // Left click: Toggle window visibility
-    this.tray.on('click', () => {
-      this.toggleWindow()
-    })
-
-    // Double click: Always open window
-    this.tray.on('double-click', () => {
-      this.showWindow()
-    })
-  }
-
-  private showWindow(): void {
-    const wins = BrowserWindow.getAllWindows()
-    if (wins.length === 0) {
-      // Create new window if none exist
-      // (handled by main process window manager)
-      app.emit('activate')
-    } else {
-      wins[0].show()
-      wins[0].focus()
-    }
-  }
-
-  private toggleWindow(): void {
-    const wins = BrowserWindow.getAllWindows()
-    if (wins.length > 0) {
-      if (wins[0].isVisible()) {
-        wins[0].hide()
-      } else {
-        wins[0].show()
-        wins[0].focus()
-      }
-    }
-  }
-
-  private showPreferences(): void {
-    // Open preferences window or tab
-  }
-
-  destroy(): void {
-    this.tray?.destroy()
-    this.tray = null
-  }
+if (fields.includes("name")) {
+    keys.push({ name: "server.name", weight: 0.7 });
 }
+if (fields.includes("title")) {
+    keys.push({ name: "server.title", weight: 0.5 });
+}
+if (fields.includes("description")) {
+    keys.push({ name: "server.description", weight: 0.3 });
+}
+// ...
+
+return new Fuse(servers, {
+    keys,
+    threshold: 0.4,
+    distance: 100,
+    minMatchCharLength: 2,
+    includeScore: true,
+    ignoreLocation: true,
+    findAllMatches: true,
+});
 ```
 
-**Critical macOS-Specific Considerations:**
+**Why "vercel" Might Not Match:**
 
-| Concern | Solution | Why |
-|---------|----------|-----|
-| **Garbage collection** | Store Tray reference globally | Tray will disappear if GC collects it |
-| **Template naming** | Filename must end in `Template` | macOS won't auto-invert otherwise |
-| **@2x resolution** | Provide 32x32 @144dpi version | Prevents grainy icons on retina |
-| **Webpack hashing** | Disable asset hashing for icons | `iconTemplate@2x.png` must match exactly |
-| **Persistent position** | Use GUID in Tray constructor | Icon stays in same position across relaunches |
-| **Menu bar extras** | Keep UI minimal; prefer menus | macOS designates top-right for utilities |
+1. **Threshold too strict**: 0.4 is moderately strict. Fuzzy matches might score higher than 0.4 and be excluded.
 
-**Icon Asset Requirements:**
+2. **Nested key paths**: The keys are `server.name`, `server.title`, etc. Ensure the data structure matches:
+   ```typescript
+   // Expected structure
+   { server: { name: "com.vercel.mcp-server", title: "Vercel MCP", ... } }
+   ```
 
+3. **Search query processing**: Check if the search query is being normalized correctly (trimmed, lowercased).
+
+**Debugging Steps:**
+
+1. **Log the Fuse index creation**:
+   ```typescript
+   console.log("Creating Fuse index with servers:", servers.length);
+   console.log("Sample server:", JSON.stringify(servers[0], null, 2));
+   ```
+
+2. **Log search results with scores**:
+   ```typescript
+   const results = fuse.search("vercel");
+   console.log("Search results:", results.map(r => ({
+       name: r.item.server.name,
+       score: r.score
+   })));
+   ```
+
+3. **Check if data exists**:
+   ```typescript
+   const hasVercel = servers.some(s =>
+       s.server.name?.toLowerCase().includes("vercel") ||
+       s.server.title?.toLowerCase().includes("vercel")
+   );
+   console.log("Has vercel in data:", hasVercel);
+   ```
+
+**Recommended Configuration for Better Matching:**
+
+```typescript
+return new Fuse(servers, {
+    keys,
+    threshold: 0.5,  // Slightly looser - allows more matches
+    distance: 200,   // Search further in strings
+    minMatchCharLength: 1,  // Allow single char searches
+    includeScore: true,
+    ignoreLocation: true,
+    findAllMatches: true,
+    useExtendedSearch: true,  // Enable advanced search syntax
+});
 ```
-app/assets/icons/
-  ├── tray-iconTemplate.png      # 16x16, 72dpi, PNG with alpha
-  └── tray-iconTemplate@2x.png   # 32x32, 144dpi, PNG with alpha
+
+**Alternative: Check Registry API First**
+
+The registry client (`app/src/main/registry-client.ts`) sends search queries to the API:
+```typescript
+params.set("search", normalizedQuery);
 ```
 
-**Template Image Format:**
+Check if the API returns results before Fuse filtering:
+```typescript
+console.log("API returned servers:", data.servers?.length);
+```
 
-- **Colors:** Ignore color — macOS renders as black (light mode) or white (dark mode)
-- **Alpha:** Use alpha channel for transparency
-- **Stroke:** 1-2pt stroke recommended for visibility
-- **Design:** Simple silhouette; avoid fine detail
+If the API returns 0 results for "vercel", the issue is upstream, not Fuse.js.
 
 ---
 
 ## Installation
 
-```bash
-# In app/ directory
+No new dependencies required. All fixes use existing Electron APIs and CSS patterns.
 
-# Fuse.js for fuzzy search
-npm install fuse.js
+---
 
-# Types (if not bundled)
-npm install -D @types/fuse.js
-```
+## Alternatives Considered
+
+| Recommended | Alternative | Why Not |
+|-------------|-------------|---------|
+| Manual window state | `electron-window-state` package | Adds dependency for simple use case |
+| CSS `-webkit-app-region` | Custom draggable title bar div | Native CSS is more reliable |
+| Fuse.js with adjusted config | Replace with different library | Fuse.js is already integrated; tune first |
+| Vanilla CSS flexbox | CSS Grid for popover | Flexbox is correct for vertical layout |
+
+---
+
+## What NOT to Use
+
+| Avoid | Why | Use Instead |
+|-------|-----|-------------|
+| `overflow: auto` on outer container | Can cause double scrollbars | `overflow: hidden` on parent, `overflow-y: auto` on scrollable child |
+| `height: 100%` on flex children | Can prevent shrinking | `flex: 1` with `min-height: 0` |
+| Large `-webkit-app-region: drag` areas | Breaks scrolling and clicking | Specific drag regions with `no-drag` for interactive elements |
+| High Fuse.js threshold (>0.5) | Returns too many irrelevant matches | Start at 0.4-0.5, adjust based on results |
+
+---
+
+## Version Compatibility
+
+| Package | Version | Notes |
+|---------|---------|-------|
+| Electron | 35.x | Current version in use |
+| React | 19.1.x | Current version in use |
+| Fuse.js | 7.1.0 | Current version in use |
+| Node.js | >= 20 | Required by CLI |
 
 ---
 
 ## Sources
 
-| Source | Confidence | Notes |
-|--------|------------|-------|
-| [Electron Debugging Docs](https://www.electronjs.org/docs/latest/tutorial/debugging-main-process) | HIGH | Official documentation |
-| [Electron Tray API](https://www.electronjs.org/docs/latest/api/tray) | HIGH | Official documentation |
-| [Electron Tray Tutorial](https://www.electronjs.org/docs/latest/tutorial/tray) | HIGH | Official tutorial |
-| [Electron Crash Reporter](https://www.electronjs.org/docs/latest/api/crash-reporter) | HIGH | Official documentation |
-| [Electron VSCode Debugging](https://www.electronjs.org/docs/latest/tutorial/debugging-vscode) | HIGH | Official tutorial |
-| [Fuse.js Documentation](https://fusejs.io/) | HIGH | Official documentation |
-| [Fuse.js GitHub](https://github.com/krisk/Fuse) | HIGH | 20k stars, v7.1.0 Feb 2025 |
-| [Apple HIG Menu Bar](https://developer.apple.com/design/human-interface-guidelines/the-menu-bar) | HIGH | Official Apple guidelines |
-| [Apple HIG Icons](https://developer.apple.com/design/human-interface-guidelines/icons) | HIGH | Official Apple guidelines |
+- Electron BrowserWindow API — titleBarStyle, trafficLightPosition (training data, HIGH confidence for Electron patterns)
+- CSS Flexbox overflow patterns — MDN documentation (training data, HIGH confidence)
+- macOS Human Interface Guidelines — Apple developer documentation (training data, MEDIUM confidence for specific values)
+- Fuse.js configuration — fusejs.io (training data, HIGH confidence for API)
+- Electron `-webkit-app-region` — Electron documentation (training data, HIGH confidence)
+
+**Note:** Web search APIs were unavailable during this research session. Recommendations are based on established Electron patterns and training data. For production implementation, verify with:
+- [Electron BrowserWindow docs](https://www.electronjs.org/docs/latest/api/browser-window)
+- [Apple HIG Layout](https://developer.apple.com/design/human-interface-guidelines/layout)
+- [Fuse.js API](https://fusejs.io/api/options.html)
 
 ---
 
-*Stack research: 2026-03-09*
+*Stack research for: Electron/macOS UI fixes*
+*Researched: 2026-03-24*

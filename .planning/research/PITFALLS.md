@@ -1,10 +1,275 @@
 # Domain Pitfalls: Electron Desktop App Fixes
 
 **Domain:** Electron macOS Desktop Application
-**Researched:** Mon Mar 09 2026
+**Researched:** Mon Mar 09 2026 (updated for v1.1 UI fixes: Mon Mar 24 2026)
 **Confidence:** HIGH
 
-## Critical Pitfalls
+---
+
+## v1.1 Milestone: UI Fix Pitfalls
+
+The following pitfalls are specific to FIXING broken UI components in the existing Electron + React macOS app. These focus on common mistakes when implementing popover scrolling, window dragging, and search in Electron/macOS apps.
+
+### Critical Pitfall: App-Region Drag Blocks Scroll Events
+
+**What goes wrong:**
+Setting `-webkit-app-region: drag` on a container element causes scroll wheel/trackpad events to be captured by the drag system, preventing child elements from scrolling even when they have `-webkit-app-region: no-drag` and `overflow: auto`.
+
+**Why it happens:**
+The `-webkit-app-region` CSS property was designed for window dragging, not for complex interactive layouts. When a parent has `drag`, Chromium's event handling prioritizes the drag behavior over scroll gestures. The `no-drag` exemption only makes elements interactive (clickable, focusable) but does not restore scroll gesture handling on macOS trackpad.
+
+**Current code issue:**
+The `.popover` CSS class has `-webkit-app-region: drag` on the container. The scroll container `<main style={{ flex: 1, overflowY: "auto" }}>` has `no-drag`, but scroll events are still blocked.
+
+**How to avoid:**
+1. Do NOT set `-webkit-app-region: drag` on any ancestor of scrollable content
+2. Only apply `drag` to dedicated non-scrolling header/title bar areas
+3. Structure DOM so scrollable containers are siblings of draggable regions, not descendants
+4. For menubar popovers: make the entire popover `no-drag` since the window is already positioned correctly
+
+**Warning signs:**
+- Scroll container has `overflow: auto` but content doesn't scroll
+- Works in browser DevTools but not in Electron app on actual hardware
+- Trackpad two-finger gesture does nothing
+
+**Phase to address:**
+POPOVER-01 (Popover scrolling fix)
+
+---
+
+### Critical Pitfall: Incorrect Draggable Region Placement for hiddenInset
+
+**What goes wrong:**
+With `titleBarStyle: "hiddenInset"` on macOS, the window cannot be dragged from the expected title bar area because the draggable region is placed incorrectly (e.g., in a sidebar on the left instead of across the top of the window).
+
+**Why it happens:**
+Developers often misunderstand that `titleBarStyle: "hiddenInset"` removes the title bar but still requires an explicit `-webkit-app-region: drag` element at the TOP of the window. The traffic lights (close/minimize/maximize buttons) are positioned independently via `trafficLightPosition: { x: 16, y: 16 }`, and users expect to drag the window by the empty space around them.
+
+**Current code issue:**
+The CSS has `-webkit-app-region: drag` on `.sidebar` (left side) and `.page-header` (top area), but the sidebar's drag region doesn't help with window title bar dragging. The traffic lights are at `{ x: 16, y: 16 }` but there's no explicit drag strip above the sidebar.
+
+**How to avoid:**
+1. Create a dedicated drag region element at the TOP of the window (full width)
+2. Position it as an overlay or part of the header area
+3. Height should be at least 32px for reliable drag target
+4. Ensure traffic light positions don't overlap with interactive elements
+5. For sidebar layouts: the drag region must span the ENTIRE top edge, including above the sidebar
+
+**Warning signs:**
+- Clicking and dragging in the title area selects text instead of moving window
+- Drag works only from specific, unexpected areas
+- Traffic lights are present but window feels "stuck"
+
+**Phase to address:**
+DRAG-01 (Dashboard window drag fix)
+
+---
+
+### Critical Pitfall: Fuse.js minMatchCharLength Prevents Short Queries
+
+**What goes wrong:**
+Fuzzy search returns no results for short queries (1-2 characters) because `minMatchCharLength: 2` in the Fuse.js configuration.
+
+**Why it happens:**
+Developers set `minMatchCharLength` to filter out noise from single-character matches, but this also blocks legitimate short searches. Users expect searching "v" to return results containing "v" or starting with "v".
+
+**Current code issue:**
+In `app/src/main/search-utils.ts`, the Fuse.js config has `minMatchCharLength: 2`, which prevents single-character matches.
+
+**How to avoid:**
+1. Set `minMatchCharLength: 1` for general search
+2. Or remove the setting entirely (default is 1)
+3. Use `threshold` to control match strictness instead
+4. Consider `ignoreLocation: true` for better substring matching
+
+**Warning signs:**
+- Short queries return empty results (e.g., "v" for "vercel")
+- Users type full words to get any results
+- Search feels "unresponsive" to partial input
+
+**Phase to address:**
+BROWSE-02 (Fuzzy search fix)
+
+---
+
+### Critical Pitfall: React State Does Not Persist Across Window Lifecycle
+
+**What goes wrong:**
+Search input, active filters, and scroll position reset to defaults when the dashboard window is closed and reopened because React state is stored in component memory, which is destroyed when the window closes.
+
+**Why it happens:**
+Electron windows are full browser contexts. When a BrowserWindow is closed, all JavaScript state is garbage collected. The current implementation uses `useState` for search state without any persistence mechanism.
+
+**Current code issue:**
+`BrowseTab.tsx` uses `useState` for `searchInput`, `activeQuery`, `activeCategory`. `useRegistryList` hook uses `useState` for `servers`, `cursor`. When dashboard closes, all state is lost.
+
+**How to avoid:**
+1. Use `localStorage` for non-sensitive UI state (search terms, active tabs)
+2. Store scroll position in a parent component that persists (if using single-page architecture)
+3. For Electron: consider keeping window hidden instead of closed (if appropriate)
+4. Use `electron-store` or similar for cross-session persistence
+5. Implement state hydration on component mount
+
+**Warning signs:**
+- State resets between window opens
+- Users complain about losing their work/selections
+- Each window open feels like a fresh app launch
+
+**Phase to address:**
+BROWSE-03 (Search state persistence)
+
+---
+
+### Moderate Pitfall: Sidebar Padding Inside Draggable Region Creates Hit-Testing Issues
+
+**What goes wrong:**
+When a sidebar has `-webkit-app-region: drag` with internal padding, the padding area becomes draggable but the content inside is not. This creates an inconsistent hit-testing experience.
+
+**Why it happens:**
+The `-webkit-app-region` property applies to the entire bounding box of the element, including padding. If the sidebar has `padding: 16px` and `-webkit-app-region: drag`, the padding area becomes a drag handle while the inner content (with `-webkit-app-region: no-drag`) is interactive.
+
+**Current code issue:**
+`.sidebar` has `padding: 16px` and `-webkit-app-region: drag`. The `.sidebar-inner` has `-webkit-app-region: no-drag`. This creates inconsistent behavior across the sidebar area.
+
+**How to avoid:**
+1. Keep draggable regions separate from content areas
+2. Use wrapper elements: outer drag wrapper with no padding, inner content with padding
+3. Or structure so the drag region is a thin strip, not a full-width sidebar
+4. Test by clicking in various positions to verify expected behavior
+
+**Warning signs:**
+- Clicking in sidebar padding drags the window unexpectedly
+- Traffic lights overlap with interactive elements
+- Inconsistent behavior across the same visual region
+
+**Phase to address:**
+DRAG-02 (Dashboard padding fix)
+
+---
+
+### Moderate Pitfall: Fuse.js Threshold Too Strict for Fuzzy Matching
+
+**What goes wrong:**
+Setting `threshold: 0.4` in Fuse.js can be too strict for some queries, especially when users expect more lenient "contains" matching rather than strict fuzzy matching.
+
+**Current code issue:**
+The config uses `threshold: 0.4, distance: 100` which is reasonable, but combined with `minMatchCharLength: 2`, short queries fail.
+
+**How to avoid:**
+- Test with various query lengths and typos
+- Consider `threshold: 0.5` for more lenient matching
+- The `ignoreLocation: true` setting helps with substring matching
+
+**Phase to address:**
+BROWSE-02 (Fuzzy search fix)
+
+---
+
+### Moderate Pitfall: RegistryServerEntry Type Missing repository Field
+
+**What goes wrong:**
+The Fuse.js configuration searches `"server.repository.url"` but `RegistryServerEntry["server"]` doesn't include the `repository` field in its type definition, causing silent undefined matches.
+
+**Current code issue:**
+`app/src/main/search-utils.ts` uses keys like `"server.repository.url"` but `app/src/main/registry-client.ts` type doesn't define `repository` on the server object.
+
+**How to avoid:**
+- Update the type to include `repository?: { url: string; subfolder?: string }`
+- Or remove the repository key from Fuse.js config if not needed
+
+**Phase to address:**
+BROWSE-02 (Fuzzy search fix)
+
+---
+
+### Minor Pitfall: Untyped React State Causes Runtime Bugs
+
+**What goes wrong:**
+`useStatus()` and `useRegistryList()` use `unknown` types, forcing consumers to cast or use `as any`, which bypasses TypeScript safety.
+
+**Current code issue:**
+`useRegistryList` uses `useState<unknown[]>([])` for servers. The deduplication filter uses `(s: any)`.
+
+**How to avoid:**
+- Define proper types for status and server data
+- Import types from shared definitions
+- Enable TypeScript to catch property access errors at compile time
+
+**Phase to address:**
+BROWSE-02 or BROWSE-03
+
+---
+
+### Minor Pitfall: Debug Console.log Left in Production Code
+
+**What goes wrong:**
+`console.log("[fetchRegistryServers] fetching URL:...")` in `registry-client.ts` logs to console on every registry API call.
+
+**Current code issue:**
+Line 85 of `app/src/main/registry-client.ts`.
+
+**How to avoid:**
+- Remove or gate debug logging behind environment check
+- Use `console.error` for errors only
+
+**Phase to address:**
+BROWSE-02 (Fuzzy search fix)
+
+---
+
+## v1.1 Technical Debt Patterns
+
+| Shortcut | Immediate Benefit | Long-term Cost | When Acceptable |
+|----------|-------------------|----------------|-----------------|
+| Using `unknown` types in hooks | Fast initial implementation | Runtime bugs, no IDE support | Never - define proper types |
+| Inline CSS for layout overrides | Quick fixes | Inconsistent styling, hard to maintain | Prototype only |
+| Missing state persistence | Simpler code | Poor UX, user complaints | MVP only, fix before 1.0 |
+| App-region on scrollable parent | Quick drag implementation | Scroll completely broken | Never |
+
+## v1.1 Integration Gotchas
+
+| Integration | Common Mistake | Correct Approach |
+|-------------|----------------|------------------|
+| Fuse.js with nested objects | Wrong key paths like `"name"` instead of `"server.name"` | Match key paths to actual data structure |
+| Electron `-webkit-app-region` | Applying to scrollable parents | Only apply to non-scrolling header areas |
+| React state in Electron | Expecting state to persist across window closes | Use localStorage or keep window hidden |
+
+## v1.1 "Looks Done But Isn't" Checklist
+
+- [ ] **Popover scrolling:** Often works in DevTools but not on actual trackpad - test on real hardware
+- [ ] **Window drag:** Often works from some areas but not all - test clicking in multiple positions
+- [ ] **Search results:** Often works for some queries but not others - test with short, long, and typo queries
+- [ ] **State persistence:** Often works during testing when window stays open - test close/reopen cycle
+- [ ] **CSS padding:** Often looks correct visually - test actual hit-testing behavior
+
+## v1.1 Recovery Strategies
+
+| Pitfall | Recovery Cost | Recovery Steps |
+|---------|---------------|----------------|
+| App-region scroll blocking | HIGH | Restructure DOM, move scroll containers outside drag regions |
+| Missing drag region | MEDIUM | Add dedicated drag element at top of window |
+| Fuse.js config issues | LOW | Adjust threshold/minMatchCharLength settings |
+| No state persistence | MEDIUM | Add localStorage or electron-store |
+| Type definitions missing | LOW | Add missing fields to TypeScript interfaces |
+
+## v1.1 Pitfall-to-Phase Mapping
+
+| Pitfall | Prevention Phase | Verification |
+|---------|------------------|--------------|
+| App-region drag blocks scroll | POPOVER-01 | Test popover scrolling on trackpad |
+| Incorrect draggable region | DRAG-01 | Test window drag from title bar area |
+| Fuse.js minMatchCharLength | BROWSE-02 | Test short queries (1-2 chars) |
+| React state not persisting | BROWSE-03 | Test close/reopen with active search |
+| Sidebar padding in drag region | DRAG-02 | Test hit-testing in sidebar area |
+| Missing repository type | BROWSE-02 | Verify TypeScript compiles without errors |
+| Untyped React state | BROWSE-02 or BROWSE-03 | Verify no `as any` casts needed |
+| Debug console.log | BROWSE-02 | Check console is clean during search |
+
+---
+
+## Original Research (v1.0)
+
+The following pitfalls were identified for the original v1.0 development.
 
 ### Pitfall 1: Tray Icon Garbage Collection
 
@@ -48,7 +313,7 @@ ICON-01 (Tray icon design and implementation)
 The tray icon appears grainy, inverted, or doesn't adapt to macOS dark/light mode. The icon may look correct on some macOS versions but broken on others.
 
 **Why it happens:**
-macOS requires tray icons to be **Template Images** — black and white images with alpha channel that the system automatically styles based on the menu bar appearance. Developers often use full-color PNGs or JPEGs which don't integrate with macOS native appearance. Additionally, bundlers like webpack can mangle filenames, breaking the `Template` naming convention macOS requires.
+macOS requires tray icons to be **Template Images** - black and white images with alpha channel that the system automatically styles based on the menu bar appearance. Developers often use full-color PNGs or JPEGs which don't integrate with macOS native appearance. Additionally, bundlers like webpack can mangle filenames, breaking the `Template` naming convention macOS requires.
 
 **How to avoid:**
 - Use template images (black/white with alpha, no color)
@@ -81,7 +346,7 @@ ICON-01 (Tray icon design and implementation)
 The app crashes on launch with cryptic errors like "Cannot read property of undefined" or "Electron API can only be used after app is ready". This is the #1 cause of Electron launch crashes.
 
 **Why it happens:**
-Electron's main process modules (especially `app`, `BrowserWindow`, `Tray`) can only be used **after** the `app.whenReady()` promise resolves or the `ready` event fires. Developers often call these APIs in the top-level module scope or in async functions that execute before initialization completes. Additionally, some APIs have process restrictions — `app` only works in main process, `webFrame` only in renderer.
+Electron's main process modules (especially `app`, `BrowserWindow`, `Tray`) can only be used **after** the `app.whenReady()` promise resolves or the `ready` event fires. Developers often call these APIs in the top-level module scope or in async functions that execute before initialization completes. Additionally, some APIs have process restrictions - `app` only works in main process, `webFrame` only in renderer.
 
 **How to avoid:**
 - Wrap all app initialization in `app.whenReady().then(() => { ... })`
@@ -123,7 +388,7 @@ LAUNCH-01, LAUNCH-02 (App launch and window rendering fixes)
 The UI freezes completely when the user types in the search box. Search results appear with noticeable delay, making the app feel unresponsive and sluggish.
 
 **Why it happens:**
-Fuzzy search algorithms (like Fuse.js) are CPU-intensive. Running them in the main process or renderer process without debouncing blocks the event loop. Electron's main process handles all native API calls and window management — blocking it freezes the entire app. Even in the renderer, large datasets cause visible jank.
+Fuzzy search algorithms (like Fuse.js) are CPU-intensive. Running them in the main process or renderer process without debouncing blocks the event loop. Electron's main process handles all native API calls and window management - blocking it freezes the entire app. Even in the renderer, large datasets cause visible jank.
 
 **How to avoid:**
 - Implement search debouncing (200-300ms delay after typing stops)
@@ -164,7 +429,7 @@ SEARCH-01, SEARCH-02 (Fuzzy search implementation and ranking)
 ### Pitfall 5: Ignoring macOS Human Interface Guidelines
 
 **What goes wrong:**
-The app feels "foreign" or "ugly" to macOS users. UI elements don't match native macOS conventions — wrong spacing, incorrect font sizes, non-standard interactions. Users perceive the app as low-quality despite functional correctness.
+The app feels "foreign" or "ugly" to macOS users. UI elements don't match native macOS conventions - wrong spacing, incorrect font sizes, non-standard interactions. Users perceive the app as low-quality despite functional correctness.
 
 **Why it happens:**
 Electron apps are fundamentally web technologies wrapped in a native shell. Developers often ship web-style UIs without adapting to macOS conventions. Common violations include: incorrect window traffic light positioning, missing macOS-style menus, wrong sidebar widths, improper use of system fonts, and ignoring macOS spacing/alignment standards.
@@ -184,7 +449,7 @@ Electron apps are fundamentally web technologies wrapped in a native shell. Deve
 .button { border-radius: 4px; }
 
 /* CORRECT - macOS native feel */
-.window { 
+.window {
   font-family: -apple-system, BlinkMacSystemFont, sans-serif;
   padding: 12px;
 }
@@ -303,9 +568,9 @@ LAUNCH-02 (Window rendering and IPC setup)
 
 | Shortcut | Immediate Benefit | Long-term Cost | When Acceptable |
 |----------|-------------------|----------------|-----------------|
-| Hardcoding tray icon path | Quick prototype | Breaks in production builds | Never — always use `path.join(__dirname, ...)` |
+| Hardcoding tray icon path | Quick prototype | Breaks in production builds | Never - always use `path.join(__dirname, ...)` |
 | Skipping debouncing on search | Faster initial implementation | UI freezes, poor UX | Never for user-facing search |
-| Using `nodeIntegration: true` | Easier IPC initially | Major security vulnerability | Never — use contextBridge |
+| Using `nodeIntegration: true` | Easier IPC initially | Major security vulnerability | Never - use contextBridge |
 | Copy-pasting search config | Saves initial setup time | Poor search quality, user frustration | Only for MVP, must tune before release |
 | Ignoring @2x icon assets | Faster icon iteration | Grainy icons on Retina displays | Never for macOS apps |
 | Using web-style UI components | Faster than native styling | App feels "ugly" and non-native | Only for internal tools, never user-facing |
@@ -326,10 +591,10 @@ LAUNCH-02 (Window rendering and IPC setup)
 
 | Trap | Symptoms | Prevention | When It Breaks |
 |------|----------|------------|----------------|
-| **Blocking main process** | App freezes during operations | Use utility processes for CPU-intensive work | Immediate — user notices on first use |
+| **Blocking main process** | App freezes during operations | Use utility processes for CPU-intensive work | Immediate - user notices on first use |
 | **Unbounded search results** | Search slows as server list grows | Limit results to top 20, paginate if needed | ~100 searchable items |
 | **No search result caching** | Same search recalculated repeatedly | Cache recent searches, use Fuse.js index | ~50 searches per session |
-| **Excessive IPC traffic** | UI lag, high memory usage | Batch IPC messages, debounce频繁 updates | ~100 messages/second |
+| **Excessive IPC traffic** | UI lag, high memory usage | Batch IPC messages, debounce frequent updates | ~100 messages/second |
 | **Large preload scripts** | Slow window creation | Only expose necessary APIs, lazy load rest | ~500+ lines in preload |
 
 ## Security Mistakes
@@ -356,29 +621,29 @@ LAUNCH-02 (Window rendering and IPC setup)
 
 ## "Looks Done But Isn't" Checklist
 
-- [ ] **Tray Icon:** Often missing garbage collection prevention — verify tray variable is module-scoped
-- [ ] **Tray Icon:** Often missing @2x asset — verify both 16x16 and 32x32@2x versions exist
-- [ ] **Tray Icon:** Often wrong format for macOS — verify template image (black/white, alpha channel)
-- [ ] **Search:** Often exact-match only — verify fuzzy matching works with typos
-- [ ] **Search:** Often unranked results — verify most relevant results appear first
-- [ ] **Search:** Often no debounce — verify typing doesn't trigger search on every keystroke
-- [ ] **Launch:** Often missing `app.whenReady()` — verify all window creation is inside ready handler
-- [ ] **Launch:** Often missing macOS event handlers — verify `open-file` registered before ready
-- [ ] **UI:** Often web-style spacing — verify padding matches macOS conventions (12-16px)
-- [ ] **UI:** Often missing dark mode — verify UI adapts when system theme changes
-- [ ] **IPC:** Often missing type safety — verify preload exposes typed API, not `any`
+- [ ] **Tray Icon:** Often missing garbage collection prevention - verify tray variable is module-scoped
+- [ ] **Tray Icon:** Often missing @2x asset - verify both 16x16 and 32x32@2x versions exist
+- [ ] **Tray Icon:** Often wrong format for macOS - verify template image (black/white, alpha channel)
+- [ ] **Search:** Often exact-match only - verify fuzzy matching works with typos
+- [ ] **Search:** Often unranked results - verify most relevant results appear first
+- [ ] **Search:** Often no debounce - verify typing doesn't trigger search on every keystroke
+- [ ] **Launch:** Often missing `app.whenReady()` - verify all window creation is inside ready handler
+- [ ] **Launch:** Often missing macOS event handlers - verify `open-file` registered before ready
+- [ ] **UI:** Often web-style spacing - verify padding matches macOS conventions (12-16px)
+- [ ] **UI:** Often missing dark mode - verify UI adapts when system theme changes
+- [ ] **IPC:** Often missing type safety - verify preload exposes typed API, not `any`
 
 ## Recovery Strategies
 
 | Pitfall | Recovery Cost | Recovery Steps |
 |---------|---------------|----------------|
-| **Tray disappears** | LOW — 5 min fix | Add module-level variable reference to tray |
-| **Crash on launch** | MEDIUM — 30 min debug | Add `app.whenReady()` wrapper, check console for errors |
-| **Grainy tray icon** | LOW — 15 min fix | Create @2x template image, verify naming convention |
-| **Search too slow** | MEDIUM — 1 hour | Add debouncing, limit results, consider Web Worker |
-| **Wrong search ranking** | MEDIUM — 1-2 hours | Tune Fuse.js weights and threshold, test with real queries |
-| **UI feels non-native** | HIGH — multiple days | Audit against macOS HIG, update spacing/fonts/colors |
-| **Security vulnerability** | HIGH — architectural | Disable nodeIntegration, implement contextBridge properly |
+| **Tray disappears** | LOW - 5 min fix | Add module-level variable reference to tray |
+| **Crash on launch** | MEDIUM - 30 min debug | Add `app.whenReady()` wrapper, check console for errors |
+| **Grainy tray icon** | LOW - 15 min fix | Create @2x template image, verify naming convention |
+| **Search too slow** | MEDIUM - 1 hour | Add debouncing, limit results, consider Web Worker |
+| **Wrong search ranking** | MEDIUM - 1-2 hours | Tune Fuse.js weights and threshold, test with real queries |
+| **UI feels non-native** | HIGH - multiple days | Audit against macOS HIG, update spacing/fonts/colors |
+| **Security vulnerability** | HIGH - architectural | Disable nodeIntegration, implement contextBridge properly |
 
 ## Pitfall-to-Phase Mapping
 
@@ -396,16 +661,17 @@ LAUNCH-02 (Window rendering and IPC setup)
 
 ## Sources
 
-- Electron FAQ — "My app's tray disappeared after a few minutes" (GitHub)
-- Electron Documentation — Tray API, macOS platform considerations
-- Electron Documentation — App lifecycle and `ready` event
-- Electron Documentation — Process model and context isolation
-- Electron Documentation — Debugging main process crashes
-- Fuse.js Documentation — Configuration options and scoring
-- Apple Human Interface Guidelines — macOS Big Sur and later
-- Electron GitHub Issues — Common crash patterns and solutions
-- Community post-mortems — Electron app launch failures
+- Electron FAQ - "My app's tray disappeared after a few minutes" (GitHub)
+- Electron Documentation - Tray API, macOS platform considerations
+- Electron Documentation - App lifecycle and `ready` event
+- Electron Documentation - Process model and context isolation
+- Electron Documentation - Debugging main process crashes
+- Fuse.js Documentation - Configuration options and scoring
+- Apple Human Interface Guidelines - macOS Big Sur and later
+- Electron GitHub Issues - Common crash patterns and solutions
+- Community post-mortems - Electron app launch failures
+- Project codebase analysis - `.planning/codebase/CONCERNS.md`
 
 ---
 *Pitfalls research for: Electron Desktop App Fixes (mcpx)*
-*Researched: Mon Mar 09 2026*
+*Researched: Mon Mar 09 2026 (v1.1 updates: Mon Mar 24 2026)*

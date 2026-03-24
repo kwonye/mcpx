@@ -1,163 +1,159 @@
 # Project Research Summary
 
-**Project:** mcpx Desktop App Fixes
-**Domain:** Electron + React macOS Desktop Application
-**Researched:** 2026-03-09
-**Confidence:** HIGH
+**Project:** mcpx Desktop App v1.1 UI Fixes
+**Domain:** Electron/macOS Desktop Application UI Fixes
+**Researched:** 2026-03-24
+**Confidence:** MEDIUM-HIGH
 
 ## Executive Summary
 
-This is a targeted fix milestone for an existing Electron + React desktop application (mcpx) that manages MCP servers. The app has a solid foundation (Electron 35.x, React 19.1.x, TypeScript 5.9.3, vanilla CSS) but requires fixes in four critical areas: app launch crashes, fuzzy search implementation, macOS tray icon design, and native UI polish. Research confirms these are well-understood problems with established solutions in the Electron ecosystem.
+This research covers UI fixes for the mcpx desktop app v1.1 milestone: menu bar popover scrolling, dashboard window dragging, padding/margins, and browse/search behavior. The app uses Electron 35.x with React 19.1.x and vanilla CSS, following macOS conventions with `titleBarStyle: "hiddenInset"`.
 
-The recommended approach prioritizes stability first (crash fixes), then user-facing functionality (search + tray icon), and finally polish (macOS HIG compliance). Fuse.js 7.1.0 is the clear choice for fuzzy search—zero dependencies, actively maintained (Feb 2025 release), and industry standard with 20k+ stars. Tray icon implementation must follow macOS template image conventions precisely, with module-level variable storage to prevent garbage collection. All fixes leverage existing architecture patterns (@mcpx/core integration, IPC bridge, vanilla CSS theming).
+The recommended approach focuses on three core technical patterns: (1) proper CSS flexbox scrolling with `min-height: 0` for flex children, (2) correct `-webkit-app-region` placement that separates draggable regions from interactive/scrollable content, and (3) Fuse.js configuration tuning for better fuzzy matching. The fixes are relatively isolated and can be implemented incrementally.
 
-Key risks center on Electron initialization timing (accessing APIs before `app.whenReady()`), tray icon garbage collection, and search performance blocking the main process. These are mitigated through established patterns: wrap all initialization in `app.whenReady()`, store tray references at module scope, and implement debounced search with result limiting.
+Key risks include the critical pitfall where `-webkit-app-region: drag` on scrollable containers blocks trackpad scroll events entirely, and the common mistake of placing drag regions in sidebars rather than across the window top for hiddenInset windows. Both require structural CSS changes rather than simple property additions.
 
 ## Key Findings
 
 ### Recommended Stack
 
-**Core technologies:**
-- **Fuse.js 7.1.0**: Fuzzy search engine — zero dependencies, 6KB gzipped, actively maintained (Feb 2025), industry standard with 20k+ stars
-- **VSCode Debugger + `--inspect-brk`**: Crash debugging — built-in V8 inspector support, no external tools needed
-- **Electron `crashReporter` API**: Crash reporting — uses Crashpad for local crash dump storage during development
-- **macOS Template Images**: Tray icons — `*Template.png` naming convention with 16x16 + 32x32@2x assets for automatic light/dark mode adaptation
+No new dependencies required. All fixes use existing Electron APIs, CSS patterns, and Fuse.js configuration. The existing stack (Electron 35.x, React 19.1.x, TypeScript 5.9.3, Fuse.js 7.1.0, vanilla CSS) is validated and appropriate.
 
-**Critical requirements:**
-- Tray icon filenames must end with `Template` suffix (macOS auto-inverts for theme)
-- Store `Tray` instance in module-level variable (prevents garbage collection)
-- All Electron API calls must occur after `app.whenReady()` resolves
-- Disable asset hashing for tray icons in build config (preserve `Template` naming)
+**Core patterns:**
+- `-webkit-app-region: drag/no-drag` — Electron CSS property for window dragging in hiddenInset windows
+- `min-height: 0` with `flex: 1` — Critical CSS pattern for enabling overflow scrolling in flex children
+- Fuse.js threshold/minMatchCharLength — Configuration tuning for fuzzy search quality
 
 ### Expected Features
 
-**Must have (table stakes):**
-- **Fuzzy search with typo tolerance** — users expect "filesytem" to match "filesystem"
-- **Relevance-ranked results** — search results ordered by match quality, not just filtered
-- **Template tray icon** — macOS menu bar icons must adapt to light/dark mode automatically
-- **Native macOS UI feel** — system fonts, proper spacing, semantic colors
-- **Responsive search** — instant filtering without lag as user types
+**Must have (table stakes) — P1:**
+- POPOVER-01: Popover content scrolling — users expect smooth scroll when content overflows
+- DRAG-01: Window drag from title area — standard macOS behavior, users instinctively drag from top
+- DRAG-02: Consistent padding/margins — macOS apps use standard spacing (16px typical)
+- BROWSE-02: Fuzzy search returns results — searching "vercel" should show Vercel-related servers
 
-**Should have (competitive):**
-- **Highlight matched terms** — show users why results matched
-- **Keyboard-first navigation** — arrow keys + Enter for search selection
-- **SF Symbols integration** — Apple's built-in iconography (`server.rack`, `network`)
-- **Customizable search weights** — power users can tune field importance
+**Should have (competitive) — P2:**
+- BROWSE-03: Search state persistence — remember query between window opens for seamless UX
+- BROWSE-01: Browse registry layout polish — consistent card spacing and alignment
 
 **Defer (v2+):**
-- Custom search weight UI (power user feature)
-- SF Symbols throughout entire app (use PNG assets first)
-- Complex search syntax (Boolean operators, regex)
+- Full-text search in server descriptions
+- Server-side category filtering
+- Highlight matched terms in search results
 
 ### Architecture Approach
 
-The app uses a three-process Electron architecture with direct CLI core integration via TypeScript path alias (`@mcpx/core`).
+The fixes integrate primarily at the renderer layer (CSS and React components) with some main process changes for search. The layered architecture (Electron main -> Preload bridge -> React renderer) remains unchanged.
 
-**Major components:**
-1. **Main Process** (`app/src/main/`) — App lifecycle, tray management, window creation, IPC handlers, daemon control
-2. **Preload Process** (`app/src/preload/`) — Context bridge exposing typed `window.mcpx` API to renderer
-3. **Renderer Process** (`app/src/renderer/`) — React UI (Dashboard, BrowseTab, ServerCard components) with vanilla CSS
-4. **CLI Core Library** (`cli/src/core/`) — Shared business logic (config, daemon, sync, secrets, registry)
-
-**Key patterns:**
-- IPC handler registration centralized in `ipc-handlers.ts`
-- CSS variable theming for dark/light mode support
-- Daemon lifecycle tracked in main process, exposed via IPC
-- Client-side search with relevance scoring (Fuse.js replaces current `includes()`)
+**Major integration points:**
+1. `app/src/renderer/index.css` — CSS changes for popover scrolling, drag regions, padding
+2. `app/src/renderer/components/StatusPopover.tsx` — JSX structure for popover layout
+3. `app/src/renderer/components/Dashboard.tsx` — Possible structural changes for drag regions
+4. `app/src/main/search-utils.ts` — Fuse.js configuration tuning
+5. `app/src/main/registry-client.ts` — Type definitions, debug log removal
 
 ### Critical Pitfalls
 
-1. **Tray icon garbage collection** — Tray disappears after minutes; prevent by storing `Tray` instance in module-level variable, never in function scope
-2. **Non-template tray icons** — Icons appear grainy/inverted; use `*Template.png` naming with 16x16 + 32x32@2x, black/white with alpha channel only
-3. **Accessing Electron APIs before `app.ready`** — Crashes on launch; wrap all initialization in `app.whenReady().then()`, register macOS events (`open-file`) before ready
-4. **Main process blocking during search** — UI freezes when typing; implement 250-300ms debounce, limit results to top 20, pre-index data on app start
-5. **Incorrect fuzzy search configuration** — Poor ranking; configure field weights (`name: 0.7`, `description: 0.3`), set `threshold: 0.4`, enable `includeScore` for tuning
-6. **Ignoring macOS HIG** — App feels "ugly/foreign"; use system fonts, 8px grid spacing, native traffic light positioning, dark mode support via `nativeTheme`
+1. **App-Region drag blocks scroll events** — Setting `-webkit-app-region: drag` on a container captures scroll wheel/trackpad events, preventing child scrolling even with `no-drag`. Structure DOM so scrollable containers are siblings of draggable regions, not descendants.
+
+2. **Incorrect draggable region for hiddenInset** — With `titleBarStyle: "hiddenInset"`, drag regions must be at the TOP of the window, not in sidebars. Create a dedicated 32-52px tall drag strip spanning the full window width.
+
+3. **Fuse.js minMatchCharLength blocks short queries** — Current `minMatchCharLength: 2` prevents single-character searches from returning results. Set to 1 or remove the setting entirely.
+
+4. **React state doesn't persist across window closes** — Electron windows are full browser contexts; state is garbage collected when closed. Use localStorage or extend existing settings infrastructure for persistence.
+
+5. **RegistryServerEntry type missing repository field** — Fuse.js searches `server.repository.url` but the type definition doesn't include this field, causing silent undefined matches.
 
 ## Implications for Roadmap
 
 Based on research, suggested phase structure:
 
-### Phase 1: Launch Stability & Crash Fixes
-**Rationale:** Foundation first—app must launch reliably before adding features. Addresses highest-severity pitfalls (crash on launch, API timing).
-**Delivers:** Stable app launch 10/10 times, proper error handling, debugging infrastructure
-**Addresses:** LAUNCH-01, LAUNCH-02
-**Avoids:** "Accessing Electron APIs before app.ready" pitfall, "Context isolation breakage" pitfall
-**Research needed:** No—well-documented Electron patterns, official docs cover all requirements
+### Phase 1: Fuzzy Search Fix (BROWSE-02)
+**Rationale:** Core functionality with no dependencies on other fixes; isolated to main process; high user impact.
+**Delivers:** Working fuzzy search that returns relevant results for queries like "vercel".
+**Addresses:** BROWSE-02 from FEATURES.md
+**Avoids:** Fuse.js minMatchCharLength pitfall, missing type definition pitfall
+**Changes:** Fuse.js config in search-utils.ts, type definitions in registry-client.ts, remove debug console.log
 
-### Phase 2: Fuzzy Search Implementation
-**Rationale:** Core user-facing feature. Depends on stable launch. Requires Fuse.js integration and search UI updates.
-**Delivers:** Typo-tolerant search with relevance ranking, debounced input, result limiting
-**Addresses:** SEARCH-01, SEARCH-02
-**Uses:** Fuse.js 7.1.0, existing `search-utils.ts` API (backward-compatible replacement)
-**Implements:** Client-side fuzzy matching with weighted field scoring
-**Avoids:** "Main process blocking during search" pitfall, "Incorrect fuzzy search configuration" pitfall
-**Research needed:** No—Fuse.js documentation is comprehensive, integration pattern is standard
+### Phase 2: Popover Scrolling Fix (POPOVER-01)
+**Rationale:** Quick CSS fix, high visibility, isolated to popover component.
+**Delivers:** Scrollable popover content with fixed header/footer.
+**Addresses:** POPOVER-01 from FEATURES.md
+**Avoids:** App-region drag blocks scroll pitfall
+**Changes:** CSS in index.css, possibly JSX structure in StatusPopover.tsx
 
-### Phase 3: Tray Icon & Menu Bar Integration
-**Rationale:** macOS-specific requirement for menu bar apps. Independent of search, but depends on stable launch.
-**Delivers:** Proper template tray icon (16x16 + 32x32@2x), light/dark mode adaptation, context menu
-**Addresses:** ICON-01
-**Uses:** Electron `Tray` API, `nativeImage.createFromPath()`, macOS template image format
-**Avoids:** "Tray icon garbage collection" pitfall, "Non-template tray icons" pitfall
-**Research needed:** No—Electron docs + Apple HIG are definitive sources
+### Phase 3: Window Drag Fix (DRAG-01)
+**Rationale:** Core UX issue; must be done before padding work (DRAG-02) since padding depends on final layout.
+**Delivers:** Draggable window from title bar area; traffic lights work correctly.
+**Addresses:** DRAG-01 from FEATURES.md
+**Avoids:** Incorrect draggable region placement pitfall
+**Changes:** CSS drag regions in index.css, possibly structural changes in Dashboard.tsx
 
-### Phase 4: macOS UI Polish
-**Rationale:** Visual refinement after functional fixes. Requires design audit against macOS HIG.
-**Delivers:** Native macOS feel—system fonts, proper spacing, dark mode, hover states, keyboard navigation
-**Addresses:** UI-01, UI-02
-**Uses:** Vanilla CSS with CSS variables, `-apple-system` font stack, 8px grid
-**Avoids:** "Ignoring macOS HIG" pitfall
-**Research needed:** Minimal—Apple HIG is authoritative, but design decisions need validation
+### Phase 4: Padding and Layout Polish (DRAG-02, BROWSE-01)
+**Rationale:** Polish work that depends on final layout from DRAG-01; combines related CSS fixes.
+**Delivers:** Consistent macOS-standard padding throughout dashboard and browse views.
+**Addresses:** DRAG-02, BROWSE-01 from FEATURES.md
+**Avoids:** Sidebar padding in drag region pitfall
+**Changes:** CSS padding values in index.css, extract inline styles from BrowseTab.tsx
+
+### Phase 5: Search State Persistence (BROWSE-03)
+**Rationale:** Nice-to-have enhancement; extends existing settings infrastructure; can be deferred if time-constrained.
+**Delivers:** Search query remembered between dashboard window opens.
+**Addresses:** BROWSE-03 from FEATURES.md
+**Avoids:** React state not persisting pitfall
+**Changes:** Extend settings-store.ts, desktop-settings.ts, BrowseTab.tsx
 
 ### Phase Ordering Rationale
 
-- **Launch first** because all other features depend on app running reliably
-- **Search before tray** because search is core functionality (tray is polish for macOS)
-- **UI polish last** because it's iterative refinement on top of working features
-- **Grouping** follows component boundaries: main process fixes (Phase 1), search logic (Phase 2), tray assets + main process (Phase 3), renderer CSS (Phase 4)
+- BROWSE-02 first: Core functionality, no dependencies, isolated changes
+- POPOVER-01 second: Quick win, high visibility, isolated to popover
+- DRAG-01 third: Core UX, must precede padding work
+- DRAG-02/BROWSE-01 fourth: Polish, depends on drag region final layout
+- BROWSE-03 last: Enhancement, can be deferred
 
 ### Research Flags
 
-**Phases with standard patterns (skip research-phase):**
-- **Phase 1:** Well-documented Electron initialization patterns, official docs cover all requirements
-- **Phase 2:** Fuse.js integration is standard, extensive documentation + examples available
-- **Phase 3:** Electron Tray API + macOS template images are covered in official docs
+Phases likely needing deeper research during planning:
+- **Phase 1 (BROWSE-02):** May need API response structure verification; test with real registry data
+- **Phase 3 (DRAG-01):** Structural changes to Dashboard.tsx may require more detailed investigation
 
-**Phases needing design validation (not deep research):**
-- **Phase 4:** macOS HIG is authoritative, but design decisions (spacing values, color palette) need visual validation during implementation
+Phases with standard patterns (skip research-phase):
+- **Phase 2 (POPOVER-01):** Well-documented CSS flexbox scrolling pattern
+- **Phase 4 (DRAG-02, BROWSE-01):** Standard macOS spacing values, CSS extraction
+- **Phase 5 (BROWSE-03):** Standard localStorage/settings persistence pattern
 
 ## Confidence Assessment
 
 | Area | Confidence | Notes |
 |------|------------|-------|
-| Stack | HIGH | Fuse.js docs + Electron official docs + Apple HIG all verified |
-| Features | HIGH | FEATURES.md aligns with Electron app expectations, MVP priorities are clear |
-| Architecture | HIGH | Existing codebase provides clear patterns, no architectural changes required |
-| Pitfalls | HIGH | PITFALLS.md covers all critical issues with specific prevention strategies |
+| Stack | HIGH | Existing stack validated; no new dependencies needed; patterns well-documented |
+| Features | MEDIUM | Based on codebase analysis and macOS conventions; web search APIs unavailable for external verification |
+| Architecture | HIGH | Clear integration points documented; codebase analysis thorough |
+| Pitfalls | HIGH | Critical pitfalls identified with specific code references; prevention strategies clear |
 
-**Overall confidence:** HIGH
+**Overall confidence:** MEDIUM-HIGH
 
 ### Gaps to Address
 
-- **Tray icon design:** Research specifies technical requirements (template format, sizes) but doesn't provide actual icon design. Need design spec or SF Symbol selection during Phase 3.
-- **Search result highlighting:** Listed as differentiator but implementation details (using Fuse.js `includeMatches` + React rendering) need validation during Phase 2.
-- **Dark mode testing:** macOS dark mode support requires physical device testing—cannot fully validate in development environment without Retina display.
+- **Fuse.js actual data verification:** The Fuse.js key paths (`server.name`, `server.title`, etc.) should be verified against actual registry API response structure during implementation.
+- **Traffic light overlap testing:** The traffic light position `{ x: 16, y: 16 }` and sidebar drag region overlap needs visual verification on actual hardware.
+- **Search behavior with real queries:** Test "vercel" and similar queries against the live registry to confirm Fuse.js tuning is correct.
 
 ## Sources
 
 ### Primary (HIGH confidence)
-- **Electron Documentation** — Tray API, App lifecycle, Crash Reporter, Debugging guides (https://www.electronjs.org/docs/latest/)
-- **Fuse.js Documentation** — Official docs + GitHub (20k+ stars, v7.1.0 Feb 2025) (https://fusejs.io/)
-- **Apple Human Interface Guidelines** — macOS menu bar, icons, spacing conventions (https://developer.apple.com/design/human-interface-guidelines/)
+- Electron BrowserWindow API documentation — titleBarStyle, trafficLightPosition, app-region
+- CSS Flexbox overflow patterns — MDN documentation for min-height: 0 flex scrolling
+- Fuse.js API documentation — Configuration options and scoring
+- Project codebase analysis — `.planning/codebase/ARCHITECTURE.md`, `app/src/renderer/index.css`
 
 ### Secondary (MEDIUM confidence)
-- **Electron GitHub Issues** — Common crash patterns, tray GC discussions
-- **Existing codebase** — `app/src/main/search-utils.ts`, `app/src/main/tray.ts`, `cli/src/core/` modules
+- macOS Human Interface Guidelines — Standard spacing values (16pt, 52pt title bar height)
+- Electron `-webkit-app-region` — Standard Electron pattern for drag regions
 
 ### Tertiary (LOW confidence)
-- **Community post-mortems** — Electron app launch failures (anecdotal, needs validation)
+- External search APIs were unavailable during research — some recommendations are based on established patterns rather than runtime verification
 
 ---
-*Research completed: 2026-03-09*
+*Research completed: 2026-03-24*
 *Ready for roadmap: yes*
