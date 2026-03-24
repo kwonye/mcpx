@@ -1,8 +1,5 @@
-import { filterServersByQuery, sortServersByRelevance } from "./search-utils";
-
 const REGISTRY_BASE = "https://registry.modelcontextprotocol.io";
 const DEFAULT_LIMIT = 100;
-const SEARCH_LIMIT = 200;
 
 export interface RegistryServerEntry {
   server: {
@@ -12,6 +9,10 @@ export interface RegistryServerEntry {
     version: string;
     packages?: RegistryPackage[];
     remotes?: RegistryRemote[];
+    repository?: {
+      url?: string;
+      source?: string;
+    };
   };
   _meta?: Record<string, unknown>;
 }
@@ -82,8 +83,6 @@ export async function fetchRegistryServers(
     params.set("search", normalizedQuery);
   }
 
-  console.log("[fetchRegistryServers] fetching URL:", `${REGISTRY_BASE}/v0.1/servers?${params}`);
-
   const response = await fetch(`${REGISTRY_BASE}/v0.1/servers?${params}`, {
     headers: { accept: "application/json" }
   });
@@ -92,21 +91,7 @@ export async function fetchRegistryServers(
     throw new Error(`Registry API error: ${response.status}`);
   }
 
-  const data = await response.json();
-
-  if (normalizedQuery) {
-    const filtered = filterServersByQuery(data.servers || [], normalizedQuery);
-    const sorted = sortServersByRelevance(filtered, normalizedQuery);
-    return {
-      servers: sorted,
-      metadata: {
-        count: sorted.length,
-        nextCursor: null
-      }
-    };
-  }
-
-  return data;
+  return response.json();
 }
 
 export async function fetchServerDetail(name: string): Promise<RegistryDetailResponse> {
