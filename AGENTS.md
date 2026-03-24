@@ -64,31 +64,22 @@ npm run e2e             # Run Playwright E2E tests
 ```
 
 ### Desktop App Local Install
-When an agent needs to install a fresh local desktop build into macOS Applications, use this exact flow so the `.app` bundle keeps a valid code signature:
+When an agent needs to install a fresh local desktop build into macOS Applications:
 
 ```bash
 cd app
-npm install
-npm run build
-npx electron-builder --mac --dir
+npm run desktop-install
+```
 
-pkill -f "/Applications/mcpx.app" || true
-pkill -f "dist/mac-arm64/mcpx.app" || true
-
-ts=$(date +%Y%m%d-%H%M%S)
-if [ -d /Applications/mcpx.app ]; then
-  mv /Applications/mcpx.app "/Applications/mcpx.app.backup-$ts"
-fi
-
-ditto dist/mac-arm64/mcpx.app /Applications/mcpx.app
-codesign --verify --deep --strict /Applications/mcpx.app
-open /Applications/mcpx.app
+For debugging with DevTools open:
+```bash
+npm run desktop-install:dev
 ```
 
 Notes:
-- Use `ditto`, not `cp -R`, when copying the app bundle into `/Applications`; `cp -R` can invalidate the bundle signature on macOS.
-- `npx electron-builder --mac --dir` is the preferred local install artifact because it produces `dist/mac-arm64/mcpx.app` without requiring a DMG mount step.
-- A local `--dir` build may still be rejected by Gatekeeper (`spctl`) because it is not notarized; for local development, treat `codesign --verify` plus a successful `open /Applications/mcpx.app` launch as the install check.
+- The script builds, installs to `/Applications`, and launches the app
+- Use `desktop-install:dev` to open DevTools for debugging
+- The app is menubar-only (no dock icon)
 
 ## Development Mandates & Conventions
 

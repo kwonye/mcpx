@@ -6,6 +6,11 @@ describe("popover window behavior", () => {
 
   class MockBrowserWindow {
     handlers: Record<string, () => void> = {};
+    webContents = {
+      on: vi.fn((event: string, handler: () => void) => {
+        this.handlers[event] = handler;
+      })
+    };
     visible = false;
     destroyed = false;
     bounds = { x: 10, y: 20, width: 360, height: 320 };

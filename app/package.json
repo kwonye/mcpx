@@ -31,7 +31,9 @@
     "preview": "electron-vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "e2e": "playwright test"
+    "e2e": "playwright test",
+    "desktop-install": "bash scripts/desktop-install.sh",
+    "desktop-install:dev": "bash scripts/desktop-install.sh --dev"
   },
   "dependencies": {
     "electron-updater": "^6.6.2",

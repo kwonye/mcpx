@@ -29,6 +29,7 @@ describe("crashReporter initialization", () => {
         whenReady: mockWhenReady,
         requestSingleInstanceLock: mockRequestSingleInstanceLock,
         getAppPath: () => "/tmp/app",
+        setActivationPolicy: vi.fn(),
       },
       crashReporter: {
         start: mockCrashReporterStart,
@@ -109,6 +110,7 @@ describe("crashReporter initialization", () => {
         whenReady: vi.fn().mockRejectedValue(startupError),
         requestSingleInstanceLock: vi.fn().mockReturnValue(true),
         getAppPath: () => "/tmp/app",
+        setActivationPolicy: vi.fn(),
       },
       crashReporter: {
         start: vi.fn(),

@@ -4,6 +4,10 @@ import { hidePopover } from "./popover";
 
 let dashboard: BrowserWindow | null = null;
 
+function isDevMode(): boolean {
+  return process.argv.includes("--dev");
+}
+
 function rendererEntryPath(): string {
   return fileURLToPath(new URL("../renderer/index.html", import.meta.url));
 }
@@ -55,6 +59,9 @@ export function openDashboard(): BrowserWindow {
   dashboard.once("ready-to-show", () => {
     if (dashboard && !dashboard.isDestroyed()) {
       revealDashboard(dashboard);
+      if (isDevMode()) {
+        dashboard.webContents.openDevTools({ mode: "right" });
+      }
     }
   });
 

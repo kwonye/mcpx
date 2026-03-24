@@ -25,6 +25,18 @@ The app is built with **Electron + React** and is designed to be a lightweight w
 
 ## Building and Installing Locally
 
+### Quick Install
+To build and install the app to `/Applications`:
+
+```bash
+npm run desktop-install
+```
+
+For debugging with DevTools open:
+```bash
+npm run desktop-install:dev
+```
+
 ### Kill Existing Instances
 Kill any running instances before starting a new one:
 
@@ -37,41 +49,10 @@ pkill -f "Electron.*mcpx-desktop" || true
 For development with hot reload:
 
 ```bash
-cd app
 npm run dev
 ```
 
 This runs the app from source with the dev server. Check the menubar for the tray icon.
-
-### Build and Install Local .app
-To build a production .app bundle and install it (replacing any existing):
-
-```bash
-cd app
-npm install
-npm run build
-npx electron-builder --mac --dir  # Build without DMG (faster)
-
-# Kill any running instances
-pkill -f "/Applications/mcpx.app" || true
-pkill -f "dist/mac-arm64/mcpx.app" || true
-
-# Replace old app while preserving bundle metadata/signature
-ts=$(date +%Y%m%d-%H%M%S)
-if [ -d /Applications/mcpx.app ]; then
-  mv /Applications/mcpx.app "/Applications/mcpx.app.backup-$ts"
-fi
-ditto dist/mac-arm64/mcpx.app /Applications/mcpx.app
-codesign --verify --deep --strict /Applications/mcpx.app
-
-# Open the new app
-open /Applications/mcpx.app
-```
-
-**Notes:**
-- Use `ditto`, not `cp -R`, to install the app bundle into `/Applications`; `cp -R` can break the app signature.
-- The local `--dir` build may still fail `spctl` because it is not notarized. For local installs, a passing `codesign --verify` and a successful `open` are the expected checks.
-- The app is a menubar-only app (no dock icon). Look for the tray icon in the menubar.
 
 ## Technologies
 - **Styling:** Pure Vanilla CSS (no Tailwind/Bootstrap).

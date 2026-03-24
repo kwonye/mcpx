@@ -60,7 +60,8 @@ describe("daemon child mode", () => {
         dock: { hide: hideDockMock },
         whenReady: whenReadyMock,
         getAppPath: () => "/tmp/app",
-        exit: vi.fn()
+        exit: vi.fn(),
+        setActivationPolicy: vi.fn()
       },
       crashReporter: { start: vi.fn() }
     }));
