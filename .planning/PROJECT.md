@@ -2,35 +2,47 @@
 
 ## What This Is
 
-The mcpx desktop app is a macOS Electron application that provides a GUI for managing MCP (Model Context Protocol) servers and cross-client installation. This project focuses on fixing critical issues and polishing the user experience.
+The mcpx desktop app is a macOS Electron application that provides a GUI for managing MCP (Model Context Protocol) servers and cross-client installation. This project focuses on fixing critical UI bugs and polishing the user experience.
 
 ## Core Value
 
 A reliable, polished desktop app that makes MCP server management effortless and intuitive.
 
+## Current Milestone: v1.1 Desktop App Fixes
+
+**Goal:** Fix all broken UI components and interactions discovered after v1.0.
+
+**Target features:**
+- Fix menu bar popover scrolling
+- Fix dashboard window drag and padding
+- Fix browse registry layout and search
+- Polish all UI interactions
+
 ## Requirements
 
 ### Validated
 
-- ✓ Existing MCP server management capabilities — existing codebase
-- ✓ Cross-client installer functionality — existing codebase
-- ✓ CLI integration via @mcpx/core — existing codebase
+- ✓ MCP server management capabilities — v1.0
+- ✓ Cross-client installer functionality — v1.0
+- ✓ CLI integration via @mcpx/core — v1.0
+- ✓ Fuzzy search with Fuse.js — v1.0 (implementation exists, has bugs)
+- ✓ Tray icon with dark mode support — v1.0
+- ✓ Dark mode UI theme — v1.0
 
 ### Active
 
-- [ ] **LAUNCH-01**: App launches successfully without crashing on startup
-- [ ] **LAUNCH-02**: App window renders content correctly after launch
-- [ ] **SEARCH-01**: Search returns partial matches (fuzzy matching)
-- [ ] **SEARCH-02**: Search results ranked by priority/popularity
-- [ ] **UI-01**: UI follows macOS Human Interface Guidelines
-- [ ] **UI-02**: Visual polish applied to all components
-- [ ] **ICON-01**: New menu bar tray icon designed and implemented
+- [ ] **POPOVER-01**: Menu bar popover content scrolls properly
+- [ ] **DRAG-01**: Dashboard window can be dragged from title bar area
+- [ ] **DRAG-02**: Dashboard padding and margins follow macOS conventions
+- [ ] **BROWSE-01**: Browse registry layout is clean and organized
+- [ ] **BROWSE-02**: Fuzzy search returns matching results
+- [ ] **BROWSE-03**: Search state persists between window opens
 
 ### Out of Scope
 
-- CLI functionality changes — existing CLI works, focus on app
-- New MCP server features — fix existing app first
-- Windows/Linux support — macOS only for now
+- New MCP server features — focus on fixing existing functionality
+- Windows/Linux support — macOS only
+- New features of any kind — purely fixes and polish
 
 ## Context
 
@@ -38,25 +50,27 @@ A reliable, polished desktop app that makes MCP server management effortless and
 
 **Tech stack:** Electron + React + TypeScript with vanilla CSS styling.
 
-**Known issues to address:**
-1. App crashes on launch (recent regression)
-2. Search requires exact match — needs fuzzy matching with ranking
-3. UI described as "ugly" — needs macOS native polish
-4. Menu bar icon described as "ugly" — needs new design
+**Issues discovered after v1.0:**
+1. Menu bar popover scrolling is broken
+2. Dashboard window cannot be dragged from title area
+3. Dashboard padding/margins are wrong
+4. Browse registry layout is scrambled and messy
+5. Fuzzy search doesn't return results (e.g., searching "vercel" shows nothing)
+6. Search state doesn't persist between window opens
 
 ## Constraints
 
 - **[Tech stack]**: Electron + React + vanilla CSS — established stack, don't add heavy UI frameworks
 - **[Platform]**: macOS only — leverage native macOS conventions
 - **[Architecture]**: Maintain @mcpx/core integration from CLI — shared business logic
+- **[Scope]**: Fixes only — no new features
 
 ## Key Decisions
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| Fuzzy search implementation | Better UX than exact match | — Pending |
-| macOS native UI direction | Users expect native feel on macOS | — Pending |
-| Custom tray icon design | Current icon doesn't meet quality bar | — Pending |
+| Focus on fixes only | Core functionality is broken, adding features would compound problems | — Pending |
+| Systematic UI fixes | Multiple interrelated issues need coordinated approach | — Pending |
 
 ---
-*Last updated: Mon Mar 09 2026 after initialization*
+*Last updated: Mon Mar 24 2026 after v1.1 milestone start*
