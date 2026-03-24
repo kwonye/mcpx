@@ -95,7 +95,10 @@ Plans:
   1. User can type "vercel" and see Vercel-related servers in results
   2. User can type single-character queries and get matching results
   3. Search results display server name, description, and repository info
-**Plans**: TBD
+**Plans**: 1 plan
+
+Plans:
+- [ ] 05-01-PLAN.md — Simplify search by removing redundant Fuse.js filtering, rely on API search
 
 #### Phase 6: Popover Fix
 **Goal**: Menu bar popover content is scrollable and has clean UI
@@ -148,7 +151,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 | 2. Fuzzy Search | v1.0 | 3/3 | Complete | 2026-03-12 |
 | 3. Tray Icon | v1.0 | 1/1 | Complete | 2026-03-12 |
 | 4. macOS UI Polish | v1.0 | 1/1 | Complete | 2026-03-12 |
-| 5. Fuzzy Search Fix | v1.1 | 0/TBD | Not started | - |
+| 5. Fuzzy Search Fix | v1.1 | 0/1 | Planned | - |
 | 6. Popover Fix | v1.1 | 0/TBD | Not started | - |
 | 7. Window Drag Fix | v1.1 | 0/TBD | Not started | - |
 | 8. Layout Polish | v1.1 | 0/TBD | Not started | - |
@@ -158,3 +161,4 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 *Roadmap created: 2026-03-09*
 *v1.0 completed: 2026-03-12*
 *v1.1 phases added: 2026-03-24*
+*Phase 5 planned: 2026-03-24*
