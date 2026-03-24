@@ -4,6 +4,9 @@ coverage/
 *.log
 .DS_Store
 
+# Claude
+.claude/
+
 # Electron
 app/out/
 app/dist/
