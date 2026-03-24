@@ -60,20 +60,21 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| POPOVER-01 | — | Pending |
-| POPOVER-02 | — | Pending |
-| WIND-01 | — | Pending |
-| WIND-02 | — | Pending |
-| SIDE-01 | — | Pending |
-| BROWSE-01 | — | Pending |
-| BROWSE-02 | — | Pending |
-| BROWSE-03 | — | Pending |
-| PASTE-01 | — | Pending |
+| POPOVER-01 | Phase 6 | Pending |
+| POPOVER-02 | Phase 6 | Pending |
+| WIND-01 | Phase 7 | Pending |
+| WIND-02 | Phase 8 | Pending |
+| SIDE-01 | Phase 8 | Pending |
+| BROWSE-01 | Phase 8 | Pending |
+| BROWSE-02 | Phase 5 | Pending |
+| BROWSE-03 | Phase 9 | Pending |
+| PASTE-01 | Phase 8 | Pending |
 
 **Coverage:**
 - v1 requirements: 9 total
-- Mapped to phases: 0
-- Unmapped: 9 ⚠️
+- Mapped to phases: 9
+- Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-03-24*
+*Traceability updated: 2026-03-24*
