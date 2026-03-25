@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: UI Fixes
-status: Ready to plan
-stopped_at: Completed 07-01-PLAN.md
-last_updated: "2026-03-25T11:51:25.967Z"
+status: Phase complete — ready for verification
+stopped_at: Completed 08-01-PLAN.md
+last_updated: "2026-03-25T12:13:59.937Z"
 progress:
   total_phases: 5
-  completed_phases: 3
-  total_plans: 3
-  completed_plans: 3
+  completed_phases: 4
+  total_plans: 5
+  completed_plans: 5
 ---
 
 # Project State
@@ -19,12 +19,12 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-24)
 
 **Core value:** A reliable, polished desktop app that makes MCP server management effortless and intuitive.
-**Current focus:** Phase 07 — window-drag-fix
+**Current focus:** Phase 08 — layout-polish
 
 ## Current Position
 
-Phase: 8
-Plan: Not started
+Phase: 08 (layout-polish) — EXECUTING
+Plan: 2 of 2
 
 ## Performance Metrics
 
@@ -51,6 +51,8 @@ Plan: Not started
 *Updated after each plan completion*
 | Phase 06 P01 | 4min | 2 tasks | 3 files |
 | Phase 07 P01 | 3min | 2 tasks | 2 files |
+| Phase 08 P02 | 2min | 2 tasks | 3 files |
+| Phase 08 P01 | 3min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -64,6 +66,8 @@ Recent decisions affecting current work:
 - [Phase 06]: D-04: Footer has two buttons - Open Dashboard (primary) and daemon toggle (secondary)
 - [Phase 07]: D-02: Sidebar header (.sidebar-logo) has -webkit-app-region: drag for window dragging
 - [Phase 07]: D-06: Traffic light area protected with ::before pseudo-element no-drag zone
+- [Phase 08]: D-01: Daemon controls moved to sidebar hero position for prominence
+- [Phase 08]: D-06: Standardized all dashboard padding to 16px (macOS standard)
 
 ### Pending Todos
 
@@ -79,8 +83,8 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-25T11:46:04.570Z
-Stopped at: Completed 07-01-PLAN.md
+Last session: 2026-03-25T12:13:59.935Z
+Stopped at: Completed 08-01-PLAN.md
 Resume file: None
 
 ---

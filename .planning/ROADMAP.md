@@ -138,8 +138,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 08-01-PLAN.md — Move daemon controls to sidebar hero position, standardize padding
-- [ ] 08-02-PLAN.md — Change browse registry to grid layout, improve paste command display
+- [x] 08-01-PLAN.md — Move daemon controls to sidebar hero position, standardize padding
+- [x] 08-02-PLAN.md — Change browse registry to grid layout, improve paste command display
 
 #### Phase 9: Search State Persistence
 **Goal**: Search state is preserved between dashboard window sessions

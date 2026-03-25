@@ -13,21 +13,21 @@
 ### Window
 
 - [x] **WIND-01**: User can drag window from title bar area
-- [ ] **WIND-02**: Dashboard padding and margins follow macOS conventions (16-20pt consistent spacing)
+- [x] **WIND-02**: Dashboard padding and margins follow macOS conventions (16-20pt consistent spacing)
 
 ### Sidebar
 
-- [ ] **SIDE-01**: User sees daemon start/stop controls at top of sidebar (hero area)
+- [x] **SIDE-01**: User sees daemon start/stop controls at top of sidebar (hero area)
 
 ### Browse
 
-- [ ] **BROWSE-01**: Browse registry layout is clean and organized
+- [x] **BROWSE-01**: Browse registry layout is clean and organized
 - [x] **BROWSE-02**: Fuzzy search returns matching results (e.g., searching "vercel" shows Vercel servers)
 - [ ] **BROWSE-03**: Search state persists between window opens
 
 ### Paste Command
 
-- [ ] **PASTE-01**: Paste command UI uses multi-line layout instead of one long line
+- [x] **PASTE-01**: Paste command UI uses multi-line layout instead of one long line
 
 ## v2 Requirements
 
@@ -63,12 +63,12 @@ Which phases cover which requirements. Updated during roadmap creation.
 | POPOVER-01 | Phase 6 | Complete |
 | POPOVER-02 | Phase 6 | Complete |
 | WIND-01 | Phase 7 | Complete |
-| WIND-02 | Phase 8 | Pending |
-| SIDE-01 | Phase 8 | Pending |
-| BROWSE-01 | Phase 8 | Pending |
+| WIND-02 | Phase 8 | Complete |
+| SIDE-01 | Phase 8 | Complete |
+| BROWSE-01 | Phase 8 | Complete |
 | BROWSE-02 | Phase 5 | Complete |
 | BROWSE-03 | Phase 9 | Pending |
-| PASTE-01 | Phase 8 | Pending |
+| PASTE-01 | Phase 8 | Complete |
 
 **Coverage:**
 - v1 requirements: 9 total
