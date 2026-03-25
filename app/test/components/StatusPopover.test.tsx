@@ -47,12 +47,12 @@ describe("StatusPopover", () => {
     expect(await screen.findByRole("button", { name: /Open Dashboard/i })).toBeDefined();
   });
 
-  it("shows Stop Daemon when running", async () => {
+  it("shows daemon toggle button in footer when running", async () => {
     render(<StatusPopover />);
-    expect(await screen.findByTitle("Stop Daemon")).toBeDefined();
+    expect(await screen.findByRole("button", { name: /Stop Daemon/i })).toBeDefined();
   });
 
-  it("shows Start Daemon when stopped", async () => {
+  it("shows daemon toggle button in footer when stopped", async () => {
     mockMcpx.getStatus.mockResolvedValueOnce({
       daemon: { running: false, pid: undefined, pidFile: "", logFile: "", port: 37373 },
       upstreamCount: 3,
@@ -60,6 +60,29 @@ describe("StatusPopover", () => {
     });
 
     render(<StatusPopover />);
-    expect(await screen.findByTitle("Start Daemon")).toBeDefined();
+    expect(await screen.findByRole("button", { name: /Start Daemon/i })).toBeDefined();
+  });
+
+  it("does not show settings icon in header", async () => {
+    render(<StatusPopover />);
+    await screen.findByText(/Local Daemon/i);
+    // Should not find a button with settings title
+    expect(screen.queryByTitle("Settings")).toBeNull();
+  });
+
+  it("does not show power icon in header", async () => {
+    render(<StatusPopover />);
+    await screen.findByText(/Local Daemon/i);
+    // Should not find buttons with power_settings_new icon in header
+    const buttons = screen.getAllByRole("button");
+    // Filter to only buttons in the footer (not header)
+    const footerButtons = buttons.filter(btn => btn.textContent?.includes("Open Dashboard") || btn.textContent?.includes("Daemon"));
+    expect(footerButtons.length).toBe(2);
+  });
+
+  it("does not show Sync All Clients button", async () => {
+    render(<StatusPopover />);
+    await screen.findByText(/Local Daemon/i);
+    expect(screen.queryByText(/Sync All Clients/i)).toBeNull();
   });
 });
