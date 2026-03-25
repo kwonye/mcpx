@@ -38,14 +38,13 @@ export function Dashboard() {
   return (
     <div className="dashboard-container">
       <aside className="sidebar">
-        <div className="sidebar-inner glass-panel">
-          <div className="sidebar-logo">
-            <div className="sidebar-logo-icon">
-              <span className="material-symbols-outlined" style={{ fontSize: "20px" }}>hub</span>
-            </div>
-            <span className="sidebar-logo-text">mcpx Manager</span>
+        <div className="sidebar-logo">
+          <div className="sidebar-logo-icon">
+            <span className="material-symbols-outlined" style={{ fontSize: "20px" }}>hub</span>
           </div>
-
+          <span className="sidebar-logo-text">mcpx Manager</span>
+        </div>
+        <div className="sidebar-inner glass-panel">
           <button
             className="nav-button"
             data-active={tab === "servers"}
