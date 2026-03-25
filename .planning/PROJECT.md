@@ -31,13 +31,15 @@ A reliable, polished desktop app that makes MCP server management effortless and
 - ✓ **BROWSE-02**: Fuzzy search returns matching results — Phase 5 (2026-03-24)
 - ✓ **POPOVER-01**: Menu bar popover content scrolls properly — Phase 6 (2026-03-25)
 - ✓ **POPOVER-02**: No duplicate buttons in popover — Phase 6 (2026-03-25)
+- ✓ **WIND-01**: Dashboard window can be dragged from title bar area — Phase 7 (2026-03-25)
 
 ### Active
 
-- [ ] **DRAG-01**: Dashboard window can be dragged from title bar area
-- [ ] **DRAG-02**: Dashboard padding and margins follow macOS conventions
+- [ ] **WIND-02**: Dashboard padding and margins follow macOS conventions
+- [ ] **SIDE-01**: Daemon start/stop controls at top of sidebar
 - [ ] **BROWSE-01**: Browse registry layout is clean and organized
 - [ ] **BROWSE-03**: Search state persists between window opens
+- [ ] **PASTE-01**: Paste command uses multi-line layout
 
 ### Out of Scope
 
@@ -74,4 +76,4 @@ A reliable, polished desktop app that makes MCP server management effortless and
 | Systematic UI fixes | Multiple interrelated issues need coordinated approach | — Pending |
 
 ---
-*Last updated: Tue Mar 25 2026 after Phase 6: Popover Fix complete*
+*Last updated: Tue Mar 25 2026 after Phase 7: Window Drag Fix complete*
