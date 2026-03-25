@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useStatus } from "../hooks/useMcpx";
 import { ServerCard } from "./ServerCard";
 import { ServerDetail } from "./ServerDetail";
@@ -6,6 +6,7 @@ import { BrowseTab } from "./BrowseTab";
 import { DaemonControls } from "./DaemonControls";
 import { SettingsPanel } from "./SettingsPanel";
 import { CliCommandInput } from "./CliCommandInput";
+import type { BrowseState } from "../../shared/desktop-settings";
 
 type Tab = "servers" | "browse" | "settings";
 
@@ -13,8 +14,51 @@ export function Dashboard() {
   const { status, loading, refresh } = useStatus();
   const [tab, setTab] = useState<Tab>("servers");
   const [selectedServer, setSelectedServer] = useState<string | null>(null);
+  const [browseState, setBrowseState] = useState<BrowseState>({});
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
 
-  if (loading || !status) {
+  // Load settings on mount to restore persisted state
+  useEffect(() => {
+    async function loadSettings() {
+      try {
+        const settings = await window.mcpx.getDesktopSettings();
+        if (settings.browseState?.activeTab) {
+          setTab(settings.browseState.activeTab as Tab);
+        }
+        setBrowseState(settings.browseState ?? {});
+      } catch {
+        // Use defaults if settings fail to load
+      }
+      setSettingsLoaded(true);
+    }
+    loadSettings();
+  }, []);
+
+  // Persist tab changes to settings
+  const handleTabChange = async (newTab: Tab) => {
+    setTab(newTab);
+    setSelectedServer(null);
+    const newBrowseState = { ...browseState, activeTab: newTab };
+    setBrowseState(newBrowseState);
+    try {
+      await window.mcpx.updateDesktopSettings({ browseState: newBrowseState });
+    } catch {
+      // Ignore persistence errors
+    }
+  };
+
+  // Handle browse state changes from BrowseTab
+  const handleBrowseStateChange = async (state: { searchQuery?: string; activeCategory?: string }) => {
+    const newBrowseState = { ...browseState, ...state, activeTab: "browse" as const };
+    setBrowseState(newBrowseState);
+    try {
+      await window.mcpx.updateDesktopSettings({ browseState: newBrowseState });
+    } catch {
+      // Ignore persistence errors
+    }
+  };
+
+  if (loading || !status || !settingsLoaded) {
     return (
       <div className="dashboard-container" style={{ alignItems: "center", justifyItems: "center", justifyContent: "center" }}>
         Loading...
@@ -49,7 +93,7 @@ export function Dashboard() {
           <button
             className="nav-button"
             data-active={tab === "servers"}
-            onClick={() => { setTab("servers"); setSelectedServer(null); }}
+            onClick={() => handleTabChange("servers")}
           >
             <span className="material-symbols-outlined">grid_view</span>
             <span style={{ fontSize: "14px", fontWeight: 500 }}>My Servers</span>
@@ -57,7 +101,7 @@ export function Dashboard() {
           <button
             className="nav-button"
             data-active={tab === "browse"}
-            onClick={() => { setTab("browse"); setSelectedServer(null); }}
+            onClick={() => handleTabChange("browse")}
           >
             <span className="material-symbols-outlined">explore</span>
             <span style={{ fontSize: "14px", fontWeight: 500 }}>Browse Registry</span>
@@ -66,7 +110,7 @@ export function Dashboard() {
           <button
             className="nav-button"
             data-active={tab === "settings"}
-            onClick={() => { setTab("settings"); setSelectedServer(null); }}
+            onClick={() => handleTabChange("settings")}
           >
             <span className="material-symbols-outlined">settings</span>
             <span style={{ fontSize: "14px", fontWeight: 500 }}>Settings</span>
@@ -119,7 +163,15 @@ export function Dashboard() {
                     <p className="page-subtitle">Discover and install official MCP servers.</p>
                   </div>
                 </div>
-                <BrowseTab onServerAdded={refresh} status={report} />
+                <BrowseTab
+                  onServerAdded={refresh}
+                  status={report}
+                  initialState={{
+                    searchQuery: browseState.searchQuery,
+                    activeCategory: browseState.activeCategory
+                  }}
+                  onStateChange={handleBrowseStateChange}
+                />
               </>
             )}
 
