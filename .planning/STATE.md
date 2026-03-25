@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: UI Fixes
 status: Phase complete — ready for verification
-stopped_at: Completed 08-01-PLAN.md
-last_updated: "2026-03-25T12:13:59.937Z"
+stopped_at: Completed 08-02-PLAN.md
+last_updated: "2026-03-25T12:14:31.096Z"
 progress:
   total_phases: 5
   completed_phases: 4
@@ -68,6 +68,8 @@ Recent decisions affecting current work:
 - [Phase 07]: D-06: Traffic light area protected with ::before pseudo-element no-drag zone
 - [Phase 08]: D-01: Daemon controls moved to sidebar hero position for prominence
 - [Phase 08]: D-06: Standardized all dashboard padding to 16px (macOS standard)
+- [Phase 08]: D-09: Browse cards use CSS Grid with responsive 2-column layout
+- [Phase 08]: D-16: Paste command example moved to help text for natural wrapping
 
 ### Pending Todos
 
@@ -83,8 +85,8 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-25T12:13:59.935Z
-Stopped at: Completed 08-01-PLAN.md
+Last session: 2026-03-25T12:14:30.867Z
+Stopped at: Completed 08-02-PLAN.md
 Resume file: None
 
 ---
