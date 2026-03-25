@@ -164,7 +164,7 @@ export function BrowseTab({ onServerAdded, status }: BrowseTabProps) {
 
       {loading && <div style={{ color: "var(--text-secondary)", textAlign: "center", padding: "40px" }}>Loading registry...</div>}
 
-      <div style={{ display: "flex", flexDirection: "column", gap: "12px", paddingBottom: "48px" }}>
+      <div className="browse-grid">
         {serverEntries.map((entry) => {
           const shortName = entry.server.name.split("/").pop() ?? entry.server.name;
           const isInstalled = installedServerNames.has(shortName);

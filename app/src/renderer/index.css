@@ -399,6 +399,14 @@ input {
     padding-bottom: 40px;
 }
 
+/* Browse Registry Grid Layout */
+.browse-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 16px;
+    padding-bottom: 48px;
+}
+
 /* Activity Feed (if used later) */
 .activity-feed-container {
     margin-top: auto;
