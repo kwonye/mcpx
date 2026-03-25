@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRegistryList } from "../hooks/useMcpx";
 import { AddServerForm } from "./AddServerForm";
 
@@ -7,6 +7,11 @@ interface BrowseTabProps {
   status: {
     servers: Array<{ name: string }>;
   };
+  initialState?: {
+    searchQuery?: string;
+    activeCategory?: string;
+  };
+  onStateChange?: (state: { searchQuery?: string; activeCategory?: string }) => void;
 }
 
 interface RequiredInput {
@@ -24,11 +29,11 @@ const CATEGORIES = [
   { id: "web", label: "Web & Browser 🌐", query: "puppeteer brave browser" }
 ];
 
-export function BrowseTab({ onServerAdded, status }: BrowseTabProps) {
+export function BrowseTab({ onServerAdded, status, initialState, onStateChange }: BrowseTabProps) {
   const { servers, loading, search, debouncedSearch, loadMore, hasMore } = useRegistryList();
-  const [searchInput, setSearchInput] = useState("");
+  const [searchInput, setSearchInput] = useState(initialState?.searchQuery ?? "");
   const [activeQuery, setActiveQuery] = useState("");
-  const [activeCategory, setActiveCategory] = useState("all");
+  const [activeCategory, setActiveCategory] = useState(initialState?.activeCategory ?? "all");
   const [adding, setAdding] = useState<{
     registryName: string;
     shortName: string;
@@ -36,8 +41,28 @@ export function BrowseTab({ onServerAdded, status }: BrowseTabProps) {
   } | null>(null);
   const [addStatus, setAddStatus] = useState<string | null>(null);
   const [isError, setIsError] = useState(false);
+  const initialSearchTriggered = useRef(false);
 
   const installedServerNames = new Set(status.servers.map(s => s.name));
+
+  // Trigger initial search on mount if initialState has searchQuery or activeCategory
+  useEffect(() => {
+    if (initialSearchTriggered.current) return;
+    initialSearchTriggered.current = true;
+
+    if (initialState?.searchQuery) {
+      const query = initialState.searchQuery.trim();
+      setActiveQuery(query);
+      search(query);
+    } else if (initialState?.activeCategory && initialState.activeCategory !== "all") {
+      // Find the category query for the persisted category
+      const category = CATEGORIES.find(c => c.id === initialState.activeCategory);
+      if (category) {
+        setActiveQuery(category.query);
+        search(category.query);
+      }
+    }
+  }, [initialState, search]);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -45,6 +70,8 @@ export function BrowseTab({ onServerAdded, status }: BrowseTabProps) {
     setActiveCategory("");
     setActiveQuery(normalizedQuery);
     search(normalizedQuery);  // Immediate search on form submit
+    // Persist state on explicit search action
+    onStateChange?.({ searchQuery: normalizedQuery, activeCategory: "" });
   };
 
   const handleSearchInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -59,6 +86,8 @@ export function BrowseTab({ onServerAdded, status }: BrowseTabProps) {
     setSearchInput("");
     setActiveQuery(categoryQuery);
     search(categoryQuery);
+    // Persist state on category selection
+    onStateChange?.({ searchQuery: "", activeCategory: categoryId });
   };
 
   const handleAdd = async (registryName: string) => {
