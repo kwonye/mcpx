@@ -98,6 +98,9 @@ Plans:
 **Plans**: 1 plan
 
 Plans:
+- [ ] 09-01-PLAN.md — Persist search query, category, and tab state between sessions
+
+Plans:
 - [x] 05-01-PLAN.md — Simplify search by removing redundant Fuse.js filtering, rely on API search
 
 #### Phase 6: Popover Fix
@@ -111,6 +114,9 @@ Plans:
 **Plans**: 1 plan
 
 Plans:
+- [ ] 09-01-PLAN.md — Persist search query, category, and tab state between sessions
+
+Plans:
 - [x] 06-01-PLAN.md — Remove scroll-blocking CSS and reorganize popover buttons
 
 #### Phase 7: Window Drag Fix
@@ -122,6 +128,9 @@ Plans:
   2. Window moves smoothly when dragged via trackpad or mouse
   3. Traffic light buttons (close/minimize/maximize) remain clickable and functional
 **Plans**: 1 plan
+
+Plans:
+- [ ] 09-01-PLAN.md — Persist search query, category, and tab state between sessions
 
 Plans:
 - [x] 07-01-PLAN.md — Restructure sidebar HTML and CSS for window drag regions
@@ -148,7 +157,10 @@ Plans:
 **Success Criteria** (what must be TRUE):
   1. Search query remains in the input field after closing and reopening dashboard
   2. User can resume searching without retyping the previous query
-**Plans**: TBD
+**Plans**: 1 plan
+
+Plans:
+- [ ] 09-01-PLAN.md — Persist search query, category, and tab state between sessions
 
 ## Progress
 
