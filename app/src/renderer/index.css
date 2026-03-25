@@ -420,7 +420,6 @@ input {
     height: 100vh;
     padding: 16px;
     gap: 16px;
-    -webkit-app-region: drag;
 }
 
 .popover-header {
@@ -429,7 +428,6 @@ input {
     gap: 12px;
     padding-bottom: 16px;
     border-bottom: 1px solid var(--border-color);
-    -webkit-app-region: no-drag;
 }
 
 .popover-status {
@@ -449,7 +447,6 @@ input {
     border: 1px solid var(--border-color);
     border-radius: var(--radius-md);
     padding: 12px;
-    -webkit-app-region: no-drag;
 }
 
 .popover-summary-stat {
@@ -473,7 +470,6 @@ input {
     flex-direction: column;
     gap: 8px;
     margin-top: auto;
-    -webkit-app-region: no-drag;
 }
 
 .popover-btn {
