@@ -30,7 +30,7 @@ export function CliCommandInput({ onServerAdded }: CliCommandInputProps) {
   }
 
   return (
-    <div className="glass-panel" style={{ padding: "20px", borderRadius: "16px", marginBottom: "24px" }}>
+    <div className="glass-panel" style={{ padding: "16px", borderRadius: "16px", marginBottom: "24px" }}>
       <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
         <div className="form-field">
           <label htmlFor="cli-command" style={{ fontSize: "14px", fontWeight: 600, color: "var(--text-main)" }}>Paste your mcpx add command</label>
@@ -43,7 +43,7 @@ export function CliCommandInput({ onServerAdded }: CliCommandInputProps) {
                 type="text"
                 value={command}
                 onChange={(e) => setCommand(e.target.value)}
-                placeholder="e.g., claude mcp add slack --transport http https://mcp.slack.com/mcp"
+                placeholder="Paste your mcpx add command here..."
                 disabled={loading}
                 autoFocus
                 style={{ width: "100%", padding: "12px 16px 12px 40px", fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace", fontSize: "13px" }}
@@ -65,6 +65,8 @@ export function CliCommandInput({ onServerAdded }: CliCommandInputProps) {
           </div>
           <p className="field-description" style={{ marginTop: "4px" }}>
             Supports: <code style={{ background: "rgba(0,0,0,0.05)", padding: "2px 6px", borderRadius: "4px" }}>claude mcp add</code>, <code style={{ background: "rgba(0,0,0,0.05)", padding: "2px 6px", borderRadius: "4px" }}>codex mcp add</code>, <code style={{ background: "rgba(0,0,0,0.05)", padding: "2px 6px", borderRadius: "4px" }}>qwen mcp add</code>, <code style={{ background: "rgba(0,0,0,0.05)", padding: "2px 6px", borderRadius: "4px" }}>code --add-mcp</code>, <code style={{ background: "rgba(0,0,0,0.05)", padding: "2px 6px", borderRadius: "4px" }}>mcpx add</code>
+            <br />
+            <span style={{ color: "var(--text-muted)", fontSize: "11px" }}>Example: claude mcp add slack --transport http https://mcp.slack.com/mcp</span>
           </p>
         </div>
 
