@@ -81,9 +81,9 @@ Plans:
 
 **Milestone Goal:** Fix all broken UI components and interactions discovered after v1.0.
 
-- [ ] **Phase 5: Fuzzy Search Fix** - Search returns matching results
-- [ ] **Phase 6: Popover Fix** - Popover scrolls properly with no duplicate buttons
-- [ ] **Phase 7: Window Drag Fix** - Dashboard window is draggable from title bar
+- [x] **Phase 5: Fuzzy Search Fix** - Search returns matching results
+- [x] **Phase 6: Popover Fix** - Popover scrolls properly with no duplicate buttons
+- [x] **Phase 7: Window Drag Fix** - Dashboard window is draggable from title bar
 - [ ] **Phase 8: Layout Polish** - Consistent padding, organized layout, proper control placement
 - [ ] **Phase 9: Search State Persistence** - Search state persists between window opens
 
@@ -135,7 +135,11 @@ Plans:
   2. Daemon start/stop controls appear at the top of the sidebar (hero position)
   3. Browse registry shows organized card layout with consistent spacing
   4. Paste command displays as multi-line text instead of one long horizontal line
-**Plans**: TBD
+**Plans**: 2 plans
+
+Plans:
+- [ ] 08-01-PLAN.md — Move daemon controls to sidebar hero position, standardize padding
+- [ ] 08-02-PLAN.md — Change browse registry to grid layout, improve paste command display
 
 #### Phase 9: Search State Persistence
 **Goal**: Search state is preserved between dashboard window sessions
@@ -158,9 +162,9 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8 -> 9
 | 3. Tray Icon | v1.0 | 1/1 | Complete | 2026-03-12 |
 | 4. macOS UI Polish | v1.0 | 1/1 | Complete | 2026-03-12 |
 | 5. Fuzzy Search Fix | v1.1 | 1/1 | Complete | 2026-03-24 |
-| 6. Popover Fix | v1.1 | 0/1 | Not started | - |
-| 7. Window Drag Fix | v1.1 | 0/1 | Not started | - |
-| 8. Layout Polish | v1.1 | 0/TBD | Not started | - |
+| 6. Popover Fix | v1.1 | 1/1 | Complete | 2026-03-25 |
+| 7. Window Drag Fix | v1.1 | 1/1 | Complete | 2026-03-25 |
+| 8. Layout Polish | v1.1 | 0/2 | Not started | - |
 | 9. Search State Persistence | v1.1 | 0/TBD | Not started | - |
 
 ---
@@ -170,3 +174,4 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8 -> 9
 *Phase 5 planned: 2026-03-24*
 *Phase 6 planned: 2026-03-25*
 *Phase 7 planned: 2026-03-25*
+*Phase 8 planned: 2026-03-25*
