@@ -98,7 +98,7 @@ Plans:
 **Plans**: 1 plan
 
 Plans:
-- [ ] 09-01-PLAN.md — Persist search query, category, and tab state between sessions
+- [x] 09-01-PLAN.md — Persist search query, category, and tab state between sessions
 
 Plans:
 - [x] 05-01-PLAN.md — Simplify search by removing redundant Fuse.js filtering, rely on API search

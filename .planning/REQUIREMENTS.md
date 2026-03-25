@@ -23,7 +23,7 @@
 
 - [x] **BROWSE-01**: Browse registry layout is clean and organized
 - [x] **BROWSE-02**: Fuzzy search returns matching results (e.g., searching "vercel" shows Vercel servers)
-- [ ] **BROWSE-03**: Search state persists between window opens
+- [x] **BROWSE-03**: Search state persists between window opens
 
 ### Paste Command
 
@@ -67,7 +67,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | SIDE-01 | Phase 8 | Complete |
 | BROWSE-01 | Phase 8 | Complete |
 | BROWSE-02 | Phase 5 | Complete |
-| BROWSE-03 | Phase 9 | Pending |
+| BROWSE-03 | Phase 9 | Complete |
 | PASTE-01 | Phase 8 | Complete |
 
 **Coverage:**
