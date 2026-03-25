@@ -44,6 +44,7 @@ export function Dashboard() {
           </div>
           <span className="sidebar-logo-text">mcpx Manager</span>
         </div>
+        <DaemonControls daemon={report.daemon} onRefresh={refresh} />
         <div className="sidebar-inner glass-panel">
           <button
             className="nav-button"
@@ -92,7 +93,6 @@ export function Dashboard() {
                 </div>
                 <div className="servers-controls-container">
                   <CliCommandInput onServerAdded={refresh} />
-                  <DaemonControls daemon={report.daemon} onRefresh={refresh} />
                 </div>
                 <div className="server-grid">
                   {report.servers.map((server) => (

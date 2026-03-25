@@ -14,7 +14,7 @@ export function DaemonControls({ daemon, onRefresh }: DaemonControlsProps) {
   }
 
   return (
-    <div className="glass-panel" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 20px", borderRadius: "16px", marginBottom: "24px" }}>
+    <div className="glass-panel" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 16px", borderRadius: "16px" }}>
       <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
         <div className={`status-dot ${daemon.running ? 'status-online' : 'status-offline'}`} style={{ width: "10px", height: "10px" }} />
         <div>
