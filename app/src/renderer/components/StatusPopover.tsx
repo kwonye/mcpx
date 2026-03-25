@@ -45,16 +45,6 @@ export function StatusPopover() {
             {report.upstreamCount} Active
           </span>
         </div>
-        <div style={{ display: "flex", gap: "8px" }}>
-          <button style={{ padding: "4px", borderRadius: "8px", color: "var(--text-muted)", transition: "all 0.15s" }} onClick={() => window.mcpx.openDashboard()} title="Settings">
-            <span className="material-symbols-outlined" style={{ fontSize: "18px" }}>settings</span>
-          </button>
-          <button style={{ padding: "4px", borderRadius: "8px", color: "var(--text-muted)", transition: "all 0.15s" }} onClick={handleDaemonToggle} title={report.daemon.running ? "Stop Daemon" : "Start Daemon"}>
-            <span className="material-symbols-outlined" style={{ fontSize: "18px", color: report.daemon.running ? "inherit" : "var(--error)" }}>
-              power_settings_new
-            </span>
-          </button>
-        </div>
       </header>
 
       <main style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: "16px", marginTop: "4px" }}>
@@ -101,8 +91,8 @@ export function StatusPopover() {
           <span>Open Dashboard</span>
           <span className="material-symbols-outlined" style={{ fontSize: "16px" }}>open_in_new</span>
         </button>
-        <button className="popover-btn" onClick={() => window.mcpx.syncAll()}>
-          Sync All Clients
+        <button className="popover-btn" onClick={handleDaemonToggle}>
+          {report.daemon.running ? "Stop Daemon" : "Start Daemon"}
         </button>
       </footer>
     </div>
