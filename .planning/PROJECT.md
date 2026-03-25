@@ -28,14 +28,15 @@ A reliable, polished desktop app that makes MCP server management effortless and
 - ✓ Fuzzy search with Fuse.js — v1.0 (implementation exists, has bugs)
 - ✓ Tray icon with dark mode support — v1.0
 - ✓ Dark mode UI theme — v1.0
+- ✓ **BROWSE-02**: Fuzzy search returns matching results — Phase 5 (2026-03-24)
+- ✓ **POPOVER-01**: Menu bar popover content scrolls properly — Phase 6 (2026-03-25)
+- ✓ **POPOVER-02**: No duplicate buttons in popover — Phase 6 (2026-03-25)
 
 ### Active
 
-- [ ] **POPOVER-01**: Menu bar popover content scrolls properly
 - [ ] **DRAG-01**: Dashboard window can be dragged from title bar area
 - [ ] **DRAG-02**: Dashboard padding and margins follow macOS conventions
 - [ ] **BROWSE-01**: Browse registry layout is clean and organized
-- [ ] **BROWSE-02**: Fuzzy search returns matching results
 - [ ] **BROWSE-03**: Search state persists between window opens
 
 ### Out of Scope
@@ -73,4 +74,4 @@ A reliable, polished desktop app that makes MCP server management effortless and
 | Systematic UI fixes | Multiple interrelated issues need coordinated approach | — Pending |
 
 ---
-*Last updated: Mon Mar 24 2026 after v1.1 milestone start*
+*Last updated: Tue Mar 25 2026 after Phase 6: Popover Fix complete*
