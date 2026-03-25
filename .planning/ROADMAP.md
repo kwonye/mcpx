@@ -6,8 +6,8 @@ This roadmap tracks mcpx desktop app development from v1.0 MVP through v1.1 UI F
 
 ## Milestones
 
-- ✅ **v1.0 MVP** - Phases 1-4 (shipped 2026-03-12)
-- 🚧 **v1.1 UI Fixes** - Phases 5-9 (in progress)
+- **v1.0 MVP** - Phases 1-4 (shipped 2026-03-12)
+- **v1.1 UI Fixes** - Phases 5-9 (in progress)
 
 ## Phases
 
@@ -18,7 +18,7 @@ This roadmap tracks mcpx desktop app development from v1.0 MVP through v1.1 UI F
 Decimal phases appear between their surrounding integers in numeric order.
 
 <details>
-<summary>✅ v1.0 MVP (Phases 1-4) - SHIPPED 2026-03-12</summary>
+<summary>v1.0 MVP (Phases 1-4) - SHIPPED 2026-03-12</summary>
 
 ### Phase 1: Launch Stability
 **Goal**: App launches successfully and renders content reliably on every attempt
@@ -77,7 +77,7 @@ Plans:
 
 </details>
 
-### 🚧 v1.1 UI Fixes (In Progress)
+### v1.1 UI Fixes (In Progress)
 
 **Milestone Goal:** Fix all broken UI components and interactions discovered after v1.0.
 
@@ -108,7 +108,10 @@ Plans:
   1. User can scroll popover content when there are many servers
   2. Popover header remains visible while scrolling content
   3. Each action button appears exactly once in the popover (no duplicates)
-**Plans**: TBD
+**Plans**: 1 plan
+
+Plans:
+- [ ] 06-01-PLAN.md — Remove scroll-blocking CSS and reorganize popover buttons
 
 #### Phase 7: Window Drag Fix
 **Goal**: Dashboard window can be dragged from the title bar area
@@ -143,7 +146,7 @@ Plans:
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 9
+Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8 -> 9
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
@@ -152,7 +155,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 | 3. Tray Icon | v1.0 | 1/1 | Complete | 2026-03-12 |
 | 4. macOS UI Polish | v1.0 | 1/1 | Complete | 2026-03-12 |
 | 5. Fuzzy Search Fix | v1.1 | 1/1 | Complete | 2026-03-24 |
-| 6. Popover Fix | v1.1 | 0/TBD | Not started | - |
+| 6. Popover Fix | v1.1 | 0/1 | Not started | - |
 | 7. Window Drag Fix | v1.1 | 0/TBD | Not started | - |
 | 8. Layout Polish | v1.1 | 0/TBD | Not started | - |
 | 9. Search State Persistence | v1.1 | 0/TBD | Not started | - |
@@ -162,3 +165,4 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 *v1.0 completed: 2026-03-12*
 *v1.1 phases added: 2026-03-24*
 *Phase 5 planned: 2026-03-24*
+*Phase 6 planned: 2026-03-25*
