@@ -7,8 +7,8 @@
 
 ### Popover
 
-- [ ] **POPOVER-01**: User can scroll popover content when it overflows
-- [ ] **POPOVER-02**: Popover has no duplicate functionality buttons (e.g., "Open Dashboard")
+- [x] **POPOVER-01**: User can scroll popover content when it overflows
+- [x] **POPOVER-02**: Popover has no duplicate functionality buttons (e.g., "Open Dashboard")
 
 ### Window
 
@@ -60,8 +60,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| POPOVER-01 | Phase 6 | Pending |
-| POPOVER-02 | Phase 6 | Pending |
+| POPOVER-01 | Phase 6 | Complete |
+| POPOVER-02 | Phase 6 | Complete |
 | WIND-01 | Phase 7 | Pending |
 | WIND-02 | Phase 8 | Pending |
 | SIDE-01 | Phase 8 | Pending |

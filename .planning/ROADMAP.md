@@ -111,7 +111,7 @@ Plans:
 **Plans**: 1 plan
 
 Plans:
-- [ ] 06-01-PLAN.md — Remove scroll-blocking CSS and reorganize popover buttons
+- [x] 06-01-PLAN.md — Remove scroll-blocking CSS and reorganize popover buttons
 
 #### Phase 7: Window Drag Fix
 **Goal**: Dashboard window can be dragged from the title bar area

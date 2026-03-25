@@ -2,16 +2,14 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: UI Fixes
-status: completed
-stopped_at: Phase 6 context gathered
-last_updated: "2026-03-25T10:38:16.258Z"
-last_activity: "2026-03-24 — Completed 05-01: Simplified search by removing Fuse.js"
+status: Phase complete — ready for verification
+stopped_at: Completed 06-01-PLAN.md
+last_updated: "2026-03-25T10:55:32.654Z"
 progress:
   total_phases: 5
-  completed_phases: 1
-  total_plans: 1
-  completed_plans: 1
-  percent: 50
+  completed_phases: 2
+  total_plans: 2
+  completed_plans: 2
 ---
 
 # Project State
@@ -21,16 +19,12 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-24)
 
 **Core value:** A reliable, polished desktop app that makes MCP server management effortless and intuitive.
-**Current focus:** Phase 5: Fuzzy Search Fix
+**Current focus:** Phase 06 — popover-fix
 
 ## Current Position
 
-Phase: 5 of 9 (Fuzzy Search Fix)
+Phase: 06 (popover-fix) — EXECUTING
 Plan: 1 of 1
-Status: Plan complete
-Last activity: 2026-03-24 — Completed 05-01: Simplified search by removing Fuse.js
-
-Progress: [█████████░] 50% (v1.1 in progress)
 
 ## Performance Metrics
 
@@ -55,6 +49,7 @@ Progress: [█████████░] 50% (v1.1 in progress)
 - Trend: Stable
 
 *Updated after each plan completion*
+| Phase 06 P01 | 4min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -64,6 +59,8 @@ Decisions are logged in PROJECT.md Key Decisions table.
 Recent decisions affecting current work:
 
 - v1.1 milestone scope: Focus on UI fixes only, no new features
+- [Phase 06]: D-01: Remove -webkit-app-region: drag from .popover CSS class
+- [Phase 06]: D-04: Footer has two buttons - Open Dashboard (primary) and daemon toggle (secondary)
 
 ### Pending Todos
 
@@ -79,9 +76,9 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-25T10:38:16.256Z
-Stopped at: Phase 6 context gathered
-Resume file: .planning/phases/06-popover-fix/06-CONTEXT.md
+Last session: 2026-03-25T10:55:32.652Z
+Stopped at: Completed 06-01-PLAN.md
+Resume file: None
 
 ---
 
