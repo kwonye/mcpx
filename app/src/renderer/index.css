@@ -261,7 +261,6 @@ input {
     padding: 16px;
     position: relative;
     z-index: 10;
-    -webkit-app-region: drag;
     display: flex;
     flex-direction: column;
 }
@@ -282,6 +281,18 @@ input {
     gap: 12px;
     padding: 8px;
     margin-bottom: 24px;
+    -webkit-app-region: drag;
+    position: relative;
+}
+
+.sidebar-logo::before {
+    content: '';
+    position: absolute;
+    top: -16px;
+    left: -16px;
+    width: 60px;
+    height: 40px;
+    -webkit-app-region: no-drag;
 }
 
 .sidebar-logo-icon {
