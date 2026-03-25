@@ -36,10 +36,11 @@ A reliable, polished desktop app that makes MCP server management effortless and
 - ✓ **SIDE-01**: Daemon start/stop controls at top of sidebar — Phase 8 (2026-03-25)
 - ✓ **BROWSE-01**: Browse registry layout is clean and organized — Phase 8 (2026-03-25)
 - ✓ **PASTE-01**: Paste command uses multi-line layout — Phase 8 (2026-03-25)
+- ✓ **BROWSE-03**: Search state persists between window opens — Phase 9 (2026-03-25)
 
 ### Active
 
-- [ ] **BROWSE-03**: Search state persists between window opens
+None — v1.1 milestone complete
 
 ### Out of Scope
 
@@ -53,13 +54,13 @@ A reliable, polished desktop app that makes MCP server management effortless and
 
 **Tech stack:** Electron + React + TypeScript with vanilla CSS styling.
 
-**Issues discovered after v1.0:**
-1. Menu bar popover scrolling is broken
-2. Dashboard window cannot be dragged from title area
-3. Dashboard padding/margins are wrong
-4. Browse registry layout is scrambled and messy
-5. Fuzzy search doesn't return results (e.g., searching "vercel" shows nothing)
-6. Search state doesn't persist between window opens
+**Issues discovered after v1.0 (all resolved in v1.1):**
+1. ~~Menu bar popover scrolling is broken~~ — Fixed Phase 6
+2. ~~Dashboard window cannot be dragged from title area~~ — Fixed Phase 7
+3. ~~Dashboard padding/margins are wrong~~ — Fixed Phase 8
+4. ~~Browse registry layout is scrambled and messy~~ — Fixed Phase 8
+5. ~~Fuzzy search doesn't return results~~ — Fixed Phase 5
+6. ~~Search state doesn't persist between window opens~~ — Fixed Phase 9
 
 ## Constraints
 
@@ -72,8 +73,8 @@ A reliable, polished desktop app that makes MCP server management effortless and
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| Focus on fixes only | Core functionality is broken, adding features would compound problems | — Pending |
-| Systematic UI fixes | Multiple interrelated issues need coordinated approach | — Pending |
+| Focus on fixes only | Core functionality was broken, adding features would compound problems | ✓ All v1.0 issues resolved |
+| Systematic UI fixes | Multiple interrelated issues needed coordinated approach | ✓ 5 phases delivered fixes |
 
 ---
-*Last updated: Tue Mar 25 2026 after Phase 8: Layout Polish complete*
+*Last updated: Tue Mar 25 2026 after Phase 9: Search State Persistence complete — v1.1 milestone complete*
