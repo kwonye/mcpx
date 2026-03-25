@@ -7,6 +7,8 @@ import {
   type DesktopSettingsPatch
 } from "../shared/desktop-settings";
 
+const VALID_TABS = ["servers", "browse", "settings"] as const;
+
 function settingsPath(): string {
   return path.join(app.getPath("userData"), "settings.json");
 }
@@ -16,13 +18,31 @@ function normalizeSettings(value: unknown): DesktopSettings {
     ? (value as Partial<DesktopSettings>)
     : {};
 
+  const browseStatePartial = partial.browseState && typeof partial.browseState === "object"
+    ? (partial.browseState as { searchQuery?: unknown; activeCategory?: unknown; activeTab?: unknown })
+    : {};
+
+  const normalizedBrowseState = {
+    searchQuery: typeof browseStatePartial.searchQuery === "string"
+      ? browseStatePartial.searchQuery
+      : undefined,
+    activeCategory: typeof browseStatePartial.activeCategory === "string"
+      ? browseStatePartial.activeCategory
+      : undefined,
+    activeTab: typeof browseStatePartial.activeTab === "string" &&
+      VALID_TABS.includes(browseStatePartial.activeTab as typeof VALID_TABS[number])
+      ? browseStatePartial.activeTab
+      : undefined
+  };
+
   return {
     autoUpdateEnabled: typeof partial.autoUpdateEnabled === "boolean"
       ? partial.autoUpdateEnabled
       : DEFAULT_DESKTOP_SETTINGS.autoUpdateEnabled,
     startOnLoginEnabled: typeof partial.startOnLoginEnabled === "boolean"
       ? partial.startOnLoginEnabled
-      : DEFAULT_DESKTOP_SETTINGS.startOnLoginEnabled
+      : DEFAULT_DESKTOP_SETTINGS.startOnLoginEnabled,
+    browseState: normalizedBrowseState
   };
 }
 
