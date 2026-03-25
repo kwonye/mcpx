@@ -12,7 +12,7 @@
 
 ### Window
 
-- [ ] **WIND-01**: User can drag window from title bar area
+- [x] **WIND-01**: User can drag window from title bar area
 - [ ] **WIND-02**: Dashboard padding and margins follow macOS conventions (16-20pt consistent spacing)
 
 ### Sidebar
@@ -62,7 +62,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 |-------------|-------|--------|
 | POPOVER-01 | Phase 6 | Complete |
 | POPOVER-02 | Phase 6 | Complete |
-| WIND-01 | Phase 7 | Pending |
+| WIND-01 | Phase 7 | Complete |
 | WIND-02 | Phase 8 | Pending |
 | SIDE-01 | Phase 8 | Pending |
 | BROWSE-01 | Phase 8 | Pending |

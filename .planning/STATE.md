@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: UI Fixes
-status: Ready to plan
-stopped_at: Completed 06-01-PLAN.md
-last_updated: "2026-03-25T10:59:34.333Z"
+status: Phase complete — ready for verification
+stopped_at: Completed 07-01-PLAN.md
+last_updated: "2026-03-25T11:46:04.573Z"
 progress:
   total_phases: 5
-  completed_phases: 2
-  total_plans: 2
-  completed_plans: 2
+  completed_phases: 3
+  total_plans: 3
+  completed_plans: 3
 ---
 
 # Project State
@@ -19,12 +19,12 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-24)
 
 **Core value:** A reliable, polished desktop app that makes MCP server management effortless and intuitive.
-**Current focus:** Phase 06 — popover-fix
+**Current focus:** Phase 07 — window-drag-fix
 
 ## Current Position
 
-Phase: 7
-Plan: Not started
+Phase: 07 (window-drag-fix) — EXECUTING
+Plan: 1 of 1
 
 ## Performance Metrics
 
@@ -50,6 +50,7 @@ Plan: Not started
 
 *Updated after each plan completion*
 | Phase 06 P01 | 4min | 2 tasks | 3 files |
+| Phase 07 P01 | 3min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -61,6 +62,8 @@ Recent decisions affecting current work:
 - v1.1 milestone scope: Focus on UI fixes only, no new features
 - [Phase 06]: D-01: Remove -webkit-app-region: drag from .popover CSS class
 - [Phase 06]: D-04: Footer has two buttons - Open Dashboard (primary) and daemon toggle (secondary)
+- [Phase 07]: D-02: Sidebar header (.sidebar-logo) has -webkit-app-region: drag for window dragging
+- [Phase 07]: D-06: Traffic light area protected with ::before pseudo-element no-drag zone
 
 ### Pending Todos
 
@@ -76,8 +79,8 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-25T10:55:32.652Z
-Stopped at: Completed 06-01-PLAN.md
+Last session: 2026-03-25T11:46:04.570Z
+Stopped at: Completed 07-01-PLAN.md
 Resume file: None
 
 ---
