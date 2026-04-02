@@ -273,9 +273,5 @@ jobs:
           draft: false
           overwrite_files: true
           files: |
-            cli-dist/**/*
-            desktop-dist/**/*.dmg
-            desktop-dist/**/*.zip
-            desktop-dist/**/*.blockmap
-            desktop-dist/**/latest*.yml
+            desktop-dist/*.dmg
           fail_on_unmatched_files: false
