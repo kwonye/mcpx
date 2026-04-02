@@ -15,7 +15,6 @@
       "hardenedRuntime": true,
       "gatekeeperAssess": false,
       "notarize": true,
-      "notaryBundleId": "io.github.kwonye.mcpx",
       "extendInfo": {
         "LSUIElement": true
       },
