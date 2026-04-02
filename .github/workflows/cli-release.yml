@@ -37,6 +37,7 @@ jobs:
           node-version: '20'
           cache: npm
           cache-dependency-path: cli/package-lock.json
+          registry-url: 'https://registry.npmjs.org'
 
       - name: Refresh tags
         run: git fetch --tags --force
@@ -122,6 +123,8 @@ jobs:
 
       - name: Publish to npm
         run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         working-directory: cli
 
       - name: Upload CLI artifacts
