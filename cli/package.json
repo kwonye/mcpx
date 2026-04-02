@@ -6,7 +6,8 @@
     "mcp",
     "cli",
     "gateway",
-    "proxy"
+    "proxy",
+    "agent"
   ],
   "homepage": "https://github.com/kwonye/mcpx#readme",
   "bugs": {
