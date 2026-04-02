@@ -212,24 +212,20 @@ npm test
 
 ## CI/CD Workflows
 
-The project uses a consolidated release orchestration strategy:
+The project uses a unified release workflow:
 
-- **CLI release** (`.github/workflows/cli-release.yml`)
-  - **Main Trigger**: Push to `main` with changes in `cli/**` or `app/**`.
-  - **Inclusion Rules**:
-    - `cli/**` changes (or both): Releases both CLI (npm) and Desktop (GitHub Release).
-    - `app/**` changes only: Releases only Desktop (GitHub Release).
-  - **Process**: Computes shared version, tags release, publishes npm (if CLI included), and orchestrates desktop build/upload to a unified GitHub Release.
+- **Release Orchestration** (`.github/workflows/release.yml`)
+  - **Triggers**: Push to `main` with changes in `cli/**` or `app/**`, or manual `workflow_dispatch`.
+  - **Process**:
+    - **Orchestrate**: Detects changes, computes versioning, and determines inclusion rules.
+    - **Build CLI**: (Conditional) Tests, builds, and publishes to npm.
+    - **Build Desktop**: (Conditional) Builds, signs, and notarizes the macOS universal app.
+    - **Publish Release**: Downloads all artifacts and creates a single, unified GitHub Release.
 
-- **Desktop release/build** (`.github/workflows/desktop-release.yml`)
-  - **Triggers**: Orchestrated via `workflow_call` or manual `workflow_dispatch`.
-  - **Features**: Handles macOS universal packaging, app signing, and notarization (if secrets present). Falls back to unsigned builds otherwise.
-  - **Publishing**: Uploads artifacts to the provided `release_tag`.
+### Versioning Strategy
 
-### Single Monotonic Version Stream
-
-- Every qualifying `main` push increments one shared patch version.
-- Versions are tracked via git tags (`v*`) and synced across `cli/package.json` and `app/package.json` as needed during the release.
+- **Single Monotonic Stream**: Every qualifying `main` push increments one shared patch version across all components.
+- **Unified Tags**: Releases are tracked via shared git tags (`v*`).
 
 ## Notes
 

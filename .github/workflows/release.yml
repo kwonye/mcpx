@@ -1,0 +1,280 @@
+name: release
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'cli/**'
+      - 'app/**'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  orchestrate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    outputs:
+      include_cli: ${{ steps.meta.outputs.include_cli }}
+      include_desktop: ${{ steps.meta.outputs.include_desktop }}
+      version: ${{ steps.meta.outputs.version }}
+      tag: ${{ steps.meta.outputs.tag }}
+      release_body: ${{ steps.meta.outputs.release_body }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect changed paths
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            cli:
+              - 'cli/**'
+            app:
+              - 'app/**'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Refresh tags
+        run: git fetch --tags --force
+
+      - name: Compute release metadata
+        id: meta
+        run: |
+          CLI_CHANGED=${{ steps.filter.outputs.cli || 'true' }}
+          APP_CHANGED=${{ steps.filter.outputs.app || 'true' }}
+          
+          # Force true if manual dispatch
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            CLI_CHANGED=true
+            APP_CHANGED=true
+          fi
+
+          if [ "$CLI_CHANGED" = "true" ]; then
+            INCLUDE_CLI=true
+            INCLUDE_DESKTOP=true
+          else
+            INCLUDE_CLI=false
+            INCLUDE_DESKTOP=true
+          fi
+
+          VERSION=$(node .github/scripts/release-coordinator.mjs next-version --include-cli "$INCLUDE_CLI" --include-desktop "$INCLUDE_DESKTOP")
+          TAG="v${VERSION}"
+          RELEASE_BODY=$(node .github/scripts/release-coordinator.mjs release-body --include-cli "$INCLUDE_CLI" --include-desktop "$INCLUDE_DESKTOP" --version "$VERSION")
+
+          echo "include_cli=${INCLUDE_CLI}" >> "$GITHUB_OUTPUT"
+          echo "include_desktop=${INCLUDE_DESKTOP}" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          {
+            echo "release_body<<EOF"
+            echo "$RELEASE_BODY"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+  build-cli:
+    needs: orchestrate
+    if: needs.orchestrate.outputs.include_cli == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: cli/package-lock.json
+
+      - name: Update npm
+        run: npm install -g npm@latest
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: cli
+
+      - name: Build
+        run: npm run build
+        working-directory: cli
+
+      - name: Test
+        run: npm test
+        working-directory: cli
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Set release versions
+        run: |
+          npm version "${{ needs.orchestrate.outputs.version }}" --no-git-tag-version --allow-same-version
+          npm run sync-version
+        working-directory: cli
+
+      - name: Sync desktop version
+        run: npm version "${{ needs.orchestrate.outputs.version }}" --no-git-tag-version --allow-same-version
+        working-directory: app
+
+      - name: Commit and tag release
+        env:
+          RELEASE_VERSION: ${{ needs.orchestrate.outputs.version }}
+          RELEASE_TAG: ${{ needs.orchestrate.outputs.tag }}
+          SOURCE_SHA: ${{ github.sha }}
+          INCLUDE_CLI: ${{ needs.orchestrate.outputs.include_cli }}
+          INCLUDE_DESKTOP: ${{ needs.orchestrate.outputs.include_desktop }}
+        run: |
+          git add cli/package.json cli/package-lock.json cli/src/version.ts
+          git add app/package.json app/package-lock.json
+          git commit -m "chore(release): v${RELEASE_VERSION} [skip ci]"
+          TAG_BODY=$(node .github/scripts/release-coordinator.mjs tag-body --source-sha "$SOURCE_SHA" --include-cli "$INCLUDE_CLI" --include-desktop "$INCLUDE_DESKTOP" --version "$RELEASE_VERSION")
+          git tag -a "$RELEASE_TAG" -m "$TAG_BODY"
+          git push origin "$RELEASE_TAG"
+
+      - name: Publish to npm
+        run: npm publish --provenance --access public
+        working-directory: cli
+
+      - name: Upload CLI artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: cli-dist
+          path: cli/dist/
+
+  build-desktop:
+    needs: orchestrate
+    if: needs.orchestrate.outputs.include_desktop == 'true'
+    runs-on: macos-14
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: |
+            app/package-lock.json
+            cli/package-lock.json
+
+      - name: Install CLI dependencies
+        run: npm ci
+        working-directory: cli
+
+      - name: Install desktop dependencies
+        run: npm ci
+        working-directory: app
+
+      - name: Set desktop version for build
+        run: npm version "${{ needs.orchestrate.outputs.version }}" --no-git-tag-version --allow-same-version
+        working-directory: app
+
+      - name: Build desktop bundle
+        run: npm run build
+        working-directory: app
+
+      - name: Determine signing mode
+        id: signing_mode
+        env:
+          CSC_LINK: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+          CSC_KEY_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          missing=()
+          for var in CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; do
+            if [ -z "${!var}" ]; then
+              missing+=("${var}")
+            fi
+          done
+          if [ "${#missing[@]}" -eq 0 ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Package macOS app (signed + notarized)
+        if: steps.signing_mode.outputs.enabled == 'true'
+        run: npx electron-builder build --mac --universal --publish never --config.mac.hardenedRuntime=true --config.mac.gatekeeperAssess=false
+        working-directory: app
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_LINK: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+          CSC_KEY_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
+      - name: Package macOS app (unsigned)
+        if: steps.signing_mode.outputs.enabled != 'true'
+        run: npx electron-builder build --mac --universal --publish never
+        working-directory: app
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+      - name: Upload desktop artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-dist
+          path: |
+            app/dist/**/*.dmg
+            app/dist/**/*.zip
+            app/dist/**/*.blockmap
+            app/dist/**/latest*.yml
+
+  publish-release:
+    needs: [orchestrate, build-cli, build-desktop]
+    if: always() && needs.orchestrate.result == 'success' && (needs.build-cli.result == 'success' || needs.build-cli.result == 'skipped') && (needs.build-desktop.result == 'success' || needs.build-desktop.result == 'skipped')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Download CLI artifacts
+        if: needs.orchestrate.outputs.include_cli == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: cli-dist
+          path: cli-dist/
+
+      - name: Download desktop artifacts
+        if: needs.orchestrate.outputs.include_desktop == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: desktop-dist
+          path: desktop-dist/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.orchestrate.outputs.tag }}
+          body: ${{ needs.orchestrate.outputs.release_body }}
+          overwrite_files: true
+          files: |
+            cli-dist/**/*
+            desktop-dist/**/*.dmg
+            desktop-dist/**/*.zip
+            desktop-dist/**/*.blockmap
+            desktop-dist/**/latest*.yml
+          fail_on_unmatched_files: false
