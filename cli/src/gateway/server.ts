@@ -189,6 +189,28 @@ function rewriteWwwAuthenticateResourceMetadata(headerValue: string, localResour
   return `${headerValue}, resource_metadata="${localResourceMetadataUrl}"`;
 }
 
+/**
+ * Checks if a server is OAuth-capable.
+ * Only HTTP servers with Authorization headers (or similar) are considered OAuth-capable.
+ * Stdio servers with env var auth are NOT OAuth-capable - they use internal auth.
+ */
+function isOAuthCapableServer(spec: UpstreamServerSpec): boolean {
+  if (spec.transport !== "http") {
+    return false;
+  }
+
+  // Check if the server has headers that suggest OAuth usage
+  const headers = spec.headers ?? {};
+  for (const headerName of Object.keys(headers)) {
+    // Authorization header or any header with secret ref suggests OAuth/auth usage
+    if (headerName.toLowerCase() === "authorization") {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 function splitNamespacedName(value: string): { serverName: string; upstreamName: string } | null {
   const split = value.indexOf(".");
   if (split <= 0 || split >= value.length - 1) {
@@ -1015,6 +1037,16 @@ async function maybeHandleWellKnownOAuthRequest(
   const requestedUpstream = getRequestedUpstream(requestUrl);
   const upstream = getScopedHttpUpstream(config, requestedUpstream);
   if (!upstream) {
+    // No HTTP upstream found - this includes stdio servers which don't support OAuth
+    response.statusCode = 404;
+    response.setHeader("content-type", "application/json");
+    response.end(JSON.stringify({ error: "not_found" }));
+    return true;
+  }
+
+  // Check if this server is OAuth-capable
+  // Stdio servers and HTTP servers without auth headers don't support OAuth
+  if (!isOAuthCapableServer(upstream.spec)) {
     response.statusCode = 404;
     response.setHeader("content-type", "application/json");
     response.end(JSON.stringify({ error: "not_found" }));

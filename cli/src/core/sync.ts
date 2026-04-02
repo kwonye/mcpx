@@ -30,7 +30,7 @@ function buildManagedEntries(config: McpxConfig, gatewayUrl: string, localToken:
     name: `${name} (mcpx)`,
     url: `${gatewayUrl}?upstream=${encodeURIComponent(name)}`,
     headers: {
-      "x-mcpx-local-token": localToken
+      Authorization: `Bearer ${localToken}`
     }
   }));
 }

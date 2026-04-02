@@ -66,7 +66,7 @@ describe("sync engine", () => {
     expect(finalConfig.servers["circleback (mcpx)"].type).toBe("http");
     expect(finalConfig.servers["circleback (mcpx)"].url).toContain("127.0.0.1");
     expect(finalConfig.servers["circleback (mcpx)"].url).toContain("upstream=circleback");
-    expect(typeof finalConfig.servers["circleback (mcpx)"].headers?.["x-mcpx-local-token"]).toBe("string");
+    expect(typeof finalConfig.servers["circleback (mcpx)"].headers?.["Authorization"]).toBe("string");
     expect(config.servers.custom_unmanaged).toEqual({
       transport: "stdio",
       command: "npx",
@@ -234,7 +234,7 @@ describe("sync engine", () => {
     expect(syncedClaudeDesktop.mcpServers["vercel (mcpx)"]?.type).toBe("http");
     expect(syncedClaudeDesktop.mcpServers["vercel (mcpx)"]?.url).toContain("127.0.0.1");
     expect(syncedClaudeDesktop.mcpServers["vercel (mcpx)"]?.url).toContain("upstream=vercel");
-    expect(typeof syncedClaudeDesktop.mcpServers["vercel (mcpx)"].headers?.["x-mcpx-local-token"]).toBe("string");
+    expect(typeof syncedClaudeDesktop.mcpServers["vercel (mcpx)"].headers?.["Authorization"]).toBe("string");
     expect(syncedClaudeDesktop.mcpServers.existing_mcp).toBeUndefined();
     expect(syncedClaudeDesktop.mcpServers["existing_mcp (mcpx)"]?.type).toBe("http");
     expect(config.servers.existing_mcp).toEqual({
@@ -280,7 +280,7 @@ describe("sync engine", () => {
     };
 
     expect(syncedQwen.mcpServers["vercel (mcpx)"]?.httpUrl).toContain("127.0.0.1");
-    expect(syncedQwen.mcpServers["vercel (mcpx)"]?.headers?.["x-mcpx-local-token"]).toBeDefined();
+    expect(syncedQwen.mcpServers["vercel (mcpx)"]?.headers?.["Authorization"]).toBeDefined();
     expect(syncedQwen.mcpServers["existing_qwen_mcp"]).toBeUndefined();
     expect(syncedQwen.mcpServers["existing_qwen_mcp (mcpx)"]?.httpUrl).toContain("upstream=existing_qwen_mcp");
     expect(config.servers.existing_qwen_mcp).toEqual({

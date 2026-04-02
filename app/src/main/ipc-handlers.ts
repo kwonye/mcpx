@@ -9,6 +9,7 @@ import {
   syncAllClients,
   addServer,
   removeServer,
+  updateServer,
   listAuthBindings,
   SecretsManager,
   buildStatusReport,
@@ -327,6 +328,25 @@ export function registerIpcHandlers(): void {
     const secrets = new SecretsManager();
     const summary = syncAllClients(config, secrets);
     return { removed: name, sync: summary };
+  });
+
+  ipcMain.handle(IPC.UPDATE_SERVER, (_event, name: string, spec: UpstreamServerSpec, resolvedSecrets?: Record<string, string>) => {
+    const config = loadConfig();
+    const secrets = new SecretsManager();
+    
+    // Store any new secret values before updating the server
+    if (resolvedSecrets) {
+      for (const [key, value] of Object.entries(resolvedSecrets)) {
+        if (value) {
+          secrets.setSecret(key, value);
+        }
+      }
+    }
+    
+    updateServer(config, name, spec);
+    saveConfig(config);
+    const summary = syncAllClients(config, secrets);
+    return { updated: name, sync: summary };
   });
 
   ipcMain.handle(IPC.SYNC_ALL, () => {

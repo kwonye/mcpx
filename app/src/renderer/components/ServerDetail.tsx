@@ -1,3 +1,7 @@
+import { useState } from "react";
+import { EditServerForm } from "./EditServerForm";
+import type { UpstreamServerSpec } from "@mcpx/core";
+
 interface ServerDetailProps {
   server: {
     name: string;
@@ -11,6 +15,46 @@ interface ServerDetailProps {
 }
 
 export function ServerDetail({ server, onBack, onRefresh }: ServerDetailProps) {
+  const [isEditing, setIsEditing] = useState(false);
+
+  const handleEdit = () => {
+    setIsEditing(true);
+  };
+
+  const handleEditSubmit = async (spec: UpstreamServerSpec, resolvedSecrets: Record<string, string>) => {
+    try {
+      await window.mcpx.updateServer(server.name, spec, resolvedSecrets);
+      setIsEditing(false);
+      onRefresh();
+    } catch (error) {
+      alert(`Failed to update server: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+
+  const handleEditCancel = () => {
+    setIsEditing(false);
+  };
+
+  if (isEditing) {
+    return (
+      <div className="server-detail">
+        <div className="server-detail-header">
+          <button className="server-detail-back" onClick={handleEditCancel} title="Back">
+            ←
+          </button>
+          <h2 className="server-detail-title">Edit {server.name}</h2>
+        </div>
+        <EditServerForm
+          serverName={server.name}
+          transport={server.transport}
+          target={server.target}
+          authBindings={server.authBindings}
+          onSubmit={handleEditSubmit}
+          onCancel={handleEditCancel}
+        />
+      </div>
+    );
+  }
   return (
     <div className="server-detail">
       <div className="server-detail-header">
@@ -69,6 +113,14 @@ export function ServerDetail({ server, onBack, onRefresh }: ServerDetailProps) {
             </tbody>
           </table>
         )}
+      </div>
+
+      <div className="detail-section" style={{ border: "1px solid rgba(59, 130, 246, 0.2)" }}>
+        <h3 style={{ color: "var(--primary)", borderBottomColor: "rgba(59, 130, 246, 0.2)" }}>Configuration</h3>
+        <p style={{ color: "var(--text-secondary)", marginBottom: "16px" }}>Update server connection settings and authentication.</p>
+        <button className="btn btn-primary" onClick={handleEdit}>
+          Edit Configuration
+        </button>
       </div>
 
       <div className="detail-section" style={{ border: "1px solid rgba(239, 68, 68, 0.2)" }}>
