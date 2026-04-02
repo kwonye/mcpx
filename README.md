@@ -212,30 +212,24 @@ npm test
 
 ## CI/CD Workflows
 
-Top-level GitHub Actions workflows are split by release target:
+The project uses a consolidated release orchestration strategy:
 
 - **CLI release** (`.github/workflows/cli-release.yml`)
-  - Trigger: push to `main` when files in `cli/**` change.
-  - Runs CLI install/build/test, computes the next shared release version, syncs CLI runtime version, conditionally syncs desktop version for mixed releases, tags release, publishes npm package, and creates/updates the GitHub Release body.
-  - CLI creates `v*` tags for `cli-only` and mixed (`cli/**` + `app/**`) releases.
+  - **Main Trigger**: Push to `main` with changes in `cli/**` or `app/**`.
+  - **Inclusion Rules**:
+    - `cli/**` changes (or both): Releases both CLI (npm) and Desktop (GitHub Release).
+    - `app/**` changes only: Releases only Desktop (GitHub Release).
+  - **Process**: Computes shared version, tags release, publishes npm (if CLI included), and orchestrates desktop build/upload to a unified GitHub Release.
 
 - **Desktop release/build** (`.github/workflows/desktop-release.yml`)
-  - Triggers:
-    - Push to `main` when files in `app/**` or `cli/**` change.
-    - Push of tags matching `v*`.
-    - Manual run (`workflow_dispatch`) with required `release_tag` input.
-  - Uses annotated tag metadata (`mcpx-release-v1`) to determine whether desktop artifacts are included for a tag.
-  - If signing/notarization secrets are present, it produces signed/notarized builds.
-  - If signing secrets are missing, it falls back to unsigned builds (`CSC_IDENTITY_AUTO_DISCOVERY=false`) instead of skipping.
-  - Publishing behavior:
-    - `main` push with `app/**` changes and no `cli/**` changes: desktop workflow creates the next shared `v*` tag (desktop-only).
-    - `main` push including `cli/**` changes: CLI workflow owns tag creation.
-    - tag push (`v*`) with `include_desktop=true`: build and upload desktop assets to that GitHub Release tag.
-    - tag push (`v*`) with `include_desktop=false`: skip desktop artifacts (cli-only release).
-    - manual run: upload artifacts to the provided `release_tag`.
-  - Single monotonic version stream:
-    - every qualifying `main` push increments one shared patch version.
-    - each version can include `CLI`, `Desktop`, or both, with component-scoped release notes.
+  - **Triggers**: Orchestrated via `workflow_call` or manual `workflow_dispatch`.
+  - **Features**: Handles macOS universal packaging, app signing, and notarization (if secrets present). Falls back to unsigned builds otherwise.
+  - **Publishing**: Uploads artifacts to the provided `release_tag`.
+
+### Single Monotonic Version Stream
+
+- Every qualifying `main` push increments one shared patch version.
+- Versions are tracked via git tags (`v*`) and synced across `cli/package.json` and `app/package.json` as needed during the release.
 
 ## Notes
 

@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - 'cli/**'
+      - 'app/**'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -20,6 +21,7 @@ jobs:
     if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     outputs:
+      include_cli: ${{ steps.release_meta.outputs.include_cli }}
       include_desktop: ${{ steps.release_meta.outputs.include_desktop }}
       version: ${{ steps.release_meta.outputs.version }}
       tag: ${{ steps.release_meta.outputs.tag }}
@@ -30,6 +32,16 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Detect changed paths
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            cli:
+              - 'cli/**'
+            app:
+              - 'app/**'
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -47,11 +59,22 @@ jobs:
       - name: Compute release metadata
         id: release_meta
         run: |
-          INCLUDE_DESKTOP=true
-          VERSION=$(node .github/scripts/release-coordinator.mjs next-version --include-cli true --include-desktop "$INCLUDE_DESKTOP")
-          TAG="v${VERSION}"
-          RELEASE_BODY=$(node .github/scripts/release-coordinator.mjs release-body --include-cli true --include-desktop "$INCLUDE_DESKTOP" --version "$VERSION")
+          CLI_CHANGED=${{ steps.filter.outputs.cli }}
+          APP_CHANGED=${{ steps.filter.outputs.app }}
 
+          if [ "$CLI_CHANGED" = "true" ]; then
+            INCLUDE_CLI=true
+            INCLUDE_DESKTOP=true
+          else
+            INCLUDE_CLI=false
+            INCLUDE_DESKTOP=true
+          fi
+
+          VERSION=$(node .github/scripts/release-coordinator.mjs next-version --include-cli "$INCLUDE_CLI" --include-desktop "$INCLUDE_DESKTOP")
+          TAG="v${VERSION}"
+          RELEASE_BODY=$(node .github/scripts/release-coordinator.mjs release-body --include-cli "$INCLUDE_CLI" --include-desktop "$INCLUDE_DESKTOP" --version "$VERSION")
+
+          echo "include_cli=${INCLUDE_CLI}" >> "$GITHUB_OUTPUT"
           echo "include_desktop=${INCLUDE_DESKTOP}" >> "$GITHUB_OUTPUT"
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
@@ -79,10 +102,12 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
       - name: Set CLI release version
+        if: steps.release_meta.outputs.include_cli == 'true'
         run: npm version "${{ steps.release_meta.outputs.version }}" --no-git-tag-version --allow-same-version
         working-directory: cli
 
       - name: Sync runtime version
+        if: steps.release_meta.outputs.include_cli == 'true'
         run: npm run sync-version
         working-directory: cli
 
@@ -93,23 +118,27 @@ jobs:
 
       - name: Commit and tag release
         env:
+          INCLUDE_CLI: ${{ steps.release_meta.outputs.include_cli }}
           INCLUDE_DESKTOP: ${{ steps.release_meta.outputs.include_desktop }}
           RELEASE_VERSION: ${{ steps.release_meta.outputs.version }}
           RELEASE_TAG: ${{ steps.release_meta.outputs.tag }}
           SOURCE_SHA: ${{ github.sha }}
         run: |
-          git add cli/package.json cli/package-lock.json cli/src/version.ts
+          if [ "$INCLUDE_CLI" = "true" ]; then
+            git add cli/package.json cli/package-lock.json cli/src/version.ts
+          fi
           if [ "$INCLUDE_DESKTOP" = "true" ]; then
             git add app/package.json app/package-lock.json
           fi
           git commit -m "chore(release): v${RELEASE_VERSION} [skip ci]"
-          TAG_BODY=$(node .github/scripts/release-coordinator.mjs tag-body --source-sha "$SOURCE_SHA" --include-cli true --include-desktop "$INCLUDE_DESKTOP" --version "$RELEASE_VERSION")
+          TAG_BODY=$(node .github/scripts/release-coordinator.mjs tag-body --source-sha "$SOURCE_SHA" --include-cli "$INCLUDE_CLI" --include-desktop "$INCLUDE_DESKTOP" --version "$RELEASE_VERSION")
           git tag -a "$RELEASE_TAG" -m "$TAG_BODY"
 
       - name: Push release tag
         run: git push origin "${{ steps.release_meta.outputs.tag }}"
 
       - name: Debug OIDC claims
+        if: steps.release_meta.outputs.include_cli == 'true'
         run: |
           echo "Repository: ${{ github.repository }}"
           echo "Workflow: ${{ github.workflow }}"
@@ -124,10 +153,12 @@ jobs:
           echo "ACTIONS_ID_TOKEN_REQUEST_URL: ${ACTIONS_ID_TOKEN_REQUEST_URL}"
 
       - name: Publish to npm
+        if: steps.release_meta.outputs.include_cli == 'true'
         run: npm publish --provenance --access public
         working-directory: cli
 
       - name: Upload CLI artifacts
+        if: steps.release_meta.outputs.include_cli == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: cli-dist
@@ -141,7 +172,7 @@ jobs:
     with:
       release_tag: ${{ needs.cli-release.outputs.tag }}
       build_version: ${{ needs.cli-release.outputs.version }}
-      include_cli: true
+      include_cli: ${{ needs.cli-release.outputs.include_cli == 'true' }}
     secrets: inherit
 
   create-release:
@@ -156,6 +187,7 @@ jobs:
           fetch-depth: 0
 
       - name: Download CLI artifacts
+        if: needs.cli-release.outputs.include_cli == 'true'
         uses: actions/download-artifact@v4
         with:
           name: cli-dist
