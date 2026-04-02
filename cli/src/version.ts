@@ -1,2 +1,2 @@
-// This version is synced automatically during the release process (e.g. by cli-release).
+// Version management: cli/src/version.ts is updated by the release process.
 export const APP_VERSION = "0.1.3";

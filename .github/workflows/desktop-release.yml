@@ -78,7 +78,7 @@ jobs:
             echo "build_version=$VERSION" >> "$GITHUB_OUTPUT"
             echo "include_cli=$INPUT_INCLUDE_CLI" >> "$GITHUB_OUTPUT"
             echo "include_desktop=true" >> "$GITHUB_OUTPUT"
-            echo "::notice::Publishing desktop assets for workflow_call on tag $TAG."
+            echo "::notice::Publishing desktop assets for workflow_call on tag $TAG. include_cli=$INPUT_INCLUDE_CLI"
           elif [ "$EVENT_NAME" = "workflow_dispatch" ]; then
             TAG="$INPUT_RELEASE_TAG"
             VERSION="${TAG#v}"
