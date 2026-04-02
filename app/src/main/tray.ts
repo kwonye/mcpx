@@ -26,7 +26,7 @@ function buildContextMenu(daemonRunning: boolean): Menu {
   if (daemonRunning) {
     template.push(
       {
-        label: "Stop Daemon",
+        label: "Stop Gateway",
         click: () => {
           onStopDaemonRequested?.();
         }
@@ -36,7 +36,7 @@ function buildContextMenu(daemonRunning: boolean): Menu {
   } else {
     template.push(
       {
-        label: "Start Daemon",
+        label: "Start Gateway",
         click: () => {
           onStartDaemonRequested?.();
         }
@@ -78,7 +78,7 @@ export function updateTrayForDaemonStatus(running: boolean): void {
   if (!tray) return;
 
   daemonRunning = running;
-  const tooltip = running ? "mcpx - Daemon running" : "mcpx - Daemon stopped";
+  const tooltip = running ? "mcpx - Gateway running" : "mcpx - Gateway stopped";
   tray.setToolTip(tooltip);
 }
 

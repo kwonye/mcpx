@@ -18,19 +18,19 @@ beforeEach(() => {
 describe("DaemonControls", () => {
   it("shows Stop when daemon is running", async () => {
     render(<DaemonControls daemon={{ running: true, pid: 1234, port: 37373 }} onRefresh={vi.fn()} />);
-    expect(await screen.findByRole("button", { name: /Stop Daemon/i })).toBeDefined();
+    expect(await screen.findByRole("button", { name: /Stop Gateway/i })).toBeDefined();
   });
 
   it("shows Start when daemon is stopped", async () => {
     render(<DaemonControls daemon={{ running: false }} onRefresh={vi.fn()} />);
-    expect(await screen.findByRole("button", { name: /Start Daemon/i })).toBeDefined();
+    expect(await screen.findByRole("button", { name: /Start Gateway/i })).toBeDefined();
   });
 
   it("stops the daemon when running", async () => {
     const onRefresh = vi.fn();
     render(<DaemonControls daemon={{ running: true, pid: 1234, port: 37373 }} onRefresh={onRefresh} />);
 
-    fireEvent.click(screen.getByRole("button", { name: /Stop Daemon/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Stop Gateway/i }));
     expect(mockMcpx.daemonStop).toHaveBeenCalledTimes(1);
   });
 
@@ -38,7 +38,7 @@ describe("DaemonControls", () => {
     const onRefresh = vi.fn();
     render(<DaemonControls daemon={{ running: false }} onRefresh={onRefresh} />);
 
-    fireEvent.click(screen.getByRole("button", { name: /Start Daemon/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Start Gateway/i }));
     expect(mockMcpx.daemonStart).toHaveBeenCalledTimes(1);
   });
 });

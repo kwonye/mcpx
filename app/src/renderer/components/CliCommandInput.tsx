@@ -7,9 +7,16 @@ interface CliCommandInputProps {
 
 export function CliCommandInput({ onServerAdded }: CliCommandInputProps) {
   const [command, setCommand] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
+const [loading, setLoading] = useState(false);
+const [error, setError] = useState<string | null>(null);
+const [success, setSuccess] = useState<string | null>(null);
+  const supportedCommands = [
+    "claude mcp add",
+    "codex mcp add",
+    "qwen mcp add",
+    "code --add-mcp",
+    "mcpx add"
+  ];
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -64,13 +71,13 @@ export function CliCommandInput({ onServerAdded }: CliCommandInputProps) {
           </div>
           <div className="field-description">
             <span>Supports:</span>
-            <div className="cli-command-supports">
-              <code className="inline-code">claude mcp add</code>
-              <code className="inline-code">codex mcp add</code>
-              <code className="inline-code">qwen mcp add</code>
-              <code className="inline-code">code --add-mcp</code>
-              <code className="inline-code">mcpx add</code>
-            </div>
+            <ul className="cli-command-supports" aria-label="Supported commands">
+              {supportedCommands.map((supportedCommand) => (
+                <li key={supportedCommand} className="cli-command-support-item">
+                  <code className="inline-code">{supportedCommand}</code>
+                </li>
+              ))}
+            </ul>
             <span className="cli-command-example">Example: claude mcp add slack --transport http https://mcp.slack.com/mcp</span>
           </div>
         </div>

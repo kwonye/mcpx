@@ -56,7 +56,7 @@ export function StatusPopover() {
             <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
               <div className={`status-dot ${report.daemon.running ? 'status-online' : 'status-offline'}`} style={{ width: "10px", height: "10px" }} />
               <div style={{ display: "flex", flexDirection: "column" }}>
-                <span style={{ fontSize: "13px", fontWeight: 600, color: "var(--text-main)" }}>Local Daemon</span>
+                <span style={{ fontSize: "13px", fontWeight: 600, color: "var(--text-main)" }}>Local Gateway</span>
                 <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>
                   {report.daemon.running ? `Port: ${report.daemon.port}` : "Offline"}
                 </span>
@@ -92,7 +92,7 @@ export function StatusPopover() {
           <span className="material-symbols-outlined" style={{ fontSize: "16px" }}>open_in_new</span>
         </button>
         <button className="popover-btn" onClick={handleDaemonToggle}>
-          {report.daemon.running ? "Stop Daemon" : "Start Daemon"}
+          {report.daemon.running ? "Stop Gateway" : "Start Gateway"}
         </button>
       </footer>
     </div>

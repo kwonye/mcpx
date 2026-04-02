@@ -486,9 +486,9 @@ select {
 
 .daemon-panel {
     display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--space-4);
+    flex-direction: column;
+    align-items: stretch;
+    gap: 14px;
     padding: 16px;
     border-radius: var(--radius-md);
 }
@@ -498,6 +498,10 @@ select {
     align-items: flex-start;
     gap: 12px;
     min-width: 0;
+}
+
+.daemon-panel .btn {
+    width: 100%;
 }
 
 .daemon-panel__indicator {
@@ -1014,9 +1018,15 @@ select {
 
 .cli-command-supports {
     display: flex;
-    flex-wrap: wrap;
+    flex-direction: column;
     gap: 6px;
-    margin-top: 6px;
+    margin: 8px 0 0;
+    padding: 0;
+    list-style: none;
+}
+
+.cli-command-support-item {
+    margin: 0;
 }
 
 .cli-command-example {

@@ -33,12 +33,12 @@ export function DaemonControls({ daemon, onRefresh }: DaemonControlsProps) {
         {daemon.running ? (
           <>
             <span className="material-symbols-outlined">stop_circle</span>
-            Stop Daemon
+            Stop Gateway
           </>
         ) : (
           <>
             <span className="material-symbols-outlined">play_circle</span>
-            Start Daemon
+            Start Gateway
           </>
         )}
       </button>
