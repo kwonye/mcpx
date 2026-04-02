@@ -16,7 +16,8 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/kwonye/mcpx.git"
+    "url": "git+https://github.com/kwonye/mcpx.git",
+    "directory": "cli"
   },
   "license": "MIT",
   "author": "Will Kwon",
