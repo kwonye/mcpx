@@ -15,7 +15,6 @@ import { applyStartOnLoginSetting, wasOpenedAtLogin } from "./login-item";
 import { setAutoUpdateEnabled } from "./update-manager";
 
 // Export mutable state for testing lifecycle handlers
-// (Used by the app's main entry point to manage state)
 export const lifecycleState = { allowQuit: false };
 
 let daemonRunning = false;
