@@ -9,7 +9,8 @@
     "proxy",
     "agent",
     "ai",
-    "gateway-proxy"
+    "gateway-proxy",
+    "gateway-installer"
   ],
   "homepage": "https://github.com/kwonye/mcpx#readme",
   "bugs": {
