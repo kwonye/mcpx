@@ -270,6 +270,7 @@ jobs:
         with:
           tag_name: ${{ needs.orchestrate.outputs.tag }}
           body: ${{ needs.orchestrate.outputs.release_body }}
+          draft: false
           overwrite_files: true
           files: |
             cli-dist/**/*
