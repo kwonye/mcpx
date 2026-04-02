@@ -49,10 +49,22 @@ export function getLogPath(): string {
   return path.join(getLogDir(), "daemon.log");
 }
 
-export function ensureParentDir(filePath: string): void {
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+export function getUpdatesDir(): string {
+  return path.join(getDataRoot(), "mcpx", "updates");
+}
+
+export function getStagedVersionPath(): string {
+  return path.join(getUpdatesDir(), "staged-version.json");
+}
+
+export function getUpdateLockPath(): string {
+  return path.join(getUpdatesDir(), ".update.lock");
 }
 
 export function ensureDir(dirPath: string): void {
   fs.mkdirSync(dirPath, { recursive: true });
+}
+
+export function ensureParentDir(filePath: string): void {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
 }

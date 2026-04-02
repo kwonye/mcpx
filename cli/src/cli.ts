@@ -37,6 +37,8 @@ import { getConfigPath, getManagedIndexPath } from "./core/paths.js";
 import { loadManagedIndex } from "./core/managed-index.js";
 import { STATUS_CLIENTS, buildStatusReport, type StatusAuthBinding, type StatusReport, type StatusServerEntry } from "./core/status.js";
 import { APP_VERSION } from "./version.js";
+import { getStagedCliPath, getStagedUpdate, clearStagedUpdate, checkForUpdates } from "./core/update.js";
+import { performUpdate, performRollback, runBackgroundUpdate } from "./core/update-manager.js";
 
 const VALID_CLIENTS: ClientId[] = STATUS_CLIENTS;
 
@@ -1361,6 +1363,72 @@ function registerClientsCommands(program: Command): void {
     });
 }
 
+function registerUpdateCommand(program: Command): void {
+  const update = program.command("update").description("Check for and install updates");
+
+  update
+    .command("check")
+    .option("--json", "Output JSON")
+    .description("Check for available updates")
+    .action(async (options: { json?: boolean }) => {
+      const status = await checkForUpdates();
+
+      if (options.json) {
+        process.stdout.write(`${JSON.stringify(status, null, 2)}\n`);
+        return;
+      }
+
+      process.stdout.write(`Current: ${status.currentVersion}\n`);
+      if (status.latestVersion) {
+        process.stdout.write(`Latest:  ${status.latestVersion}\n`);
+        if (status.updateAvailable) {
+          process.stdout.write("Status:  Update available. Run `mcpx update` to install.\n");
+        } else {
+          process.stdout.write("Status:  Up to date.\n");
+        }
+      } else {
+        process.stdout.write(`Status:  Unable to check for updates.${status.error ? ` (${status.error})` : ""}\n`);
+      }
+    });
+
+  update
+    .command("install")
+    .description("Download and stage the latest update")
+    .action(async () => {
+      process.stdout.write("Checking for updates...\n");
+      const result = await performUpdate();
+      process.stdout.write(`${result.message}\n`);
+      if (!result.success) {
+        process.exitCode = 1;
+      }
+    });
+
+  update
+    .command("rollback")
+    .description("Roll back to the previously installed version")
+    .action(() => {
+      const result = performRollback();
+      process.stdout.write(`${result.message}\n`);
+      if (!result.success) {
+        process.exitCode = 1;
+      }
+    });
+
+  update
+    .command("status")
+    .description("Show current update status")
+    .action(() => {
+      const staged = getStagedUpdate();
+      if (staged) {
+        process.stdout.write(`Staged version: ${staged.version}\n`);
+        process.stdout.write(`Staged at: ${staged.stagedAt}\n`);
+        process.stdout.write("Status: Will activate on next run.\n");
+      } else {
+        process.stdout.write("No staged updates.\n");
+      }
+    });
+}
+
 function registerMcpCompat(program: Command): void {
   const mcp = program.command("mcp").description("Compatibility namespace for MCP commands");
   registerAddCommand(mcp);
@@ -1369,8 +1437,29 @@ function registerMcpCompat(program: Command): void {
 }
 
 export async function runCli(argv = process.argv): Promise<void> {
-  // Extract raw args (without node and script path) for compatibility check
+  if (process.env.MCPX_UPDATE_CHILD === "1") {
+    await runBackgroundUpdate();
+    return;
+  }
+
   const rawArgs = argv.slice(2);
+  const isUpdateCommand = rawArgs[0] === "update";
+
+  if (!isUpdateCommand) {
+    const stagedCliPath = getStagedCliPath();
+    const stagedInfo = getStagedUpdate();
+
+    if (stagedCliPath && stagedInfo && stagedCliPath !== argv[1]) {
+      execFileSync(process.execPath, [stagedCliPath, ...rawArgs], {
+        stdio: "inherit",
+        env: {
+          ...process.env,
+          MCPX_USING_STAGED: "1"
+        }
+      });
+      return;
+    }
+  }
 
   // Check for client-native compatibility patterns before Commander parses
   if (rawArgs.length > 0) {
@@ -1404,6 +1493,7 @@ export async function runCli(argv = process.argv): Promise<void> {
   registerAuthCommands(program);
   registerClientsCommands(program);
   registerMcpCompat(program);
+  registerUpdateCommand(program);
 
   await program.parseAsync(argv);
 }

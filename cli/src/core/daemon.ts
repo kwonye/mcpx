@@ -7,6 +7,7 @@ import { SecretsManager } from "./secrets.js";
 import { ensureGatewayToken, getGatewayTokenSecretName } from "./registry.js";
 import type { McpxConfig } from "../types.js";
 import { saveConfig } from "./config.js";
+import { startBackgroundUpdateCheck } from "./update-manager.js";
 
 export interface DaemonStatus {
   running: boolean;
@@ -140,6 +141,8 @@ export async function startDaemon(config: McpxConfig, cliPath: string, secrets: 
   child.unref();
 
   fs.writeFileSync(pidPath, `${child.pid}\n`, { mode: 0o600 });
+
+  startBackgroundUpdateCheck();
 
   return {
     started: true,

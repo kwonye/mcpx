@@ -48,6 +48,11 @@ export { loadManagedIndex } from "./managed-index.js";
 // Paths
 export { getConfigPath, getManagedIndexPath } from "./paths.js";
 
+// Update
+export { checkForUpdates, getStagedUpdate, getStagedCliPath, clearStagedUpdate, compareVersions } from "./update.js";
+export type { UpdateStatus, StagedUpdateInfo } from "./update.js";
+export { startBackgroundUpdateCheck, performUpdate, performRollback } from "./update-manager.js";
+
 // Types (re-export from parent)
 export type {
   McpxConfig,
