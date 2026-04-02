@@ -24,9 +24,9 @@ pkill -f "dist/mac-arm64/mcpx.app" || true
 sleep 1
 
 echo "Installing to /Applications..."
-ts=$(date +%Y%m%d-%H%M%S)
 if [ -d /Applications/mcpx.app ]; then
-  mv /Applications/mcpx.app "/Applications/mcpx.app.backup-$ts"
+  echo "Removing existing installation..."
+  rm -rf /Applications/mcpx.app
 fi
 ditto dist/mac-arm64/mcpx.app /Applications/mcpx.app
 

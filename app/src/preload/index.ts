@@ -7,6 +7,7 @@ const api = {
   getServers: () => ipcRenderer.invoke(IPC.GET_SERVERS),
   getDesktopSettings: () => ipcRenderer.invoke(IPC.GET_DESKTOP_SETTINGS),
   addServer: (name: string, spec: unknown) => ipcRenderer.invoke(IPC.ADD_SERVER, name, spec),
+  updateServer: (name: string, spec: unknown, resolvedSecrets?: Record<string, string>) => ipcRenderer.invoke(IPC.UPDATE_SERVER, name, spec, resolvedSecrets),
   removeServer: (name: string) => ipcRenderer.invoke(IPC.REMOVE_SERVER, name),
   updateDesktopSettings: (patch: DesktopSettingsPatch) => ipcRenderer.invoke(IPC.UPDATE_DESKTOP_SETTINGS, patch),
   syncAll: () => ipcRenderer.invoke(IPC.SYNC_ALL),

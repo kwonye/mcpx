@@ -562,7 +562,10 @@ describe("gateway passthrough", () => {
     const config = defaultConfig();
     config.servers.vercel = {
       transport: "http",
-      url: `http://127.0.0.1:${upstream.port}/mcp`
+      url: `http://127.0.0.1:${upstream.port}/mcp`,
+      headers: {
+        Authorization: "Bearer test-token"
+      }
     };
     saveConfig(config);
 

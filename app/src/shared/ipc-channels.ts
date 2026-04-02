@@ -3,6 +3,7 @@ export const IPC = {
   GET_SERVERS: "mcpx:get-servers",
   GET_DESKTOP_SETTINGS: "mcpx:get-desktop-settings",
   ADD_SERVER: "mcpx:add-server",
+  UPDATE_SERVER: "mcpx:update-server",
   REMOVE_SERVER: "mcpx:remove-server",
   UPDATE_DESKTOP_SETTINGS: "mcpx:update-desktop-settings",
   SYNC_ALL: "mcpx:sync-all",

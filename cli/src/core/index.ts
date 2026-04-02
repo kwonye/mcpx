@@ -17,7 +17,7 @@ export { syncAllClients, getGatewayUrl } from "./sync.js";
 export type { SyncSummary } from "./sync.js";
 
 // Registry (server add/remove)
-export { addServer, removeServer } from "./registry.js";
+export { addServer, removeServer, updateServer } from "./registry.js";
 
 // Secrets
 export { SecretsManager } from "./secrets.js";

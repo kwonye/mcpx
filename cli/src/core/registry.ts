@@ -25,6 +25,16 @@ export function removeServer(config: McpxConfig, name: string, force = false): v
   delete config.servers[name];
 }
 
+export function updateServer(config: McpxConfig, name: string, spec: UpstreamServerSpec): void {
+  validateServerName(name);
+
+  if (!config.servers[name]) {
+    throw new Error(`Server \"${name}\" does not exist.`);
+  }
+
+  config.servers[name] = spec;
+}
+
 export function getGatewayTokenSecretName(config: McpxConfig): string {
   if (!config.gateway.tokenRef.startsWith("secret://")) {
     return "local_gateway_token";
