@@ -215,7 +215,7 @@ jobs:
 
       - name: Package macOS app (signed + notarized)
         if: steps.signing_mode.outputs.enabled == 'true'
-        run: npx electron-builder build --mac --universal --publish never --config.mac.hardenedRuntime=true --config.mac.gatekeeperAssess=false
+        run: npx electron-builder build --mac --universal --publish never
         working-directory: app
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
