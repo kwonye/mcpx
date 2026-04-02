@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const updateEventHandlers: Record<string, (...args: unknown[]) => void> = {};
-const checkForUpdatesMock = vi.fn().mockResolvedValue(undefined);
+const checkForUpdatesMock = vi.fn().mockResolvedValue({ updateInfo: { version: "1.2.3" } });
 const quitAndInstallMock = vi.fn();
 const onMock = vi.fn((event: string, handler: (...args: unknown[]) => void) => {
   updateEventHandlers[event] = handler;
@@ -99,5 +99,29 @@ describe("update manager", () => {
 
     expect(showMessageBoxMock).toHaveBeenCalledTimes(1);
     expect(quitAndInstallMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns a manual check message when an update is found", async () => {
+    const { checkForUpdatesNow } = await import("../../src/main/update-manager");
+
+    const result = await checkForUpdatesNow();
+
+    expect(result).toEqual({
+      status: "checking",
+      message: "Update 1.2.3 found. Downloading now and it will install on the next restart."
+    });
+    expect(checkForUpdatesMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns latest-version status when no update is available", async () => {
+    const { checkForUpdatesNow } = await import("../../src/main/update-manager");
+    checkForUpdatesMock.mockResolvedValueOnce({ updateInfo: undefined });
+
+    const result = await checkForUpdatesNow();
+
+    expect(result).toEqual({
+      status: "downloaded",
+      message: "You're already on the latest version."
+    });
   });
 });

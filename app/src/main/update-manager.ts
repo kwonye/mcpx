@@ -7,11 +7,47 @@ let checkInterval: ReturnType<typeof setInterval> | null = null;
 let initialized = false;
 let updateDownloadedHandler: (() => void) | null = null;
 
-async function checkForUpdatesSafe(): Promise<void> {
+export interface UpdateCheckResult {
+  status: "unsupported" | "checking" | "downloaded";
+  message: string;
+}
+
+async function runUpdateCheck(): Promise<UpdateCheckResult> {
+  if (!app.isPackaged) {
+    return {
+      status: "unsupported",
+      message: "Updates are only available in packaged builds."
+    };
+  }
+
+  ensureInitialized();
+
   try {
-    await autoUpdater.checkForUpdates();
+    const result = await autoUpdater.checkForUpdates();
+    const version = result?.updateInfo?.version;
+
+    if (version) {
+      return {
+        status: "checking",
+        message: `Update ${version} found. Downloading now and it will install on the next restart.`
+      };
+    }
+
+    return {
+      status: "downloaded",
+      message: "You're already on the latest version."
+    };
   } catch (error) {
     console.error("[update-manager] update check failed:", error);
+    throw error;
+  }
+}
+
+async function checkForUpdatesSafe(): Promise<void> {
+  try {
+    await runUpdateCheck();
+  } catch {
+    // Logged in runUpdateCheck.
   }
 }
 
@@ -29,7 +65,7 @@ function ensureInitialized(): void {
 
   initialized = true;
   autoUpdater.autoDownload = true;
-  autoUpdater.autoInstallOnAppQuit = false;
+  autoUpdater.autoInstallOnAppQuit = true;
 
   updateDownloadedHandler = () => {
     void dialog.showMessageBox({
@@ -74,6 +110,10 @@ export function setAutoUpdateEnabled(enabled: boolean): void {
 
   ensureInitialized();
   startChecking();
+}
+
+export function checkForUpdatesNow(): Promise<UpdateCheckResult> {
+  return runUpdateCheck();
 }
 
 export function disposeUpdateManager(): void {

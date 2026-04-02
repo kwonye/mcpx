@@ -6,6 +6,7 @@ export const IPC = {
   UPDATE_SERVER: "mcpx:update-server",
   REMOVE_SERVER: "mcpx:remove-server",
   UPDATE_DESKTOP_SETTINGS: "mcpx:update-desktop-settings",
+  CHECK_FOR_UPDATES: "mcpx:check-for-updates",
   SYNC_ALL: "mcpx:sync-all",
   DAEMON_START: "mcpx:daemon-start",
   DAEMON_STOP: "mcpx:daemon-stop",

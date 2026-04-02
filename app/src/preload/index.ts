@@ -10,6 +10,7 @@ const api = {
   updateServer: (name: string, spec: unknown, resolvedSecrets?: Record<string, string>) => ipcRenderer.invoke(IPC.UPDATE_SERVER, name, spec, resolvedSecrets),
   removeServer: (name: string) => ipcRenderer.invoke(IPC.REMOVE_SERVER, name),
   updateDesktopSettings: (patch: DesktopSettingsPatch) => ipcRenderer.invoke(IPC.UPDATE_DESKTOP_SETTINGS, patch),
+  checkForUpdates: () => ipcRenderer.invoke(IPC.CHECK_FOR_UPDATES),
   syncAll: () => ipcRenderer.invoke(IPC.SYNC_ALL),
   daemonStart: () => ipcRenderer.invoke(IPC.DAEMON_START),
   daemonStop: () => ipcRenderer.invoke(IPC.DAEMON_STOP),

@@ -24,7 +24,7 @@ import { selectBestPackage, extractRequiredInputs, mapServerToSpec } from "./ser
 import type { SelectedOption } from "./server-mapper";
 import { loadDesktopSettings, updateDesktopSettings } from "./settings-store";
 import { applyStartOnLoginSetting } from "./login-item";
-import { setAutoUpdateEnabled } from "./update-manager";
+import { checkForUpdatesNow, setAutoUpdateEnabled } from "./update-manager";
 
 // Cache the selected option between prepare and confirm calls
 let pendingAdd: { name: string; option: SelectedOption } | null = null;
@@ -310,6 +310,10 @@ export function registerIpcHandlers(): void {
     applyStartOnLoginSetting(next.startOnLoginEnabled);
     setAutoUpdateEnabled(next.autoUpdateEnabled);
     return next;
+  });
+
+  ipcMain.handle(IPC.CHECK_FOR_UPDATES, async () => {
+    return checkForUpdatesNow();
   });
 
   ipcMain.handle(IPC.ADD_SERVER, (_event, name: string, spec: UpstreamServerSpec) => {

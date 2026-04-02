@@ -4,7 +4,8 @@ import { SettingsPanel } from "../../src/renderer/components/SettingsPanel";
 
 const mockMcpx = {
   getDesktopSettings: vi.fn(),
-  updateDesktopSettings: vi.fn()
+  updateDesktopSettings: vi.fn(),
+  checkForUpdates: vi.fn()
 };
 
 beforeEach(() => {
@@ -73,5 +74,24 @@ describe("SettingsPanel", () => {
     fireEvent.click(autoUpdate);
 
     expect(await screen.findByText("save failed")).toBeDefined();
+  });
+
+  it("checks for updates on demand and shows the result", async () => {
+    mockMcpx.getDesktopSettings.mockResolvedValue({
+      autoUpdateEnabled: true,
+      startOnLoginEnabled: true
+    });
+    mockMcpx.checkForUpdates.mockResolvedValue({
+      status: "checking",
+      message: "Update 1.2.3 found. Downloading now and it will install on the next restart."
+    });
+
+    render(<SettingsPanel />);
+    fireEvent.click(await screen.findByRole("button", { name: /Check for Updates/i }));
+
+    await waitFor(() => {
+      expect(mockMcpx.checkForUpdates).toHaveBeenCalledTimes(1);
+    });
+    expect(await screen.findByText(/Downloading now and it will install on the next restart/i)).toBeDefined();
   });
 });

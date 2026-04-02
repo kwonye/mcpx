@@ -15,6 +15,8 @@ export function SettingsPanel() {
   const [settings, setSettings] = useState<DesktopSettings | null>(null);
   const [savingKey, setSavingKey] = useState<SettingKey | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [updateMessage, setUpdateMessage] = useState<string | null>(null);
+  const [checkingForUpdates, setCheckingForUpdates] = useState(false);
 
   useEffect(() => {
     window.mcpx.getDesktopSettings()
@@ -33,6 +35,7 @@ export function SettingsPanel() {
 
     const previous = settings;
     setError(null);
+    setUpdateMessage(null);
     setSavingKey(key);
     setSettings({
       ...settings,
@@ -55,6 +58,21 @@ export function SettingsPanel() {
   }
 
   const busy = savingKey !== null;
+
+  const handleCheckForUpdates = async () => {
+    setError(null);
+    setUpdateMessage(null);
+    setCheckingForUpdates(true);
+
+    try {
+      const result = await window.mcpx.checkForUpdates();
+      setUpdateMessage(result.message);
+    } catch (checkError) {
+      setError(formatError(checkError));
+    } finally {
+      setCheckingForUpdates(false);
+    }
+  };
 
   return (
     <section className="glass-panel settings-panel">
@@ -91,7 +109,23 @@ export function SettingsPanel() {
         />
       </div>
 
+      <div className="settings-panel__item settings-panel__item--stacked">
+        <div>
+          <span className="settings-panel__label">Updates</span>
+          <p className="settings-panel__description">Check for app updates now. Any downloaded update will install the next time you restart mcpx.</p>
+        </div>
+        <button
+          type="button"
+          className="btn btn-secondary"
+          onClick={handleCheckForUpdates}
+          disabled={checkingForUpdates}
+        >
+          {checkingForUpdates ? "Checking..." : "Check for Updates"}
+        </button>
+      </div>
+
       {error && <div className="feedback-message error">{error}</div>}
+      {updateMessage && <div className="feedback-message success">{updateMessage}</div>}
     </section>
   );
 }
