@@ -5,7 +5,8 @@
   "keywords": [
     "mcp",
     "cli",
-    "gateway"
+    "gateway",
+    "proxy"
   ],
   "homepage": "https://github.com/kwonye/mcpx#readme",
   "bugs": {
