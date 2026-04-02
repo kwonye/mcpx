@@ -9,8 +9,16 @@ export function App() {
   });
 
   if (view === "popover") {
-    return <StatusPopover />;
+    return (
+      <div className="app-shell app-shell--popover">
+        <StatusPopover />
+      </div>
+    );
   }
 
-  return <Dashboard />;
+  return (
+    <div className="app-shell app-shell--dashboard">
+      <Dashboard />
+    </div>
+  );
 }

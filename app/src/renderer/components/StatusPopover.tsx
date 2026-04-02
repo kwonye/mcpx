@@ -37,7 +37,7 @@ export function StatusPopover() {
   }
 
   return (
-    <div className="popover glass-panel" style={{ border: "none", boxShadow: "none" }}>
+    <div className="popover glass-panel">
       <header className="popover-header" style={{ justifyContent: "space-between", borderBottom: "1px solid rgba(255, 255, 255, 0.4)", paddingBottom: "12px" }}>
         <div style={{ display: "flex", flexDirection: "column" }}>
           <span style={{ fontSize: "14px", fontWeight: 700, color: "var(--text-main)", letterSpacing: "-0.015em" }}>MCP Hub</span>

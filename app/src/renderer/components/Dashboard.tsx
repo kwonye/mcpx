@@ -60,7 +60,7 @@ export function Dashboard() {
 
   if (loading || !status || !settingsLoaded) {
     return (
-      <div className="dashboard-container" style={{ alignItems: "center", justifyItems: "center", justifyContent: "center" }}>
+      <div className="dashboard-container dashboard-loading">
         Loading...
       </div>
     );
@@ -84,7 +84,7 @@ export function Dashboard() {
       <aside className="sidebar">
         <div className="sidebar-logo">
           <div className="sidebar-logo-icon">
-            <span className="material-symbols-outlined" style={{ fontSize: "20px" }}>hub</span>
+            <span className="material-symbols-outlined">hub</span>
           </div>
           <span className="sidebar-logo-text">mcpx Manager</span>
         </div>
@@ -96,7 +96,7 @@ export function Dashboard() {
             onClick={() => handleTabChange("servers")}
           >
             <span className="material-symbols-outlined">grid_view</span>
-            <span style={{ fontSize: "14px", fontWeight: 500 }}>My Servers</span>
+            <span className="nav-button__label">My Servers</span>
           </button>
           <button
             className="nav-button"
@@ -104,7 +104,7 @@ export function Dashboard() {
             onClick={() => handleTabChange("browse")}
           >
             <span className="material-symbols-outlined">explore</span>
-            <span style={{ fontSize: "14px", fontWeight: 500 }}>Browse Registry</span>
+            <span className="nav-button__label">Browse Registry</span>
           </button>
           <div className="nav-spacer" />
           <button
@@ -113,81 +113,83 @@ export function Dashboard() {
             onClick={() => handleTabChange("settings")}
           >
             <span className="material-symbols-outlined">settings</span>
-            <span style={{ fontSize: "14px", fontWeight: 500 }}>Settings</span>
+            <span className="nav-button__label">Settings</span>
           </button>
         </div>
       </aside>
 
       <main className="main-content">
-        {activeServer ? (
-          <ServerDetail
-            server={activeServer}
-            onBack={() => setSelectedServer(null)}
-            onRefresh={refresh}
-          />
-        ) : (
-          <>
-            {tab === "servers" && (
-              <>
-                <div className="page-header">
-                  <div>
-                    <h1 className="page-title">My Servers</h1>
-                    <p className="page-subtitle">Manage your local and remote MCP integrations.</p>
+        <div className="main-content-inner">
+          {activeServer ? (
+            <ServerDetail
+              server={activeServer}
+              onBack={() => setSelectedServer(null)}
+              onRefresh={refresh}
+            />
+          ) : (
+            <>
+              {tab === "servers" && (
+                <>
+                  <div className="page-header">
+                    <div>
+                      <h1 className="page-title">My Servers</h1>
+                      <p className="page-subtitle">Manage your local and remote MCP integrations.</p>
+                    </div>
                   </div>
-                </div>
-                <div className="servers-controls-container">
-                  <CliCommandInput onServerAdded={refresh} />
-                </div>
-                <div className="server-grid">
-                  {report.servers.map((server) => (
-                    <ServerCard
-                      key={server.name}
-                      name={server.name}
-                      transport={server.transport}
-                      target={server.target}
-                      authConfigured={server.authBindings.length > 0}
-                      syncedCount={server.clients.filter((c) => c.managed && c.status === "SYNCED").length}
-                      errorCount={server.clients.filter((c) => c.managed && c.status === "ERROR").length}
-                      onClick={() => setSelectedServer(server.name)}
-                    />
-                  ))}
-                </div>
-              </>
-            )}
+                  <div className="servers-controls-container">
+                    <CliCommandInput onServerAdded={refresh} />
+                  </div>
+                  <div className="server-grid">
+                    {report.servers.map((server) => (
+                      <ServerCard
+                        key={server.name}
+                        name={server.name}
+                        transport={server.transport}
+                        target={server.target}
+                        authConfigured={server.authBindings.length > 0}
+                        syncedCount={server.clients.filter((c) => c.managed && c.status === "SYNCED").length}
+                        errorCount={server.clients.filter((c) => c.managed && c.status === "ERROR").length}
+                        onClick={() => setSelectedServer(server.name)}
+                      />
+                    ))}
+                  </div>
+                </>
+              )}
 
-            {tab === "browse" && (
-              <>
-                <div className="page-header">
-                  <div>
-                    <h1 className="page-title">Registry</h1>
-                    <p className="page-subtitle">Discover and install official MCP servers.</p>
+              {tab === "browse" && (
+                <>
+                  <div className="page-header">
+                    <div>
+                      <h1 className="page-title">Registry</h1>
+                      <p className="page-subtitle">Discover and install official MCP servers.</p>
+                    </div>
                   </div>
-                </div>
-                <BrowseTab
-                  onServerAdded={refresh}
-                  status={report}
-                  initialState={{
-                    searchQuery: browseState.searchQuery,
-                    activeCategory: browseState.activeCategory
-                  }}
-                  onStateChange={handleBrowseStateChange}
-                />
-              </>
-            )}
+                  <BrowseTab
+                    onServerAdded={refresh}
+                    status={report}
+                    initialState={{
+                      searchQuery: browseState.searchQuery,
+                      activeCategory: browseState.activeCategory
+                    }}
+                    onStateChange={handleBrowseStateChange}
+                  />
+                </>
+              )}
 
-            {tab === "settings" && (
-              <>
-                <div className="page-header">
-                  <div>
-                    <h1 className="page-title">Settings</h1>
-                    <p className="page-subtitle">Configure your mcpx installation.</p>
+              {tab === "settings" && (
+                <>
+                  <div className="page-header">
+                    <div>
+                      <h1 className="page-title">Settings</h1>
+                      <p className="page-subtitle">Configure your mcpx installation.</p>
+                    </div>
                   </div>
-                </div>
-                <SettingsPanel />
-              </>
-            )}
-          </>
-        )}
+                  <SettingsPanel />
+                </>
+              )}
+            </>
+          )}
+        </div>
       </main>
     </div>
   );

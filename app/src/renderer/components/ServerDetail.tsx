@@ -65,25 +65,29 @@ export function ServerDetail({ server, onBack, onRefresh }: ServerDetailProps) {
       </div>
 
       <div className="detail-section">
-        <h3>Configuration</h3>
+        <div className="detail-section__header">
+          <h3>Configuration</h3>
+        </div>
         <div className="info-grid">
           <div className="info-label">Transport</div>
           <div className="info-value">{server.transport}</div>
           <div className="info-label">Target</div>
-          <div className="info-value">{server.target}</div>
+          <div className="info-value mono-text">{server.target}</div>
         </div>
       </div>
 
       <div className="detail-section">
-        <h3>Auth Bindings</h3>
+        <div className="detail-section__header">
+          <h3>Auth Bindings</h3>
+        </div>
         {server.authBindings.length === 0 ? (
-          <p style={{ color: "var(--text-secondary)" }}>No auth configured</p>
+          <p className="empty-state">No auth configured</p>
         ) : (
           <ul className="auth-list">
             {server.authBindings.map((binding, i) => (
               <li key={i} className="auth-item">
                 <span className="auth-kind">{binding.kind}</span>
-                <span className="info-value">{binding.key}</span>
+                <span className="info-value mono-text">{binding.key}</span>
               </li>
             ))}
           </ul>
@@ -91,9 +95,11 @@ export function ServerDetail({ server, onBack, onRefresh }: ServerDetailProps) {
       </div>
 
       <div className="detail-section">
-        <h3>Client Sync Status</h3>
+        <div className="detail-section__header">
+          <h3>Client Sync Status</h3>
+        </div>
         {server.clients.length === 0 ? (
-          <p style={{ color: "var(--text-secondary)" }}>No clients synced.</p>
+          <p className="empty-state">No clients synced.</p>
         ) : (
           <table className="client-table">
             <thead>
@@ -115,17 +121,21 @@ export function ServerDetail({ server, onBack, onRefresh }: ServerDetailProps) {
         )}
       </div>
 
-      <div className="detail-section" style={{ border: "1px solid rgba(59, 130, 246, 0.2)" }}>
-        <h3 style={{ color: "var(--primary)", borderBottomColor: "rgba(59, 130, 246, 0.2)" }}>Configuration</h3>
-        <p style={{ color: "var(--text-secondary)", marginBottom: "16px" }}>Update server connection settings and authentication.</p>
+      <div className="detail-section detail-section--accent">
+        <div className="detail-section__header">
+          <h3>Configuration</h3>
+          <p className="detail-section__description">Update server connection settings and authentication.</p>
+        </div>
         <button className="btn btn-primary" onClick={handleEdit}>
           Edit Configuration
         </button>
       </div>
 
-      <div className="detail-section" style={{ border: "1px solid rgba(239, 68, 68, 0.2)" }}>
-        <h3 style={{ color: "var(--error)", borderBottomColor: "rgba(239, 68, 68, 0.2)" }}>Danger Zone</h3>
-        <p style={{ color: "var(--text-secondary)", marginBottom: "16px" }}>Removing this server will disconnect it from all synced clients.</p>
+      <div className="detail-section detail-section--danger">
+        <div className="detail-section__header">
+          <h3>Danger Zone</h3>
+          <p className="detail-section__description">Removing this server will disconnect it from all synced clients.</p>
+        </div>
         <button className="btn btn-danger" onClick={() => window.mcpx.removeServer(server.name).then(onRefresh)}>
           Remove Server
         </button>

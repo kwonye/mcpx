@@ -74,7 +74,6 @@ export function EditServerForm({
     e.preventDefault();
 
     const resolvedSecrets: Record<string, string> = {};
-    const secretCounter = new Map<string, number>();
 
     // Build secret refs and collect resolved values
     const buildSecretRef = (kind: "env" | "header", key: string, value: string, isSecret: boolean): string => {
@@ -125,19 +124,21 @@ export function EditServerForm({
     onSubmit(spec, resolvedSecrets);
   };
 
+  const transportDescription = "Transport type cannot be changed. Remove and re-add to change.";
+
   return (
     <form className="edit-server-form" onSubmit={handleSubmit}>
       <div className="form-section">
-        <h3>Connection</h3>
+        <div className="detail-section__header">
+          <h3>Connection</h3>
+        </div>
         <div className="form-field">
           <label htmlFor="transport">Transport</label>
           <select id="transport" value={transport} disabled style={{ opacity: 0.6, cursor: "not-allowed" }}>
             <option value="stdio">stdio</option>
             <option value="http">http</option>
           </select>
-          <p className="field-description" style={{ fontSize: "0.75rem", color: "var(--text-secondary)", marginTop: "4px" }}>
-            Transport type cannot be changed. Remove and re-add to change.
-          </p>
+          <p className="field-description">{transportDescription}</p>
         </div>
 
         {transport === "stdio" ? (
@@ -146,6 +147,7 @@ export function EditServerForm({
               <label htmlFor="command">Command</label>
               <input
                 id="command"
+                className="form-control"
                 type="text"
                 value={command}
                 onChange={(e) => setCommand(e.target.value)}
@@ -157,6 +159,7 @@ export function EditServerForm({
               <label htmlFor="args">Arguments (space-separated)</label>
               <input
                 id="args"
+                className="form-control mono-text"
                 type="text"
                 value={args}
                 onChange={(e) => setArgs(e.target.value)}
@@ -169,6 +172,7 @@ export function EditServerForm({
             <label htmlFor="url">URL</label>
             <input
               id="url"
+              className="form-control"
               type="url"
               value={url}
               onChange={(e) => setUrl(e.target.value)}
@@ -181,91 +185,93 @@ export function EditServerForm({
 
       {transport === "stdio" && (
         <div className="form-section">
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
+          <div className="section-heading">
             <h3>Environment Variables</h3>
             <button type="button" className="btn btn-sm btn-secondary" onClick={handleAddEnvVar}>
               + Add
             </button>
           </div>
           {envVars.length === 0 ? (
-            <p style={{ color: "var(--text-secondary)", fontSize: "0.875rem" }}>No environment variables configured</p>
+            <p className="empty-state">No environment variables configured</p>
           ) : (
-            envVars.map((envVar, index) => (
-              <div key={index} className="auth-entry" style={{ display: "flex", gap: "8px", marginBottom: "8px", alignItems: "center" }}>
-                <input
-                  type="text"
-                  placeholder="KEY"
-                  value={envVar.key}
-                  onChange={(e) => handleUpdateEnvVar(index, "key", e.target.value)}
-                  style={{ flex: 1, fontFamily: "monospace", fontSize: "0.875rem" }}
-                  required
-                />
-                <input
-                  type={envVar.isSecret ? "password" : "text"}
-                  placeholder="Value"
-                  value={envVar.value}
-                  onChange={(e) => handleUpdateEnvVar(index, "value", e.target.value)}
-                  style={{ flex: 2, fontFamily: "monospace", fontSize: "0.875rem" }}
-                />
-                <button
-                  type="button"
-                  className="btn btn-sm btn-secondary"
-                  onClick={() => handleRemoveEnvVar(index)}
-                  title="Remove"
-                  style={{ padding: "4px 8px" }}
-                >
-                  ×
-                </button>
-              </div>
-            ))
+            <div className="auth-entry-list">
+              {envVars.map((envVar, index) => (
+                <div key={index} className="auth-entry">
+                  <input
+                    type="text"
+                    className="form-control mono-text"
+                    placeholder="KEY"
+                    value={envVar.key}
+                    onChange={(e) => handleUpdateEnvVar(index, "key", e.target.value)}
+                    required
+                  />
+                  <input
+                    type={envVar.isSecret ? "password" : "text"}
+                    className="form-control mono-text"
+                    placeholder="Value"
+                    value={envVar.value}
+                    onChange={(e) => handleUpdateEnvVar(index, "value", e.target.value)}
+                  />
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-secondary"
+                    onClick={() => handleRemoveEnvVar(index)}
+                    title="Remove"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
           )}
         </div>
       )}
 
       {transport === "http" && (
         <div className="form-section">
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
+          <div className="section-heading">
             <h3>Headers</h3>
             <button type="button" className="btn btn-sm btn-secondary" onClick={handleAddHeader}>
               + Add
             </button>
           </div>
           {headers.length === 0 ? (
-            <p style={{ color: "var(--text-secondary)", fontSize: "0.875rem" }}>No headers configured</p>
+            <p className="empty-state">No headers configured</p>
           ) : (
-            headers.map((header, index) => (
-              <div key={index} className="auth-entry" style={{ display: "flex", gap: "8px", marginBottom: "8px", alignItems: "center" }}>
-                <input
-                  type="text"
-                  placeholder="Header-Name"
-                  value={header.key}
-                  onChange={(e) => handleUpdateHeader(index, "key", e.target.value)}
-                  style={{ flex: 1, fontFamily: "monospace", fontSize: "0.875rem" }}
-                  required
-                />
-                <input
-                  type={header.isSecret ? "password" : "text"}
-                  placeholder="Value"
-                  value={header.value}
-                  onChange={(e) => handleUpdateHeader(index, "value", e.target.value)}
-                  style={{ flex: 2, fontFamily: "monospace", fontSize: "0.875rem" }}
-                />
-                <button
-                  type="button"
-                  className="btn btn-sm btn-secondary"
-                  onClick={() => handleRemoveHeader(index)}
-                  title="Remove"
-                  style={{ padding: "4px 8px" }}
-                >
-                  ×
-                </button>
-              </div>
-            ))
+            <div className="auth-entry-list">
+              {headers.map((header, index) => (
+                <div key={index} className="auth-entry">
+                  <input
+                    type="text"
+                    className="form-control mono-text"
+                    placeholder="Header-Name"
+                    value={header.key}
+                    onChange={(e) => handleUpdateHeader(index, "key", e.target.value)}
+                    required
+                  />
+                  <input
+                    type={header.isSecret ? "password" : "text"}
+                    className="form-control mono-text"
+                    placeholder="Value"
+                    value={header.value}
+                    onChange={(e) => handleUpdateHeader(index, "value", e.target.value)}
+                  />
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-secondary"
+                    onClick={() => handleRemoveHeader(index)}
+                    title="Remove"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
           )}
         </div>
       )}
 
-      <div className="form-actions" style={{ marginTop: "24px", display: "flex", gap: "12px", justifyContent: "flex-end" }}>
+      <div className="form-actions">
         <button type="button" className="btn btn-secondary" onClick={onCancel}>Cancel</button>
         <button type="submit" className="btn btn-primary">Save Changes</button>
       </div>

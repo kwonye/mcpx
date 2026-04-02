@@ -31,21 +31,24 @@ export function AddServerForm({ requiredInputs, onSubmit, onCancel }: AddServerF
 
   return (
     <form className="add-server-form" onSubmit={handleSubmit}>
-      {requiredInputs.map((input) => (
-        <div key={input.name} className="form-field">
-          <label htmlFor={input.name}>
-            {input.name} <span style={{ color: "var(--accent-purple)", fontSize: "0.7rem", verticalAlign: "top", marginLeft: "4px" }}>({input.kind})</span>
-          </label>
-          {input.description && <p className="field-description">{input.description}</p>}
-          <input
-            id={input.name}
-            type={input.isSecret ? "password" : "text"}
-            value={values[input.name] ?? ""}
-            onChange={(e) => setValues((prev) => ({ ...prev, [input.name]: e.target.value }))}
-            required
-          />
-        </div>
-      ))}
+      <div className="form-section">
+        {requiredInputs.map((input) => (
+          <div key={input.name} className="form-field">
+            <label htmlFor={input.name}>
+              {input.name} <span className="eyebrow">({input.kind})</span>
+            </label>
+            {input.description && <p className="field-description">{input.description}</p>}
+            <input
+              id={input.name}
+              type={input.isSecret ? "password" : "text"}
+              className="form-control"
+              value={values[input.name] ?? ""}
+              onChange={(e) => setValues((prev) => ({ ...prev, [input.name]: e.target.value }))}
+              required
+            />
+          </div>
+        ))}
+      </div>
       <div className="form-actions">
         <button type="button" className="btn btn-secondary" onClick={onCancel}>Cancel</button>
         <button type="submit" className="btn btn-primary">Save and Add</button>

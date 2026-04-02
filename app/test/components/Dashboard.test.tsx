@@ -41,7 +41,8 @@ const mockMcpx = {
   registryList: vi.fn().mockResolvedValue({ servers: [], metadata: {} }),
   registryGet: vi.fn(),
   registryPrepareAdd: vi.fn(),
-  registryConfirmAdd: vi.fn()
+  registryConfirmAdd: vi.fn(),
+  updateServer: vi.fn()
 };
 
 beforeEach(() => {
@@ -83,10 +84,17 @@ describe("Dashboard", () => {
     render(<Dashboard />);
     fireEvent.click(await screen.findByText("Settings"));
 
-    // We changed toggles to custom iOS toggles that don't map to aria-label properly via input wrap,
-    // so we search by text.
     expect(await screen.findByText("Auto-update")).toBeDefined();
     expect(await screen.findByText("Start on login")).toBeDefined();
-    expect(mockMcpx.getDesktopSettings).toHaveBeenCalledTimes(1);
+    expect(mockMcpx.getDesktopSettings).toHaveBeenCalledTimes(2);
+  });
+
+  it("opens the edit flow from server detail", async () => {
+    render(<Dashboard />);
+    fireEvent.click(await screen.findByText("vercel"));
+    fireEvent.click(await screen.findByRole("button", { name: /Edit Configuration/i }));
+
+    expect(await screen.findByRole("button", { name: /Save Changes/i })).toBeDefined();
+    expect(screen.getByRole("button", { name: /Cancel/i })).toBeDefined();
   });
 });

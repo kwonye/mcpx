@@ -116,4 +116,38 @@ test.describe("UI polish", () => {
       await app.close();
     }
   });
+
+  test("dashboard reserves top safe area for macOS window controls", async () => {
+    const app = await electron.launch({ args: [mainPath] });
+
+    try {
+      await app.evaluate(async ({ BrowserWindow }) => {
+        const win = new BrowserWindow({
+          width: 900,
+          height: 650,
+          titleBarStyle: "hiddenInset",
+          trafficLightPosition: { x: 16, y: 16 },
+          webPreferences: { sandbox: false }
+        });
+        const path = require("node:path");
+        const indexPath = path.join(__dirname, "../renderer/index.html");
+        await win.loadFile(indexPath, { hash: "dashboard" });
+      });
+
+      const window = await app.firstWindow();
+      await window.waitForLoadState("domcontentloaded");
+      await window.waitForTimeout(2000);
+
+      const sidebarLogoBox = await window.locator(".sidebar-logo").boundingBox();
+      const mainContentPaddingTop = await window.locator(".main-content").evaluate((element) => {
+        return window.getComputedStyle(element).paddingTop;
+      });
+
+      expect(sidebarLogoBox).toBeTruthy();
+      expect(sidebarLogoBox!.y).toBeGreaterThanOrEqual(40);
+      expect(Number.parseFloat(mainContentPaddingTop)).toBeGreaterThanOrEqual(48);
+    } finally {
+      await app.close();
+    }
+  });
 });

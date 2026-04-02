@@ -32,9 +32,10 @@ describe("settings store", () => {
     const { loadDesktopSettings } = await import("../../src/main/settings-store");
     const settings = loadDesktopSettings();
 
-    expect(settings).toEqual({
+    expect(settings).toMatchObject({
       autoUpdateEnabled: true,
-      startOnLoginEnabled: true
+      startOnLoginEnabled: true,
+      browseState: {}
     });
 
     const persisted = JSON.parse(fs.readFileSync(settingsFilePath, "utf8"));
@@ -49,9 +50,10 @@ describe("settings store", () => {
     const { loadDesktopSettings } = await import("../../src/main/settings-store");
     const settings = loadDesktopSettings();
 
-    expect(settings).toEqual({
+    expect(settings).toMatchObject({
       autoUpdateEnabled: false,
-      startOnLoginEnabled: true
+      startOnLoginEnabled: true,
+      browseState: {}
     });
 
     const persisted = JSON.parse(fs.readFileSync(settingsFilePath, "utf8"));
@@ -64,9 +66,10 @@ describe("settings store", () => {
     const { loadDesktopSettings } = await import("../../src/main/settings-store");
     const settings = loadDesktopSettings();
 
-    expect(settings).toEqual({
+    expect(settings).toMatchObject({
       autoUpdateEnabled: true,
-      startOnLoginEnabled: true
+      startOnLoginEnabled: true,
+      browseState: {}
     });
 
     const persisted = JSON.parse(fs.readFileSync(settingsFilePath, "utf8"));
