@@ -34,9 +34,12 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '24'
           cache: npm
           cache-dependency-path: cli/package-lock.json
+
+      - name: Update npm
+        run: npm install -g npm@latest
 
       - name: Refresh tags
         run: git fetch --tags --force
