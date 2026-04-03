@@ -1,4 +1,4 @@
-import { app, crashReporter, dialog } from "electron";
+import { app, crashReporter, dialog, Menu } from "electron";
 import {
   loadConfig,
   startDaemon,
@@ -7,6 +7,7 @@ import {
   SecretsManager
 } from "@mcpx/core";
 import { createTray, setQuitHandler, setStartDaemonHandler, setStopDaemonHandler, updateTrayForDaemonStatus } from "./tray";
+import { buildApplicationMenu } from "./menu";
 import { openDashboard, hideDashboard, closeDashboard } from "./dashboard";
 import { registerIpcHandlers } from "./ipc-handlers";
 import { runDaemonChildIfRequested } from "./daemon-child";
@@ -102,7 +103,7 @@ export async function startMainProcess(): Promise<void> {
   });
 
   if (process.platform === "darwin") {
-    app.setActivationPolicy("accessory");
+    app.setActivationPolicy("regular");
   }
 
   if (await runDaemonChildIfRequested()) {
@@ -120,6 +121,8 @@ export async function startMainProcess(): Promise<void> {
   });
 
   await app.whenReady();
+
+  Menu.setApplicationMenu(buildApplicationMenu());
 
   if (process.platform === "darwin") {
     app.dock?.hide();
@@ -160,7 +163,7 @@ export async function startMainProcess(): Promise<void> {
 
   // Check daemon status on startup and auto-start if needed
   try {
-    const status = getDaemonStatus();
+    const status = getDaemonStatus(loadConfig());
     daemonRunning = status.running;
     updateTrayForDaemonStatus(daemonRunning);
     

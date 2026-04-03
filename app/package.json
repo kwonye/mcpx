@@ -33,6 +33,7 @@
   },
   "scripts": {
     "dev": "electron-vite dev",
+    "dev:inspect": "electron-vite dev --remoteDebuggingPort 9222",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
     "test": "vitest run",

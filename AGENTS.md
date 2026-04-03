@@ -95,6 +95,51 @@ These rules are foundational for any agent working on this project:
 - **Secrets Management:** Never log or expose secrets. Use the `SecretsManager` class which interfaces with the macOS Keychain.
 - **State:** Core state (servers, auth) is persisted in `~/.config/mcpx/config.json`.
 
+## Developer Tools
+
+### Browser Automation (agent-browser)
+
+The Electron desktop app can be automated and inspected via Chrome DevTools Protocol using `agent-browser`. Use this to visually verify UI changes and debug the app.
+
+**Prerequisites:** `agent-browser` CLI and the Electron skills are installed.
+
+**Launch with debugging port:**
+
+```bash
+cd app
+npm run dev:inspect    # electron-vite dev --remoteDebuggingPort 9222
+```
+
+**Important:** Always clean up first:
+
+```bash
+pkill -9 -f "mcpx" || true; pkill -9 -E "Electron" || true
+agent-browser close --all  # Close any stale agent-browser sessions
+sleep 1
+```
+
+**Use `--cdp` flag, NEVER `connect`:** Electron does not support `Target.createTarget` via CDP, so `agent-browser connect 9222` always fails. Use the `--cdp` flag on standalone commands instead:
+
+```bash
+agent-browser --cdp 9222 snapshot -i          # Accessibility tree with refs
+agent-browser --cdp 9222 screenshot dump.png  # Full page screenshot
+agent-browser --cdp 9222 tab                  # List Electron windows
+agent-browser --cdp 9222 get text @e1         # Get text by ref
+agent-browser --cdp 9222 click @e2            # Click by ref
+```
+
+**Workflow for verifying UI changes:**
+
+1. Kill & close: `pkill -9 -f "mcpx" || true; agent-browser close --all; sleep 1`
+2. Launch: `cd app && npm run dev:inspect`
+3. Wait: `sleep 5`
+4. Inspect: `agent-browser --cdp 9222 snapshot -i`
+5. Capture: `agent-browser --cdp 9222 screenshot /tmp/before.png`
+6. Make changes
+7. Verify: `agent-browser --cdp 9222 screenshot /tmp/after.png`
+
+The app has 2 CDP tabs: the dashboard (main window) and the popover (menubar tray). Use `agent-browser --cdp 9222 tab` to list them, `agent-browser --cdp 9222 tab 0` to switch.
+
 ## CI/CD & Versioning
 
 The project uses a **single monotonic version stream** across both components. Every release increments a shared patch version.
