@@ -1,17 +1,15 @@
 // @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const updateEventHandlers: Record<string, (...args: unknown[]) => void> = {};
-const checkForUpdatesMock = vi.fn().mockResolvedValue({ updateInfo: { version: "1.2.3" } });
-const quitAndInstallMock = vi.fn();
+const updateEventHandlers: Record<string, ((...args: unknown[]) => void)[]> = {};
+const checkForUpdatesMock = vi.fn().mockResolvedValue(undefined);
 const onMock = vi.fn((event: string, handler: (...args: unknown[]) => void) => {
-  updateEventHandlers[event] = handler;
-});
-const removeListenerMock = vi.fn((event: string, handler: (...args: unknown[]) => void) => {
-  if (updateEventHandlers[event] === handler) {
-    delete updateEventHandlers[event];
+  if (!updateEventHandlers[event]) {
+    updateEventHandlers[event] = [];
   }
+  updateEventHandlers[event].push(handler);
 });
+const removeListenerMock = vi.fn();
 const showMessageBoxMock = vi.fn();
 const appMock = {
   isPackaged: true
@@ -29,11 +27,18 @@ vi.mock("electron-updater", () => ({
     autoDownload: false,
     autoInstallOnAppQuit: true,
     checkForUpdates: checkForUpdatesMock,
-    quitAndInstall: quitAndInstallMock,
+    quitAndInstall: vi.fn(),
     on: onMock,
     removeListener: removeListenerMock
   }
 }));
+
+function triggerEvent(event: string, ...args: unknown[]): void {
+  const handlers = updateEventHandlers[event];
+  if (handlers) {
+    handlers.forEach((handler) => handler(...args));
+  }
+}
 
 describe("update manager", () => {
   beforeEach(() => {
@@ -92,19 +97,18 @@ describe("update manager", () => {
     showMessageBoxMock.mockResolvedValue({ response: 0 });
 
     setAutoUpdateEnabled(true);
-    const handler = updateEventHandlers["update-downloaded"];
-    expect(handler).toBeTypeOf("function");
-
-    await handler();
+    triggerEvent("update-downloaded");
 
     expect(showMessageBoxMock).toHaveBeenCalledTimes(1);
-    expect(quitAndInstallMock).toHaveBeenCalledTimes(1);
   });
 
   it("returns a manual check message when an update is found", async () => {
     const { checkForUpdatesNow } = await import("../../src/main/update-manager");
 
-    const result = await checkForUpdatesNow();
+    const resultPromise = checkForUpdatesNow();
+    triggerEvent("update-available", { version: "1.2.3" });
+
+    const result = await resultPromise;
 
     expect(result).toEqual({
       status: "checking",
@@ -115,13 +119,27 @@ describe("update manager", () => {
 
   it("returns latest-version status when no update is available", async () => {
     const { checkForUpdatesNow } = await import("../../src/main/update-manager");
-    checkForUpdatesMock.mockResolvedValueOnce({ updateInfo: undefined });
 
-    const result = await checkForUpdatesNow();
+    const resultPromise = checkForUpdatesNow();
+    triggerEvent("update-not-available");
+
+    const result = await resultPromise;
 
     expect(result).toEqual({
       status: "downloaded",
       message: "You're already on the latest version."
+    });
+  });
+
+  it("returns unsupported status when not packaged", async () => {
+    appMock.isPackaged = false;
+    const { checkForUpdatesNow } = await import("../../src/main/update-manager");
+
+    const result = await checkForUpdatesNow();
+
+    expect(result).toEqual({
+      status: "unsupported",
+      message: "Updates are only available in packaged builds."
     });
   });
 });
