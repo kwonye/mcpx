@@ -116,8 +116,11 @@ export async function startMainProcess(): Promise<void> {
     return;
   }
 
-  app.on("second-instance", () => {
-    openDashboard();
+  app.on("second-instance", (_event, argv) => {
+    const isDaemonChild = argv.includes("daemon") || process.env.MCPX_DAEMON_CHILD === "1";
+    if (!isDaemonChild) {
+      openDashboard();
+    }
   });
 
   await app.whenReady();
