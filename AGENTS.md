@@ -63,23 +63,37 @@ npm test                # Run unit/component tests
 npm run e2e             # Run Playwright E2E tests
 ```
 
-### Desktop App Local Install
-When an agent needs to install a fresh local desktop build into macOS Applications:
+### Testing & Verifying Changes
 
+All UI verification must be done on the installed app, not the dev server. The dev server (`npm run dev`) serves content from `ELECTRON_RENDERER_URL` which differs from the bundled app.
+
+**Step-by-step:**
+
+1. Kill existing instances:
+   ```bash
+   pkill -9 -f "mcpx" || true; pkill -9 -E "Electron" || true
+   ```
+
+2. Build and install with DevTools open:
+   ```bash
+   cd app
+   npm run desktop-install:dev
+   ```
+   This builds the app, installs to `/Applications/mcpx.app`, and launches it with DevTools auto-opened on the dashboard.
+
+3. Inspect the dashboard in the DevTools panel that appears.
+
+4. To inspect the popover (menubar tray): right-click inside the popover and select "Inspect". DevTools must already be open from the dashboard. The popover does NOT auto-open DevTools.
+
+5. After making code changes, repeat step 2 to rebuild and verify.
+
+**For automated inspection with agent-browser:**
 ```bash
-cd app
-npm run desktop-install
+cd app && npm run build && npx electron-builder --mac --dir
+ditto dist/mac-arm64/mcpx.app /Applications/mcpx.app
+open /Applications/mcpx.app --args --remoteDebuggingPort 9222 --dev
 ```
-
-For debugging with DevTools open:
-```bash
-npm run desktop-install:dev
-```
-
-Notes:
-- The script builds, installs to `/Applications`, and launches the app
-- Use `desktop-install:dev` to open DevTools for debugging
-- The app is menubar-only (no dock icon)
+Then use `agent-browser --cdp 9222 ...` commands as described below.
 
 ## Development Mandates & Conventions
 
@@ -99,16 +113,9 @@ These rules are foundational for any agent working on this project:
 
 ### Browser Automation (agent-browser)
 
-The Electron desktop app can be automated and inspected via Chrome DevTools Protocol using `agent-browser`. Use this to visually verify UI changes and debug the app.
+The Electron desktop app can be automated and inspected via Chrome DevTools Protocol using `agent-browser`. Use this for scripted UI verification.
 
-**Prerequisites:** `agent-browser` CLI and the Electron skills are installed.
-
-**Launch with debugging port:**
-
-```bash
-cd app
-npm run dev:inspect    # electron-vite dev --remoteDebuggingPort 9222
-```
+**For launching with CDP, see "Testing & Verifying Changes" above.** Launch the installed app with `--remoteDebuggingPort 9222` as shown there.
 
 **Important:** Always clean up first:
 
@@ -130,13 +137,12 @@ agent-browser --cdp 9222 click @e2            # Click by ref
 
 **Workflow for verifying UI changes:**
 
-1. Kill & close: `pkill -9 -f "mcpx" || true; agent-browser close --all; sleep 1`
-2. Launch: `cd app && npm run dev:inspect`
-3. Wait: `sleep 5`
-4. Inspect: `agent-browser --cdp 9222 snapshot -i`
-5. Capture: `agent-browser --cdp 9222 screenshot /tmp/before.png`
-6. Make changes
-7. Verify: `agent-browser --cdp 9222 screenshot /tmp/after.png`
+1. Kill existing instances, rebuild, and launch with CDP port (see "Testing & Verifying Changes" → agent-browser section)
+2. Wait: `sleep 3`
+3. Inspect: `agent-browser --cdp 9222 snapshot -i`
+4. Capture: `agent-browser --cdp 9222 screenshot /tmp/before.png`
+5. Make changes, rebuild, and relaunch
+6. Verify: `agent-browser --cdp 9222 screenshot /tmp/after.png`
 
 The app has 2 CDP tabs: the dashboard (main window) and the popover (menubar tray). Use `agent-browser --cdp 9222 tab` to list them, `agent-browser --cdp 9222 tab 0` to switch.
 
