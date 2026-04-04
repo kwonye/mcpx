@@ -49,7 +49,7 @@ function positionPopover(window: BrowserWindow, tray: Tray): void {
 function createPopoverWindow(): BrowserWindow {
   popover = new BrowserWindow({
     width: 360,
-    height: 320,
+    height: 380,
     show: false,
     frame: false,
     resizable: false,

@@ -47,7 +47,7 @@ export function StatusPopover() {
         </div>
       </header>
 
-      <main style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: "16px", marginTop: "4px" }}>
+      <main style={{ flex: 1, display: "flex", flexDirection: "column", gap: "16px", marginTop: "4px" }}>
         <section style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
           <h2 style={{ fontSize: "11px", fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.05em", padding: "0 4px" }}>
             Gateway Status
