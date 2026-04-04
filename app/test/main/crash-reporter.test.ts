@@ -37,6 +37,13 @@ describe("crashReporter initialization", () => {
       dialog: {
         showErrorBox: vi.fn(),
       },
+      shell: {
+        openExternal: vi.fn(),
+      },
+      Menu: {
+        setApplicationMenu: vi.fn(),
+        buildFromTemplate: vi.fn().mockReturnValue({}),
+      },
     }));
 
     vi.doMock("@mcpx/core", () => ({
@@ -117,6 +124,13 @@ describe("crashReporter initialization", () => {
       },
       dialog: {
         showErrorBox: mockShowErrorBox,
+      },
+      shell: {
+        openExternal: vi.fn(),
+      },
+      Menu: {
+        setApplicationMenu: vi.fn(),
+        buildFromTemplate: vi.fn().mockReturnValue({}),
       },
     }));
 

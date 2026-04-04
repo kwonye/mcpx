@@ -75,53 +75,57 @@ export function SettingsPanel() {
   };
 
   return (
-    <section className="glass-panel settings-panel">
+    <section className="settings-panel">
       <div className="settings-panel__header">
         <span className="material-symbols-outlined" style={{ color: "var(--primary)" }}>tune</span>
         <h2>General Settings</h2>
       </div>
 
-      <div className="settings-panel__item">
-        <div>
-          <span className="settings-panel__label">Auto-update</span>
-          <p className="settings-panel__description">Automatically download updates from GitHub Releases.</p>
+      <div className="setting-card">
+        <div className="setting-card__item">
+          <div>
+            <span className="setting-card__label">Start on login</span>
+            <p className="setting-card__description">Launch in the tray when you log in.</p>
+          </div>
+          <Toggle
+            id="toggle-startOnLogin"
+            checked={settings.startOnLoginEnabled}
+            onChange={(checked) => onToggle("startOnLoginEnabled", checked)}
+            disabled={busy}
+            label="Start on login"
+          />
         </div>
-        <Toggle
-          id="toggle-autoUpdate"
-          checked={settings.autoUpdateEnabled}
-          onChange={(checked) => onToggle("autoUpdateEnabled", checked)}
-          disabled={busy}
-          label="Auto-update"
-        />
       </div>
 
-      <div className="settings-panel__item">
-        <div>
-          <span className="settings-panel__label">Start on login</span>
-          <p className="settings-panel__description">Launch in the tray when you log in.</p>
+      <div className="setting-card setting-card--grouped">
+        <h3 className="setting-card__group-title">Updates</h3>
+        <div className="setting-card__item">
+          <div>
+            <span className="setting-card__label">Auto-update</span>
+            <p className="setting-card__description">Automatically download updates from GitHub Releases.</p>
+          </div>
+          <Toggle
+            id="toggle-autoUpdate"
+            checked={settings.autoUpdateEnabled}
+            onChange={(checked) => onToggle("autoUpdateEnabled", checked)}
+            disabled={busy}
+            label="Auto-update"
+          />
         </div>
-        <Toggle
-          id="toggle-startOnLogin"
-          checked={settings.startOnLoginEnabled}
-          onChange={(checked) => onToggle("startOnLoginEnabled", checked)}
-          disabled={busy}
-          label="Start on login"
-        />
-      </div>
-
-      <div className="settings-panel__item settings-panel__item--stacked">
-        <div>
-          <span className="settings-panel__label">Updates</span>
-          <p className="settings-panel__description">Check for app updates now. Any downloaded update will install the next time you restart mcpx.</p>
+        <div className="setting-card__item setting-card__item--stacked">
+          <div>
+            <span className="setting-card__label">Manual check</span>
+            <p className="setting-card__description">Check for app updates now. Any downloaded update will install the next time you restart mcpx.</p>
+          </div>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={handleCheckForUpdates}
+            disabled={checkingForUpdates}
+          >
+            {checkingForUpdates ? "Checking..." : "Check for Updates"}
+          </button>
         </div>
-        <button
-          type="button"
-          className="btn btn-secondary"
-          onClick={handleCheckForUpdates}
-          disabled={checkingForUpdates}
-        >
-          {checkingForUpdates ? "Checking..." : "Check for Updates"}
-        </button>
       </div>
 
       {error && <div className="feedback-message error">{error}</div>}

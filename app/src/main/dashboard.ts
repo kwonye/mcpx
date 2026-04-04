@@ -14,6 +14,7 @@ function rendererEntryPath(): string {
 
 function revealDashboard(window: BrowserWindow): void {
   if (process.platform === "darwin") {
+    app.dock?.show();
     app.focus({ steal: true });
   }
 
@@ -35,8 +36,8 @@ export function openDashboard(): BrowserWindow {
   }
 
   dashboard = new BrowserWindow({
-    width: 900,
-    height: 650,
+    width: 1100,
+    height: 700,
     titleBarStyle: "hiddenInset",
     trafficLightPosition: { x: 16, y: 16 },
     show: false,
@@ -66,6 +67,9 @@ export function openDashboard(): BrowserWindow {
   });
 
   dashboard.on("closed", () => {
+    if (process.platform === "darwin") {
+      app.dock?.hide();
+    }
     dashboard = null;
   });
 

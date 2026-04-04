@@ -26,7 +26,7 @@ describe("lifecycle handlers", () => {
         "utf-8"
       );
 
-      expect(source).toContain('app.setActivationPolicy("accessory")');
+      expect(source).toContain('app.setActivationPolicy("regular")');
       expect(source).toContain("app.dock?.hide()");
     });
 

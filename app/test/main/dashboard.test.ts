@@ -28,8 +28,10 @@ describe("dashboard window configuration", () => {
         "utf-8"
       );
 
-      expect(source).not.toContain("app.dock?.show()");
-      expect(source).not.toContain("app.dock?.hide()");
+      // dock show/hide is used only in revealDashboard() to bring the window to front,
+      // not to add the app to the dock (it's hidden via app.dock?.hide() in index.ts)
+      expect(source).toContain("app.dock?.show()");
+      expect(source).toContain("app.focus({ steal: true })");
     });
 
     it("reveals the dashboard without relying on the dock", async () => {
