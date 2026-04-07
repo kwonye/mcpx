@@ -39,8 +39,10 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "e2e": "playwright test",
-    "desktop-install": "bash scripts/desktop-install.sh",
-    "desktop-install:dev": "bash scripts/desktop-install.sh --dev"
+    "desktop-install": "bash scripts/desktop-install.sh --flavor production",
+    "desktop-install:devtools": "bash scripts/desktop-install.sh --flavor production --dev",
+    "desktop-install:dev-app": "bash scripts/desktop-install.sh --flavor dev",
+    "desktop-install:dev": "bash scripts/desktop-install.sh --flavor dev --dev"
   },
   "dependencies": {
     "electron-updater": "^6.6.2",

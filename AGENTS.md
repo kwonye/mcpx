@@ -71,15 +71,22 @@ All UI verification must be done on the installed app, not the dev server. The d
 
 1. Kill existing instances:
    ```bash
-   pkill -9 -f "mcpx" || true; pkill -9 -E "Electron" || true
+   pkill -9 -f "/Applications/mcpx-dev.app" || true
+   pkill -9 -f "/Applications/mcpx.app" || true
+   pkill -9 -E "Electron" || true
    ```
 
-2. Build and install with DevTools open:
+2. Build and install the side-by-side dev app with DevTools open:
    ```bash
    cd app
    npm run desktop-install:dev
    ```
-   This builds the app, installs to `/Applications/mcpx.app`, and launches it with DevTools auto-opened on the dashboard.
+   This builds the dev app, installs it to `/Applications/mcpx-dev.app`, and launches it with DevTools auto-opened on the dashboard.
+
+   To rebuild the normal production bundle locally instead:
+   ```bash
+   npm run desktop-install
+   ```
 
 3. Inspect the dashboard in the DevTools panel that appears.
 
@@ -89,9 +96,8 @@ All UI verification must be done on the installed app, not the dev server. The d
 
 **For automated inspection with agent-browser:**
 ```bash
-cd app && npm run build && npx electron-builder --mac --dir
-ditto dist/mac-arm64/mcpx.app /Applications/mcpx.app
-open /Applications/mcpx.app --args --remoteDebuggingPort 9222 --dev
+cd app
+bash scripts/desktop-install.sh --flavor dev --dev --remote-debugging-port 9222
 ```
 Then use `agent-browser --cdp 9222 ...` commands as described below.
 
@@ -120,7 +126,9 @@ The Electron desktop app can be automated and inspected via Chrome DevTools Prot
 **Important:** Always clean up first:
 
 ```bash
-pkill -9 -f "mcpx" || true; pkill -9 -E "Electron" || true
+pkill -9 -f "/Applications/mcpx-dev.app" || true
+pkill -9 -f "/Applications/mcpx.app" || true
+pkill -9 -E "Electron" || true
 agent-browser close --all  # Close any stale agent-browser sessions
 sleep 1
 ```

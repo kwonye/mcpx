@@ -1,5 +1,6 @@
 import { app, dialog } from "electron";
 import { autoUpdater } from "electron-updater";
+import { getDesktopProductName, isDevDesktopApp } from "./app-flavor";
 
 const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 
@@ -39,7 +40,7 @@ function ensureInitialized(): void {
       defaultId: 0,
       cancelId: 1,
       title: "Update ready",
-      message: "A new version of mcpx has been downloaded.",
+      message: `A new version of ${getDesktopProductName()} has been downloaded.`,
       detail: "Restart now to install the update."
     }).then((result) => {
       if (result.response === 0) {
@@ -68,7 +69,7 @@ function startChecking(): void {
 }
 
 export function setAutoUpdateEnabled(enabled: boolean): void {
-  if (!app.isPackaged) {
+  if (!app.isPackaged || isDevDesktopApp()) {
     clearCheckInterval();
     return;
   }
@@ -87,6 +88,13 @@ export function checkForUpdatesNow(): Promise<{ status: string; message: string 
     return Promise.resolve({
       status: "unsupported",
       message: "Updates are only available in packaged builds."
+    });
+  }
+
+  if (isDevDesktopApp()) {
+    return Promise.resolve({
+      status: "unsupported",
+      message: `Updates are disabled for ${getDesktopProductName()} builds.`
     });
   }
 

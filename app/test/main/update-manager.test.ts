@@ -12,7 +12,8 @@ const onMock = vi.fn((event: string, handler: (...args: unknown[]) => void) => {
 const removeListenerMock = vi.fn();
 const showMessageBoxMock = vi.fn();
 const appMock = {
-  isPackaged: true
+  isPackaged: true,
+  getName: vi.fn().mockReturnValue("mcpx")
 };
 
 vi.mock("electron", () => ({
@@ -46,6 +47,7 @@ describe("update manager", () => {
     vi.resetModules();
     vi.clearAllMocks();
     appMock.isPackaged = true;
+    appMock.getName.mockReturnValue("mcpx");
     for (const key of Object.keys(updateEventHandlers)) {
       delete updateEventHandlers[key];
     }
@@ -140,6 +142,28 @@ describe("update manager", () => {
     expect(result).toEqual({
       status: "unsupported",
       message: "Updates are only available in packaged builds."
+    });
+  });
+
+  it("does not schedule checks for dev app builds", async () => {
+    appMock.getName.mockReturnValue("mcpx-dev");
+    const { setAutoUpdateEnabled } = await import("../../src/main/update-manager");
+
+    setAutoUpdateEnabled(true);
+    await vi.advanceTimersByTimeAsync(24 * 60 * 60 * 1000);
+
+    expect(checkForUpdatesMock).not.toHaveBeenCalled();
+  });
+
+  it("returns unsupported status for dev app manual checks", async () => {
+    appMock.getName.mockReturnValue("mcpx-dev");
+    const { checkForUpdatesNow } = await import("../../src/main/update-manager");
+
+    const result = await checkForUpdatesNow();
+
+    expect(result).toEqual({
+      status: "unsupported",
+      message: "Updates are disabled for mcpx-dev builds."
     });
   });
 });

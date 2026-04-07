@@ -14,6 +14,7 @@ import { runDaemonChildIfRequested } from "./daemon-child";
 import { loadDesktopSettings } from "./settings-store";
 import { applyStartOnLoginSetting, wasOpenedAtLogin } from "./login-item";
 import { setAutoUpdateEnabled } from "./update-manager";
+import { getDesktopProductName } from "./app-flavor";
 
 // Export mutable state for testing lifecycle handlers
 export const lifecycleState = { allowQuit: false };
@@ -96,9 +97,11 @@ async function handleStopDaemon(): Promise<void> {
 }
 
 export async function startMainProcess(): Promise<void> {
+  const productName = getDesktopProductName();
+
   // Initialize crash reporter BEFORE any Electron API calls
   crashReporter.start({
-    productName: "mcpx",
+    productName,
     uploadToServer: false,
   });
 
@@ -181,10 +184,11 @@ if (process.env.VITEST !== "true") {
     try {
       await startMainProcess();
     } catch (error) {
+      const productName = getDesktopProductName();
       console.error("[main] startup failed:", error);
       dialog.showErrorBox(
         "Startup Error",
-        `mcpx failed to start: ${error instanceof Error ? error.message : String(error)}`
+        `${productName} failed to start: ${error instanceof Error ? error.message : String(error)}`
       );
       app.exit(1);
     }

@@ -26,22 +26,25 @@ The app is built with **Electron + React** and is designed to be a lightweight w
 ## Building and Installing Locally
 
 ### Quick Install
-To build and install the app to `/Applications`:
+To build and install the production app to `/Applications`:
 
 ```bash
 npm run desktop-install
 ```
 
-For debugging with DevTools open:
+For the side-by-side dev app with DevTools open:
 ```bash
 npm run desktop-install:dev
 ```
+
+This keeps `/Applications/mcpx.app` intact and installs the dev bundle to `/Applications/mcpx-dev.app`.
 
 ### Kill Existing Instances
 Kill any running instances before starting a new one:
 
 ```bash
-pkill -f "mcpx" || true
+pkill -f "/Applications/mcpx-dev.app" || true
+pkill -f "/Applications/mcpx.app" || true
 pkill -f "Electron.*mcpx-desktop" || true
 ```
 
@@ -76,6 +79,9 @@ npm install
 - `npm run build`: Bundles the main, preload, and renderer processes.
 - `npm test`: Executes component and unit tests.
 - `npm run e2e`: Runs Playwright end-to-end tests against the built app.
+- `npm run desktop-install`: Builds and installs `/Applications/mcpx.app`.
+- `npm run desktop-install:dev`: Builds and installs `/Applications/mcpx-dev.app` with DevTools open.
+- `npm run desktop-install:dev-app`: Builds and installs `/Applications/mcpx-dev.app` without opening DevTools.
 
 ## Integration with CLI
 The app imports business logic directly from `../cli/src/core/index.ts` using the `@mcpx/core` TypeScript alias. This ensures that the CLI and Desktop app always share identical configuration parsing, sync logic, and secret management.

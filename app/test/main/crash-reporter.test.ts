@@ -29,6 +29,7 @@ describe("crashReporter initialization", () => {
         whenReady: mockWhenReady,
         requestSingleInstanceLock: mockRequestSingleInstanceLock,
         getAppPath: () => "/tmp/app",
+        getName: () => "mcpx",
         setActivationPolicy: vi.fn(),
       },
       crashReporter: {
@@ -117,6 +118,7 @@ describe("crashReporter initialization", () => {
         whenReady: vi.fn().mockRejectedValue(startupError),
         requestSingleInstanceLock: vi.fn().mockReturnValue(true),
         getAppPath: () => "/tmp/app",
+        getName: () => "mcpx-dev",
         setActivationPolicy: vi.fn(),
       },
       crashReporter: {
@@ -186,7 +188,7 @@ describe("crashReporter initialization", () => {
     // Should show error dialog
     expect(mockShowErrorBox).toHaveBeenCalledWith(
       "Startup Error",
-      expect.stringContaining("Test startup error")
+      "mcpx-dev failed to start: Test startup error"
     );
 
     // Should exit with code 1
