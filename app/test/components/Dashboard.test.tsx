@@ -9,6 +9,7 @@ const mockMcpx = {
     servers: [
       {
         name: "vercel",
+        enabled: true,
         transport: "http",
         target: "https://mcp.vercel.com",
         authBindings: [{ kind: "header", key: "Authorization", value: "secret://vercel_token" }],
@@ -16,6 +17,7 @@ const mockMcpx = {
       },
       {
         name: "github",
+        enabled: false,
         transport: "stdio",
         target: "npx @mcp/github",
         authBindings: [],
@@ -42,7 +44,8 @@ const mockMcpx = {
   registryGet: vi.fn(),
   registryPrepareAdd: vi.fn(),
   registryConfirmAdd: vi.fn(),
-  updateServer: vi.fn()
+  updateServer: vi.fn(),
+  setServerEnabled: vi.fn().mockResolvedValue({})
 };
 
 beforeEach(() => {
@@ -96,5 +99,10 @@ describe("Dashboard", () => {
 
     expect(await screen.findByRole("button", { name: /Save Changes/i })).toBeDefined();
     expect(screen.getByRole("button", { name: /Cancel/i })).toBeDefined();
+  });
+
+  it("shows disabled state for disabled servers", async () => {
+    render(<Dashboard />);
+    expect(await screen.findByText("Disabled")).toBeDefined();
   });
 });

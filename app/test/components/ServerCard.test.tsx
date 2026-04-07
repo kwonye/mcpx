@@ -7,6 +7,7 @@ describe("ServerCard", () => {
     render(
       <ServerCard
         name="vercel"
+        enabled={true}
         transport="http"
         target="https://mcp.vercel.com"
         authConfigured={true}
@@ -23,6 +24,7 @@ describe("ServerCard", () => {
     render(
       <ServerCard
         name="broken"
+        enabled={true}
         transport="stdio"
         target="npx broken-mcp"
         authConfigured={false}
@@ -38,6 +40,7 @@ describe("ServerCard", () => {
     render(
       <ServerCard
         name="test"
+        enabled={true}
         transport="http"
         target="https://test.com/mcp"
         authConfigured={false}
@@ -47,5 +50,22 @@ describe("ServerCard", () => {
       />
     );
     expect(screen.getByText("5")).toBeDefined();
+  });
+
+  it("shows disabled state", () => {
+    render(
+      <ServerCard
+        name="paused"
+        enabled={false}
+        transport="http"
+        target="https://paused.example.com/mcp"
+        authConfigured={false}
+        syncedCount={3}
+        errorCount={0}
+        onClick={() => {}}
+      />
+    );
+    expect(screen.getByText("Disabled")).toBeDefined();
+    expect(screen.getByText("Off")).toBeDefined();
   });
 });

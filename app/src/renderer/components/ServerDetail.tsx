@@ -1,10 +1,12 @@
 import { useState } from "react";
 import { EditServerForm } from "./EditServerForm";
+import { Toggle } from "./ui";
 import type { UpstreamServerSpec } from "@mcpx/core";
 
 interface ServerDetailProps {
   server: {
     name: string;
+    enabled: boolean;
     transport: string;
     target: string;
     authBindings: Array<{ kind: string; key: string; value: string }>;
@@ -16,6 +18,7 @@ interface ServerDetailProps {
 
 export function ServerDetail({ server, onBack, onRefresh }: ServerDetailProps) {
   const [isEditing, setIsEditing] = useState(false);
+  const [isToggling, setIsToggling] = useState(false);
 
   const handleEdit = () => {
     setIsEditing(true);
@@ -33,6 +36,18 @@ export function ServerDetail({ server, onBack, onRefresh }: ServerDetailProps) {
 
   const handleEditCancel = () => {
     setIsEditing(false);
+  };
+
+  const handleEnabledChange = async (enabled: boolean) => {
+    setIsToggling(true);
+    try {
+      await window.mcpx.setServerEnabled(server.name, enabled);
+      onRefresh();
+    } catch (error) {
+      alert(`Failed to ${enabled ? "enable" : "disable"} server: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setIsToggling(false);
+    }
   };
 
   if (isEditing) {
@@ -67,10 +82,24 @@ export function ServerDetail({ server, onBack, onRefresh }: ServerDetailProps) {
       <div className="detail-section">
         <div className="detail-section__header">
           <h3>Configuration</h3>
+          <div className="detail-toggle-row">
+            <span className={server.enabled ? "server-card-status-ok" : "server-card-status-disabled"}>
+              {server.enabled ? "Enabled" : "Disabled"}
+            </span>
+            <Toggle
+              id={`server-enabled-${server.name}`}
+              checked={server.enabled}
+              disabled={isToggling}
+              onChange={handleEnabledChange}
+              label={`${server.enabled ? "Disable" : "Enable"} ${server.name}`}
+            />
+          </div>
         </div>
         <div className="info-grid">
           <div className="info-label">Transport</div>
           <div className="info-value">{server.transport}</div>
+          <div className="info-label">State</div>
+          <div className="info-value">{server.enabled ? "Enabled" : "Disabled"}</div>
           <div className="info-label">Target</div>
           <div className="info-value mono-text">{server.target}</div>
         </div>

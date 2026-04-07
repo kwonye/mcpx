@@ -1,4 +1,4 @@
-import type { McpxConfig, UpstreamServerSpec } from "../types.js";
+import { normalizeServerSpecEnabled, type McpxConfig, type UpstreamServerSpec } from "../types.js";
 import { SecretsManager } from "./secrets.js";
 
 export function validateServerName(name: string): void {
@@ -14,7 +14,7 @@ export function addServer(config: McpxConfig, name: string, spec: UpstreamServer
     throw new Error(`Server \"${name}\" already exists. Use --force to overwrite.`);
   }
 
-  config.servers[name] = spec;
+  config.servers[name] = normalizeServerSpecEnabled(spec);
 }
 
 export function removeServer(config: McpxConfig, name: string, force = false): void {
@@ -32,7 +32,19 @@ export function updateServer(config: McpxConfig, name: string, spec: UpstreamSer
     throw new Error(`Server \"${name}\" does not exist.`);
   }
 
-  config.servers[name] = spec;
+  config.servers[name] = normalizeServerSpecEnabled(spec);
+}
+
+export function setServerEnabled(config: McpxConfig, name: string, enabled: boolean): void {
+  const existing = config.servers[name];
+  if (!existing) {
+    throw new Error(`Server "${name}" does not exist.`);
+  }
+
+  config.servers[name] = {
+    ...existing,
+    enabled
+  };
 }
 
 export function getGatewayTokenSecretName(config: McpxConfig): string {

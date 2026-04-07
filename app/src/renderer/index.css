@@ -637,6 +637,10 @@ select {
     overflow: hidden;
 }
 
+.server-card[data-disabled="true"] {
+    opacity: 0.76;
+}
+
 .server-card__header,
 .server-card__footer {
     display: flex;
@@ -743,6 +747,12 @@ select {
     font-size: 1rem;
     font-weight: 700;
     color: var(--text-main);
+}
+
+.detail-toggle-row {
+    display: inline-flex;
+    align-items: center;
+    gap: 12px;
 }
 
 .server-detail {
@@ -900,7 +910,8 @@ select {
 }
 
 .server-card-status-ok,
-.server-card-status-error {
+.server-card-status-error,
+.server-card-status-disabled {
     display: inline-flex;
     align-items: center;
     min-height: 26px;
@@ -918,6 +929,11 @@ select {
 .server-card-status-error {
     background: rgba(255, 59, 48, 0.12);
     color: var(--error);
+}
+
+.server-card-status-disabled {
+    background: rgba(107, 114, 128, 0.14);
+    color: #475569;
 }
 
 .edit-server-form,

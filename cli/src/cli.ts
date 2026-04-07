@@ -5,14 +5,15 @@
 import { Command } from "commander";
 import fs from "node:fs";
 import { execFileSync } from "node:child_process";
+import { pathToFileURL } from "node:url";
 import { emitKeypressEvents } from "node:readline";
 import { createInterface, type Interface as ReadlineInterface } from "node:readline/promises";
 import { loadConfig, saveConfig } from "./core/config.js";
-import { addServer, removeServer } from "./core/registry.js";
+import { addServer, removeServer, setServerEnabled } from "./core/registry.js";
 import { SecretsManager, readSecretValueFromStdin } from "./core/secrets.js";
 import { probeHttpAuthRequirement } from "./core/auth-probe.js";
 import { syncAllClients } from "./core/sync.js";
-import type { ClientId, ClientStatus, HttpServerSpec, McpxConfig, StdioServerSpec, UpstreamServerSpec } from "./types.js";
+import { isServerEnabled, type ClientId, type ClientStatus, type HttpServerSpec, type McpxConfig, type StdioServerSpec, type UpstreamServerSpec } from "./types.js";
 import { parseCompatibilityArgs } from "./compat/index.js";
 import {
   applyAuthReference,
@@ -392,6 +393,10 @@ function clientStatusEmoji(status: ClientStatus): string {
 }
 
 function serverHealthEmoji(server: StatusServerEntry): string {
+  if (!server.enabled) {
+    return "⏸️";
+  }
+
   const managed = server.clients.filter((client) => client.managed);
   if (managed.length === 0) {
     return "⚠️";
@@ -452,6 +457,7 @@ function printStatusReportText(report: StatusReport): void {
   } else {
     for (const server of report.servers) {
       process.stdout.write(`- ${serverHealthEmoji(server)} ${server.name} (${server.transport})\n`);
+      process.stdout.write(`  state: ${server.enabled ? "enabled" : "disabled"}\n`);
       process.stdout.write(`  target: ${server.target}\n`);
       if (server.authBindings.length > 0) {
         process.stdout.write(`  auth: 🔐 ${formatAuthSummary(server.authBindings)}\n`);
@@ -780,17 +786,22 @@ async function reconnectGatewayAndSync(): Promise<void> {
   printSyncSummary(summary, false);
 }
 
-async function disableServerInteractively(rl: ReadlineInterface, serverName: string): Promise<boolean> {
-  const confirmation = await promptLine(rl, `Type "${serverName}" to disable this MCP (blank to cancel): `);
+async function setServerEnabledInteractively(
+  rl: ReadlineInterface,
+  serverName: string,
+  enabled: boolean
+): Promise<boolean> {
+  const action = enabled ? "enable" : "disable";
+  const confirmation = await promptLine(rl, `Type "${serverName}" to ${action} this MCP (blank to cancel): `);
   if (confirmation !== serverName) {
     process.stdout.write("Cancelled.\n");
     return false;
   }
 
   const config = loadConfig();
-  removeServer(config, serverName, false);
+  setServerEnabled(config, serverName, enabled);
   saveConfig(config);
-  process.stdout.write(`Removed server: ${serverName}\n`);
+  process.stdout.write(`${enabled ? "Enabled" : "Disabled"} server: ${serverName}\n`);
   process.stdout.write("Auto-syncing managed gateway entries across all supported clients...\n");
   await autoSyncManagedEntries(config);
   return true;
@@ -799,6 +810,7 @@ async function disableServerInteractively(rl: ReadlineInterface, serverName: str
 function buildServerActionTitle(server: StatusServerEntry): string[] {
   const lines = [
     `${serverHealthEmoji(server)} ${server.name} MCP Server`,
+    `State: ${server.enabled ? "enabled" : "disabled"}`,
     `Transport: ${server.transport}`,
     `Target: ${server.target}`,
     "Synced configs:"
@@ -821,6 +833,10 @@ function buildServerActionTitle(server: StatusServerEntry): string[] {
 }
 
 function buildServerMenuDetail(server: StatusServerEntry): string {
+  if (!server.enabled) {
+    return "⏸️ disabled";
+  }
+
   const managed = server.clients.filter((client) => client.managed);
   const errorCount = managed.filter((client) => client.status === "ERROR").length;
   const syncSummary = managed.length > 0
@@ -848,8 +864,8 @@ async function runServerActionsMenu(rl: ReadlineInterface, serverName: string): 
         { label: "🔐 Configure auth", detail: "Set or update auth binding for this MCP." },
         { label: "♻️ Re-authenticate", detail: "Replace token for an existing auth binding." },
         { label: "🧹 Clear authentication", detail: "Remove a specific auth binding." },
+        { label: server.enabled ? "⏸️ Disable" : "▶️ Enable", detail: "Toggle this MCP across mcpx and all synced clients." },
         { label: "🔄 Reconnect", detail: "Restart daemon and sync all managed client entries." },
-        { label: "🚫 Disable", detail: "Remove this MCP and sync removals to clients." },
         { label: "← Back", detail: "Return to MCP list." }
       ],
       "q"
@@ -867,12 +883,12 @@ async function runServerActionsMenu(rl: ReadlineInterface, serverName: string): 
       } else if (action === 2) {
         await clearServerAuthInteractively(rl, serverName);
       } else if (action === 3) {
-        await reconnectGatewayAndSync();
-      } else if (action === 4) {
-        const removed = await disableServerInteractively(rl, serverName);
-        if (removed) {
+        const updated = await setServerEnabledInteractively(rl, serverName, !server.enabled);
+        if (updated) {
           return;
         }
+      } else if (action === 4) {
+        await reconnectGatewayAndSync();
       }
     } catch (error) {
       process.stdout.write(`${(error as Error).message}\n`);
@@ -930,6 +946,21 @@ async function runInteractiveStatusMenu(): Promise<void> {
   } finally {
     rl.close();
   }
+}
+
+function registerEnabledCommand(parent: Command, enabled: boolean): void {
+  parent
+    .command(enabled ? "enable <name>" : "disable <name>")
+    .description(`${enabled ? "Enable" : "Disable"} an upstream MCP server`)
+    .action(async (name: string) => {
+      const config = loadConfig();
+      setServerEnabled(config, name, enabled);
+      saveConfig(config);
+
+      process.stdout.write(`${enabled ? "Enabled" : "Disabled"} server: ${name}\n`);
+      process.stdout.write("Auto-syncing managed gateway entries across all supported clients...\n");
+      await autoSyncManagedEntries(config);
+    });
 }
 
 function registerAddCommand(parent: Command): void {
@@ -992,11 +1023,12 @@ function registerListCommand(parent: Command): void {
       }
 
       for (const server of servers) {
+        const state = isServerEnabled(server) ? "enabled" : "disabled";
         if (server.transport === "http") {
-          process.stdout.write(`- ${server.name} (http) ${server.url}\n`);
+          process.stdout.write(`- ${server.name} (${state}, http) ${server.url}\n`);
         } else {
           const args = (server.args ?? []).join(" ");
-          process.stdout.write(`- ${server.name} (stdio) ${server.command}${args ? ` ${args}` : ""}\n`);
+          process.stdout.write(`- ${server.name} (${state}, stdio) ${server.command}${args ? ` ${args}` : ""}\n`);
         }
       }
     });
@@ -1433,6 +1465,8 @@ function registerMcpCompat(program: Command): void {
   const mcp = program.command("mcp").description("Compatibility namespace for MCP commands");
   registerAddCommand(mcp);
   registerRemoveCommand(mcp);
+  registerEnabledCommand(mcp, true);
+  registerEnabledCommand(mcp, false);
   registerListCommand(mcp);
 }
 
@@ -1484,6 +1518,8 @@ export async function runCli(argv = process.argv): Promise<void> {
 
   registerAddCommand(program);
   registerRemoveCommand(program);
+  registerEnabledCommand(program, true);
+  registerEnabledCommand(program, false);
   registerListCommand(program);
   registerSyncCommand(program);
   registerStatusCommand(program);
@@ -1498,7 +1534,9 @@ export async function runCli(argv = process.argv): Promise<void> {
   await program.parseAsync(argv);
 }
 
-void runCli().catch((error) => {
-  process.stderr.write(`${(error as Error).message}\n`);
-  process.exit(1);
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  void runCli().catch((error) => {
+    process.stderr.write(`${(error as Error).message}\n`);
+    process.exit(1);
+  });
+}

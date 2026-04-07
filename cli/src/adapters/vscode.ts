@@ -66,11 +66,6 @@ export class VsCodeAdapter implements ClientAdapter {
       }
 
       const entry = parsed.data;
-      if (entry.disabled) {
-        result.skipped.push(buildImportSkip(this.id, name, "Entry is disabled in VS Code config.", configPath));
-        continue;
-      }
-
       if ((entry.type === undefined || entry.type === "http") && entry.url && !entry.command) {
         result.candidates.push({
           clientId: this.id,
@@ -80,7 +75,8 @@ export class VsCodeAdapter implements ClientAdapter {
           spec: {
             transport: "http",
             url: entry.url,
-            headers: entry.headers
+            headers: entry.headers,
+            enabled: entry.disabled !== true
           }
         });
         continue;
@@ -97,7 +93,8 @@ export class VsCodeAdapter implements ClientAdapter {
             command: entry.command,
             args: entry.args,
             env: entry.env,
-            cwd: entry.cwd
+            cwd: entry.cwd,
+            enabled: entry.disabled !== true
           }
         });
         continue;
@@ -126,7 +123,8 @@ export class VsCodeAdapter implements ClientAdapter {
         options.managedEntries.map((entry) => [entry.name, {
           type: "http",
           url: entry.url,
-          headers: entry.headers
+          headers: entry.headers,
+          disabled: !entry.enabled
         }])
       ) as Record<string, unknown>;
       for (const name of managedNames) {

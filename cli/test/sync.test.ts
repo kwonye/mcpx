@@ -72,7 +72,8 @@ describe("sync engine", () => {
       command: "npx",
       args: ["-y", "@example/server"],
       env: undefined,
-      cwd: undefined
+      cwd: undefined,
+      enabled: true
     });
 
     const managed = loadManagedIndex(getManagedIndexPath());
@@ -242,7 +243,8 @@ describe("sync engine", () => {
       command: "npx",
       args: ["-y", "@example/existing-mcp"],
       env: undefined,
-      cwd: undefined
+      cwd: undefined,
+      enabled: true
     });
   });
 
@@ -288,7 +290,8 @@ describe("sync engine", () => {
       command: "python",
       args: ["-m", "my_mcp"],
       env: undefined,
-      cwd: undefined
+      cwd: undefined,
+      enabled: true
     });
   });
 
@@ -330,7 +333,8 @@ describe("sync engine", () => {
       env: {
         STITCH_API_KEY: "secret"
       },
-      cwd: undefined
+      cwd: undefined,
+      enabled: true
     });
 
     const codexDoc = parse(fs.readFileSync(codexPath, "utf8")) as {
@@ -375,7 +379,8 @@ describe("sync engine", () => {
       url: "https://developers.openai.com/mcp",
       headers: {
         Authorization: "Bearer abc"
-      }
+      },
+      enabled: true
     });
     expect(summary.imports.imported).toEqual([
       expect.objectContaining({
@@ -472,7 +477,8 @@ describe("sync engine", () => {
     ]);
     expect(config.servers.stitch).toEqual({
       transport: "http",
-      url: "https://example.com/canonical"
+      url: "https://example.com/canonical",
+      enabled: true
     });
 
     const codexDoc = parse(fs.readFileSync(codexPath, "utf8")) as {
@@ -585,8 +591,117 @@ describe("sync engine", () => {
     expect(config.servers.valid).toEqual({
       transport: "http",
       url: "https://valid.example.com/mcp",
-      headers: undefined
+      headers: undefined,
+      enabled: true
     });
     expect(config.servers.broken).toBeUndefined();
+  });
+
+  it("syncs disabled servers as disabled managed entries instead of removing them", () => {
+    const env = setupTempEnv("mcpx-sync-disabled-");
+    cleanups.push(env.restore);
+
+    const config = defaultConfig();
+    config.servers.vercel = {
+      transport: "http",
+      url: "https://mcp.vercel.com",
+      enabled: false
+    };
+    saveConfig(config);
+
+    const summary = syncAllClients(config, new SecretsManager());
+
+    expect(summary.hasErrors).toBe(false);
+
+    const vscodePath = path.join(env.root, "Library", "Application Support", "Code", "User", "mcp.json");
+    const vscodeDoc = JSON.parse(fs.readFileSync(vscodePath, "utf8")) as {
+      servers: Record<string, { disabled?: boolean; type?: string }>;
+    };
+    expect(vscodeDoc.servers["vercel (mcpx)"]).toMatchObject({
+      type: "http",
+      disabled: true
+    });
+
+    const codexPath = path.join(env.root, ".codex", "config.toml");
+    const codexDoc = parse(fs.readFileSync(codexPath, "utf8")) as {
+      mcp_servers?: Record<string, { enabled?: boolean; url?: string }>;
+    };
+    expect(codexDoc.mcp_servers?.["vercel (mcpx)"]).toMatchObject({
+      enabled: false
+    });
+  });
+
+  it("imports disabled unmanaged entries and preserves the disabled state", () => {
+    const env = setupTempEnv("mcpx-sync-import-disabled-");
+    cleanups.push(env.restore);
+
+    const config = defaultConfig();
+    saveConfig(config);
+
+    const vscodePath = path.join(env.root, "Library", "Application Support", "Code", "User", "mcp.json");
+    fs.mkdirSync(path.dirname(vscodePath), { recursive: true });
+    fs.writeFileSync(vscodePath, JSON.stringify({
+      servers: {
+        disabled_remote: {
+          type: "http",
+          url: "https://disabled.example.com/mcp",
+          disabled: true
+        }
+      }
+    }, null, 2));
+
+    const summary = syncAllClients(config, new SecretsManager());
+
+    expect(summary.hasErrors).toBe(false);
+    expect(summary.imports.imported).toEqual([
+      expect.objectContaining({
+        clientId: "vscode",
+        sourceEntryName: "disabled_remote",
+        serverName: "disabled_remote"
+      })
+    ]);
+    expect(config.servers.disabled_remote).toEqual({
+      transport: "http",
+      url: "https://disabled.example.com/mcp",
+      headers: undefined,
+      enabled: false
+    });
+
+    const syncedVscode = JSON.parse(fs.readFileSync(vscodePath, "utf8")) as {
+      servers: Record<string, { disabled?: boolean; url?: string }>;
+    };
+    expect(syncedVscode.servers["disabled_remote (mcpx)"]).toMatchObject({
+      disabled: true
+    });
+  });
+
+  it("updates managed fingerprints when a server is toggled off and back on", () => {
+    const env = setupTempEnv("mcpx-sync-toggle-fingerprint-");
+    cleanups.push(env.restore);
+
+    const config = defaultConfig();
+    config.servers.vercel = {
+      transport: "http",
+      url: "https://mcp.vercel.com"
+    };
+    saveConfig(config);
+
+    syncAllClients(config, new SecretsManager());
+    const firstFingerprint = loadManagedIndex(getManagedIndexPath()).managed.vscode?.entries["vercel (mcpx)"]?.fingerprint;
+
+    config.servers.vercel.enabled = false;
+    syncAllClients(config, new SecretsManager());
+    const secondFingerprint = loadManagedIndex(getManagedIndexPath()).managed.vscode?.entries["vercel (mcpx)"]?.fingerprint;
+
+    config.servers.vercel.enabled = true;
+    const summary = syncAllClients(config, new SecretsManager());
+    const thirdFingerprint = loadManagedIndex(getManagedIndexPath()).managed.vscode?.entries["vercel (mcpx)"]?.fingerprint;
+
+    expect(summary.hasErrors).toBe(false);
+    expect(firstFingerprint).toBeDefined();
+    expect(secondFingerprint).toBeDefined();
+    expect(thirdFingerprint).toBeDefined();
+    expect(secondFingerprint).not.toBe(firstFingerprint);
+    expect(thirdFingerprint).not.toBe(secondFingerprint);
   });
 });

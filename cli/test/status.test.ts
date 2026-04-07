@@ -32,6 +32,10 @@ describe("status report", () => {
       status: "SYNCED",
       configPath: "/Users/test/.claude.json"
     };
+    config.clients["claude-desktop"] = {
+      status: "SYNCED",
+      configPath: "/Users/test/Library/Application Support/Claude/claude_desktop_config.json"
+    };
     config.clients.codex = {
       status: "ERROR",
       configPath: "/Users/test/.codex/config.toml",
@@ -47,6 +51,15 @@ describe("status report", () => {
             "vercel (mcpx)": {
               fingerprint: "sha",
               lastSyncedAt: "2026-02-15T00:00:00.000Z"
+            }
+          }
+        },
+        "claude-desktop": {
+          configPath: "/Users/test/Library/Application Support/Claude/claude_desktop_config.json",
+          entries: {
+            "vercel (mcpx)": {
+              fingerprint: "sha-desktop",
+              lastSyncedAt: "2026-02-15T00:00:00.500Z"
             }
           }
         },
@@ -66,6 +79,7 @@ describe("status report", () => {
     const vercel = report.servers.find((server) => server.name === "vercel");
 
     expect(vercel).toBeDefined();
+    expect(vercel?.enabled).toBe(true);
     expect(vercel?.authBindings).toEqual([{
       kind: "header",
       key: "Authorization",
@@ -74,6 +88,7 @@ describe("status report", () => {
     }]);
     expect(vercel?.clients.filter((client) => client.managed).map((client) => client.clientId).sort()).toEqual([
       "claude",
+      "claude-desktop",
       "codex"
     ]);
     expect(vercel?.clients.find((client) => client.clientId === "codex")).toMatchObject({
@@ -115,6 +130,25 @@ describe("status report", () => {
       status: "SYNCED",
       configPath: "/Users/test/.kiro/mcp.json",
       lastSyncAt: "2026-02-15T00:00:00.000Z"
+    });
+  });
+
+  it("surfaces disabled servers in status output", () => {
+    const config = defaultConfig();
+    config.servers.circleback = {
+      transport: "http",
+      url: "https://app.circleback.ai/api/mcp",
+      enabled: false
+    };
+
+    const report = buildStatusReport(config, {
+      schemaVersion: 1,
+      managed: {}
+    }, mockDaemonStatus());
+
+    expect(report.servers[0]).toMatchObject({
+      name: "circleback",
+      enabled: false
     });
   });
 });

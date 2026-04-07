@@ -19,6 +19,7 @@ import type {
   UpstreamServerRuntime,
   UpstreamServerSpec
 } from "../types.js";
+import { isServerEnabled } from "../types.js";
 
 const JSON_RPC_VERSION = "2.0";
 const SERVER_VERSION = APP_VERSION;
@@ -86,7 +87,9 @@ function makeResult(id: string | number | null, result: unknown): JsonRpcRespons
 }
 
 function listUpstreams(config: McpxConfig, upstreamFilter?: string): UpstreamServerRuntime[] {
-  const all = Object.entries(config.servers).map(([name, spec]) => ({ name, spec }));
+  const all = Object.entries(config.servers)
+    .filter(([, spec]) => isServerEnabled(spec))
+    .map(([name, spec]) => ({ name, spec }));
   if (!upstreamFilter) {
     return all;
   }
@@ -118,7 +121,7 @@ function getScopedHttpUpstream(
 ): (UpstreamServerRuntime & { spec: HttpServerSpec }) | null {
   if (upstreamFilter) {
     const selected = config.servers[upstreamFilter];
-    if (!selected || selected.transport !== "http") {
+    if (!selected || !isServerEnabled(selected) || selected.transport !== "http") {
       return null;
     }
 
@@ -338,7 +341,9 @@ async function closeStdioConnection(entry: StdioConnectionEntry): Promise<void> 
 
 async function reconcileStdioConnections(config: McpxConfig, runtime: GatewayRuntimeState): Promise<void> {
   const activeSpecs = new Map(
-    Object.entries(config.servers).map(([name, spec]) => [name, specFingerprint(spec)])
+    Object.entries(config.servers)
+      .filter(([, spec]) => isServerEnabled(spec))
+      .map(([name, spec]) => [name, specFingerprint(spec)])
   );
 
   const staleNames: string[] = [];
@@ -978,7 +983,7 @@ async function handleRequestObject(
   }
 
   const config = loadConfig();
-  if (upstreamFilter && !config.servers[upstreamFilter]) {
+  if (upstreamFilter && listUpstreams(config, upstreamFilter).length === 0) {
     return makeError(id, -32602, `Unknown upstream: ${upstreamFilter}`);
   }
   await reconcileStdioConnections(config, runtime);

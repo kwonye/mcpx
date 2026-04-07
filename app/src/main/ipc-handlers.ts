@@ -9,6 +9,7 @@ import {
   syncAllClients,
   addServer,
   removeServer,
+  setServerEnabled,
   updateServer,
   listAuthBindings,
   SecretsManager,
@@ -332,6 +333,15 @@ export function registerIpcHandlers(): void {
     const secrets = new SecretsManager();
     const summary = syncAllClients(config, secrets);
     return { removed: name, sync: summary };
+  });
+
+  ipcMain.handle(IPC.SET_SERVER_ENABLED, (_event, name: string, enabled: boolean) => {
+    const config = loadConfig();
+    setServerEnabled(config, name, enabled);
+    saveConfig(config);
+    const secrets = new SecretsManager();
+    const summary = syncAllClients(config, secrets);
+    return { updated: name, enabled, sync: summary };
   });
 
   ipcMain.handle(IPC.UPDATE_SERVER, (_event, name: string, spec: UpstreamServerSpec, resolvedSecrets?: Record<string, string>) => {

@@ -68,11 +68,6 @@ export class CodexAdapter implements ClientAdapter {
       }
 
       const entry = parsed.data;
-      if (entry.enabled === false) {
-        result.skipped.push(buildImportSkip(this.id, name, "Entry is disabled in Codex config.", configPath));
-        continue;
-      }
-
       if (entry.url && !entry.command) {
         result.candidates.push({
           clientId: this.id,
@@ -82,7 +77,8 @@ export class CodexAdapter implements ClientAdapter {
           spec: {
             transport: "http",
             url: entry.url,
-            headers: entry.http_headers ?? entry.headers
+            headers: entry.http_headers ?? entry.headers,
+            enabled: entry.enabled !== false
           }
         });
         continue;
@@ -99,7 +95,8 @@ export class CodexAdapter implements ClientAdapter {
             command: entry.command,
             args: entry.args,
             env: entry.env,
-            cwd: entry.cwd
+            cwd: entry.cwd,
+            enabled: entry.enabled !== false
           }
         });
         continue;
@@ -126,7 +123,7 @@ export class CodexAdapter implements ClientAdapter {
       const managedNames = options.managedEntries.map((entry) => entry.name);
       const serverEntries = Object.fromEntries(
         options.managedEntries.map((entry) => [entry.name, {
-          enabled: true,
+          enabled: entry.enabled,
           url: entry.url,
           http_headers: entry.headers
         }])

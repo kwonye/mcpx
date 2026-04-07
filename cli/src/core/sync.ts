@@ -5,6 +5,7 @@ import type {
   SyncImportReport,
   SyncResult
 } from "../types.js";
+import { isServerEnabled } from "../types.js";
 import { getAdapters } from "../adapters/index.js";
 import { serverSpecsEqual } from "../adapters/utils/index.js";
 import { loadManagedIndex, saveManagedIndex } from "./managed-index.js";
@@ -25,13 +26,14 @@ export function getGatewayUrl(config: McpxConfig): string {
 }
 
 function buildManagedEntries(config: McpxConfig, gatewayUrl: string, localToken: string): ManagedGatewayEntry[] {
-  const names = Object.keys(config.servers);
-  return names.map((name) => ({
+  const entries = Object.entries(config.servers);
+  return entries.map(([name, spec]) => ({
     name: `${name} (mcpx)`,
     url: `${gatewayUrl}?upstream=${encodeURIComponent(name)}`,
     headers: {
       Authorization: `Bearer ${localToken}`
-    }
+    },
+    enabled: isServerEnabled(spec)
   }));
 }
 

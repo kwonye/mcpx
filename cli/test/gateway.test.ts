@@ -193,6 +193,83 @@ describe("gateway passthrough", () => {
     expect(toolNames).toContain("vercel.echo");
   });
 
+  it("hides disabled upstreams from list responses and scoped calls", async () => {
+    const env = setupTempEnv("mcpx-gateway-disabled-http-");
+    cleanups.push(env.restore);
+
+    const upstream = await startServer(async (req, res) => {
+      const chunks: Buffer[] = [];
+      for await (const chunk of req) {
+        chunks.push(Buffer.from(chunk));
+      }
+
+      const payload = JSON.parse(Buffer.concat(chunks).toString("utf8")) as { method: string; id: string | number | null };
+      if (payload.method === "tools/list") {
+        res.setHeader("content-type", "application/json");
+        res.end(JSON.stringify({ jsonrpc: "2.0", id: payload.id, result: { tools: [{ name: "echo", description: "Echo" }] } }));
+        return;
+      }
+
+      if (payload.method === "tools/call") {
+        res.setHeader("content-type", "application/json");
+        res.end(JSON.stringify({ jsonrpc: "2.0", id: payload.id, result: { ok: true } }));
+        return;
+      }
+
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ jsonrpc: "2.0", id: payload.id, result: {} }));
+    });
+    cleanups.push(() => closeServer(upstream.server));
+
+    const config = defaultConfig();
+    config.servers.circleback = {
+      transport: "http",
+      url: `http://127.0.0.1:${upstream.port}/mcp`,
+      enabled: false
+    };
+    saveConfig(config);
+
+    const gateway = createGatewayServer({
+      port: 0,
+      expectedToken: "test-local-token",
+      secrets: new SecretsManager()
+    });
+    await waitForListening(gateway);
+    cleanups.push(() => closeServer(gateway));
+
+    const address = gateway.address();
+    if (!address || typeof address === "string") {
+      throw new Error("Failed to resolve gateway address.");
+    }
+
+    const listResponse = await fetch(`http://127.0.0.1:${address.port}/mcp`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        Authorization: "Bearer test-local-token"
+      },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} })
+    });
+    const listPayload = (await listResponse.json()) as { result: { tools: Array<{ name: string }> } };
+    expect(listPayload.result.tools).toEqual([]);
+
+    const scopedResponse = await fetch(`http://127.0.0.1:${address.port}/mcp?upstream=circleback`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        Authorization: "Bearer test-local-token"
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 2,
+        method: "tools/call",
+        params: { name: "echo", arguments: { text: "hello" } }
+      })
+    });
+    const scopedPayload = (await scopedResponse.json()) as { error?: { message?: string } };
+    expect(scopedPayload.error?.message).toContain("Unknown upstream");
+  });
+
   it("supports stdio upstream server passthrough", async () => {
     const env = setupTempEnv("mcpx-gateway-stdio-");
     cleanups.push(env.restore);
@@ -257,6 +334,61 @@ describe("gateway passthrough", () => {
       .filter((item) => item.type === "text")
       .map((item) => item.text);
     expect(textOutput).toContain("hello-stdio");
+  });
+
+  it("removes disabled stdio upstreams from the active catalog immediately", async () => {
+    const env = setupTempEnv("mcpx-gateway-disabled-stdio-");
+    cleanups.push(env.restore);
+
+    const fixturePath = fileURLToPath(new URL("./fixtures/mock-stdio-mcp-server.cjs", import.meta.url));
+
+    const config = defaultConfig();
+    config.servers.next_devtools = {
+      transport: "stdio",
+      command: process.execPath,
+      args: [fixturePath]
+    };
+    saveConfig(config);
+
+    const gateway = createGatewayServer({
+      port: 0,
+      expectedToken: "test-local-token",
+      secrets: new SecretsManager()
+    });
+    await waitForListening(gateway);
+    cleanups.push(() => closeServer(gateway));
+
+    const gatewayAddress = gateway.address();
+    if (!gatewayAddress || typeof gatewayAddress === "string") {
+      throw new Error("Failed to resolve gateway address.");
+    }
+
+    const baseUrl = `http://127.0.0.1:${gatewayAddress.port}/mcp`;
+
+    const firstList = await fetch(baseUrl, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        Authorization: "Bearer test-local-token"
+      },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} })
+    });
+    const firstPayload = (await firstList.json()) as { result: { tools: Array<{ name: string }> } };
+    expect(firstPayload.result.tools.map((tool) => tool.name)).toContain("echo");
+
+    config.servers.next_devtools.enabled = false;
+    saveConfig(config);
+
+    const secondList = await fetch(baseUrl, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        Authorization: "Bearer test-local-token"
+      },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} })
+    });
+    const secondPayload = (await secondList.json()) as { result: { tools: Array<{ name: string }> } };
+    expect(secondPayload.result.tools).toEqual([]);
   });
 
   it("rejects unauthorized local client requests", async () => {

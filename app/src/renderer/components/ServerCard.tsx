@@ -1,5 +1,6 @@
 interface ServerCardProps {
   name: string;
+  enabled: boolean;
   transport: string;
   target: string;
   authConfigured: boolean;
@@ -9,11 +10,11 @@ interface ServerCardProps {
 }
 
 export function ServerCard(props: ServerCardProps) {
-  const isHealthy = props.errorCount === 0 && props.syncedCount > 0;
-  const isWarning = props.errorCount > 0;
+  const isHealthy = props.enabled && props.errorCount === 0 && props.syncedCount > 0;
+  const isWarning = props.enabled && props.errorCount > 0;
 
   return (
-    <div className="glass-card server-card" onClick={props.onClick}>
+    <div className="glass-card server-card" data-disabled={!props.enabled} onClick={props.onClick}>
       <div className="server-card__header">
         <div className="server-card__main">
           <div className="server-card__icon">
@@ -26,7 +27,7 @@ export function ServerCard(props: ServerCardProps) {
             <div className="server-card__status">
               <div className={`status-dot ${isWarning ? 'status-error' : isHealthy ? 'status-online' : 'status-offline'}`}></div>
               <span>
-                {isWarning ? `${props.errorCount} Errors` : isHealthy ? 'Online' : 'Offline'}
+                {isWarning ? `${props.errorCount} Errors` : props.enabled ? isHealthy ? 'Online' : 'Offline' : 'Disabled'}
               </span>
             </div>
           </div>
@@ -46,8 +47,8 @@ export function ServerCard(props: ServerCardProps) {
           </span>
         </div>
         <div className="server-card__meta server-card__meta--right">
-          <span className="eyebrow">Synced</span>
-          <span className="server-card__count">{props.syncedCount}</span>
+          <span className="eyebrow">State</span>
+          <span className="server-card__count">{props.enabled ? props.syncedCount : "Off"}</span>
         </div>
       </div>
     </div>

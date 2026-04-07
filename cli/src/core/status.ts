@@ -1,9 +1,9 @@
 import { getDaemonStatus, type DaemonStatus } from "./daemon.js";
 import { getGatewayUrl } from "./sync.js";
 import { listAuthBindings, secretRefName } from "./server-auth.js";
-import type { ClientId, ClientStatus, ManagedIndex, McpxConfig, UpstreamServerSpec } from "../types.js";
+import { isServerEnabled, type ClientId, type ClientStatus, type ManagedIndex, type McpxConfig, type UpstreamServerSpec } from "../types.js";
 
-export const STATUS_CLIENTS: ClientId[] = ["claude", "codex", "cursor", "cline", "opencode", "kiro", "vscode", "qwen"];
+export const STATUS_CLIENTS: ClientId[] = ["claude", "claude-desktop", "codex", "cursor", "cline", "opencode", "kiro", "vscode", "qwen"];
 
 export interface StatusAuthBinding {
   kind: "header" | "env";
@@ -23,6 +23,7 @@ export interface StatusClientMapping {
 
 export interface StatusServerEntry {
   name: string;
+  enabled: boolean;
   transport: UpstreamServerSpec["transport"];
   target: string;
   authBindings: StatusAuthBinding[];
@@ -92,6 +93,7 @@ export function buildStatusReport(
     const spec = config.servers[name];
     return {
       name,
+      enabled: isServerEnabled(spec),
       transport: spec.transport,
       target: describeServerTarget(spec),
       authBindings: buildAuthBindings(spec),

@@ -4,11 +4,13 @@ import { ServerDetail } from "../../src/renderer/components/ServerDetail";
 
 const mockMcpx = {
   updateServer: vi.fn(),
+  setServerEnabled: vi.fn().mockResolvedValue({}),
   removeServer: vi.fn().mockResolvedValue({})
 };
 
 const baseServer = {
   name: "next-devtools-mcp",
+  enabled: true,
   transport: "stdio",
   target: "npx next-devtools-mcp@0.3.6",
   authBindings: [{ kind: "header", key: "Authorization", value: "secret://token" }],
@@ -42,5 +44,13 @@ describe("ServerDetail", () => {
     expect(screen.getByRole("button", { name: /Save Changes/i })).toBeDefined();
     expect(screen.getByRole("button", { name: /Cancel/i })).toBeDefined();
     expect(screen.getByLabelText("Transport")).toBeDefined();
+  });
+
+  it("toggles enabled state", () => {
+    render(<ServerDetail server={baseServer} onBack={() => {}} onRefresh={() => {}} />);
+
+    fireEvent.click(screen.getByLabelText(/Disable next-devtools-mcp/i));
+
+    expect(mockMcpx.setServerEnabled).toHaveBeenCalledWith("next-devtools-mcp", false);
   });
 });

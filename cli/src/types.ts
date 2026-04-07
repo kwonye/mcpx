@@ -4,6 +4,7 @@ export interface HttpServerSpec {
   transport: "http";
   url: string;
   headers?: Record<string, string>;
+  enabled?: boolean;
 }
 
 export interface StdioServerSpec {
@@ -12,6 +13,7 @@ export interface StdioServerSpec {
   args?: string[];
   env?: Record<string, string>;
   cwd?: string;
+  enabled?: boolean;
 }
 
 export type UpstreamServerSpec = HttpServerSpec | StdioServerSpec;
@@ -138,6 +140,7 @@ export interface ManagedGatewayEntry {
   name: string;
   url: string;
   headers: Record<string, string>;
+  enabled: boolean;
 }
 
 export interface JsonRpcRequest {
@@ -161,4 +164,15 @@ export interface JsonRpcResponse {
 export interface UpstreamServerRuntime {
   name: string;
   spec: UpstreamServerSpec;
+}
+
+export function isServerEnabled(spec: UpstreamServerSpec): boolean {
+  return spec.enabled !== false;
+}
+
+export function normalizeServerSpecEnabled<T extends UpstreamServerSpec>(spec: T): T & { enabled: boolean } {
+  return {
+    ...spec,
+    enabled: isServerEnabled(spec)
+  };
 }

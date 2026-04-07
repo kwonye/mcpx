@@ -70,6 +70,7 @@ export function Dashboard() {
     daemon: { running: boolean; pid?: number; port: number };
     servers: Array<{
       name: string;
+      enabled: boolean;
       transport: string;
       target: string;
       authBindings: Array<{ kind: string; key: string; value: string }>;
@@ -144,6 +145,7 @@ export function Dashboard() {
                       <ServerCard
                         key={server.name}
                         name={server.name}
+                        enabled={server.enabled}
                         transport={server.transport}
                         target={server.target}
                         authConfigured={server.authBindings.length > 0}

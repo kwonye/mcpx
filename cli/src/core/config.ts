@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { ClientId, McpxConfig } from "../types.js";
+import { normalizeServerSpecEnabled, type ClientId, type McpxConfig } from "../types.js";
 import { getConfigPath } from "./paths.js";
 import { readJsonFile, writeJsonAtomic } from "../util/fs.js";
 
@@ -13,7 +13,8 @@ const clientStateSchema = z.object({
 const httpServerSchema = z.object({
   transport: z.literal("http"),
   url: z.url(),
-  headers: z.record(z.string(), z.string()).optional()
+  headers: z.record(z.string(), z.string()).optional(),
+  enabled: z.boolean().default(true)
 });
 
 const stdioServerSchema = z.object({
@@ -21,7 +22,8 @@ const stdioServerSchema = z.object({
   command: z.string().min(1),
   args: z.array(z.string()).optional(),
   env: z.record(z.string(), z.string()).optional(),
-  cwd: z.string().min(1).optional()
+  cwd: z.string().min(1).optional(),
+  enabled: z.boolean().default(true)
 });
 
 const serverSchema = z.discriminatedUnion("transport", [httpServerSchema, stdioServerSchema]);
@@ -63,19 +65,26 @@ export function loadConfig(configPath = getConfigPath()): McpxConfig {
 
   const clientEntries: Partial<Record<ClientId, McpxConfig["clients"][ClientId]>> = {};
   for (const [key, value] of Object.entries(parsed.data.clients)) {
-    if (["claude", "codex", "cursor", "cline", "opencode", "kiro", "vscode", "qwen"].includes(key)) {
+    if (["claude", "claude-desktop", "codex", "cursor", "cline", "opencode", "kiro", "vscode", "qwen"].includes(key)) {
       clientEntries[key as ClientId] = value;
     }
   }
 
+  const servers = Object.fromEntries(
+    Object.entries(parsed.data.servers).map(([name, spec]) => [name, normalizeServerSpecEnabled(spec)])
+  );
+
   return {
     schemaVersion: 1,
     gateway: parsed.data.gateway,
-    servers: parsed.data.servers,
+    servers,
     clients: clientEntries
   };
 }
 
 export function saveConfig(config: McpxConfig, configPath = getConfigPath()): void {
+  config.servers = Object.fromEntries(
+    Object.entries(config.servers).map(([name, spec]) => [name, normalizeServerSpecEnabled(spec)])
+  );
   writeJsonAtomic(configPath, config);
 }
