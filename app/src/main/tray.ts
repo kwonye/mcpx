@@ -1,6 +1,7 @@
 import { Tray, nativeImage, Menu, app } from "electron";
 import { join } from "node:path";
 import { hidePopover, togglePopover } from "./popover";
+import { getDesktopProductName, isDevDesktopApp } from "./app-flavor";
 
 let tray: Tray | null = null;
 let daemonRunning = false;
@@ -56,11 +57,13 @@ function buildContextMenu(daemonRunning: boolean): Menu {
 }
 
 export function createTray(): Tray {
+  const productName = getDesktopProductName();
+  const iconName = isDevDesktopApp() ? "trayIconDevTemplate.png" : "trayIconTemplate.png";
   const icon = nativeImage.createFromPath(
-    join(__dirname, "../../resources/trayIconTemplate.png")
+    join(__dirname, "../../resources", iconName)
   );
   tray = new Tray(icon);
-  tray.setToolTip("mcpx");
+  tray.setToolTip(productName);
 
   tray.on("click", () => {
     togglePopover(tray);
@@ -78,7 +81,8 @@ export function updateTrayForDaemonStatus(running: boolean): void {
   if (!tray) return;
 
   daemonRunning = running;
-  const tooltip = running ? "mcpx - Gateway running" : "mcpx - Gateway stopped";
+  const productName = getDesktopProductName();
+  const tooltip = running ? `${productName} - Gateway running` : `${productName} - Gateway stopped`;
   tray.setToolTip(tooltip);
 }
 

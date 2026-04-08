@@ -18,6 +18,18 @@ describe("tray icon requirements", () => {
       expect(iconPath).toContain("@2x");
       expect(iconPath).toContain("Template");
     });
+
+    it("includes matching dev template icons", async () => {
+      const iconPath = join(__dirname, "../../resources/trayIconDevTemplate.png");
+      const retinaIconPath = join(__dirname, "../../resources/trayIconDevTemplate@2x.png");
+      const exists = await access(iconPath).then(() => true).catch(() => false);
+      const retinaExists = await access(retinaIconPath).then(() => true).catch(() => false);
+
+      expect(exists).toBe(true);
+      expect(retinaExists).toBe(true);
+      expect(iconPath).toContain("Template");
+      expect(retinaIconPath).toContain("@2x");
+    });
   });
 
   describe("ICON-03: Icon resolutions", () => {
@@ -31,6 +43,16 @@ describe("tray icon requirements", () => {
       const iconPath = join(__dirname, "../../resources/trayIconTemplate@2x.png");
       const exists = await access(iconPath).then(() => true).catch(() => false);
       expect(exists).toBe(true);
+    });
+
+    it("dev icon resolutions exist alongside production", async () => {
+      const iconPath = join(__dirname, "../../resources/trayIconDevTemplate.png");
+      const retinaIconPath = join(__dirname, "../../resources/trayIconDevTemplate@2x.png");
+      const exists = await access(iconPath).then(() => true).catch(() => false);
+      const retinaExists = await access(retinaIconPath).then(() => true).catch(() => false);
+
+      expect(exists).toBe(true);
+      expect(retinaExists).toBe(true);
     });
   });
 
@@ -61,18 +83,32 @@ describe("tray icon requirements", () => {
       
       expect(traySource).toContain("export function updateTrayForDaemonStatus");
     });
+
+    it("selects tray icons based on app flavor", async () => {
+      const traySource = await readFile(
+        join(__dirname, "../../src/main/tray.ts"),
+        "utf-8"
+      );
+
+      expect(traySource).toContain("trayIconDevTemplate.png");
+      expect(traySource).toContain("getDesktopProductName()");
+    });
   });
 
   describe("ICON-01: Icon design verification", () => {
     it("icon files are valid PNG format", async () => {
       const icon16 = await readFile(join(__dirname, "../../resources/trayIconTemplate.png"));
       const icon32 = await readFile(join(__dirname, "../../resources/trayIconTemplate@2x.png"));
+      const devIcon16 = await readFile(join(__dirname, "../../resources/trayIconDevTemplate.png"));
+      const devIcon32 = await readFile(join(__dirname, "../../resources/trayIconDevTemplate@2x.png"));
       
       // PNG magic number: 89 50 4E 47
       const pngSignature = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
       
       expect(Buffer.from(icon16).subarray(0, 4)).toEqual(pngSignature);
       expect(Buffer.from(icon32).subarray(0, 4)).toEqual(pngSignature);
+      expect(Buffer.from(devIcon16).subarray(0, 4)).toEqual(pngSignature);
+      expect(Buffer.from(devIcon32).subarray(0, 4)).toEqual(pngSignature);
     });
   });
 });

@@ -92,6 +92,14 @@ describe("Dashboard", () => {
     expect(mockMcpx.getDesktopSettings).toHaveBeenCalledTimes(2);
   });
 
+  it("shows product-aware settings copy", async () => {
+    render(<Dashboard />);
+    fireEvent.click(await screen.findByText("Settings"));
+
+    expect(await screen.findByText("Configure your mcpx installation.")).toBeDefined();
+    expect(screen.getByText("mcpx Manager")).toBeDefined();
+  });
+
   it("opens the edit flow from server detail", async () => {
     render(<Dashboard />);
     fireEvent.click(await screen.findByText("vercel"));

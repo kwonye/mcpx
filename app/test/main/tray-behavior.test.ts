@@ -5,6 +5,7 @@ describe("tray click behavior", () => {
   const togglePopoverMock = vi.fn();
   const hidePopoverMock = vi.fn();
   const trayInstances: MockTray[] = [];
+  const createFromPathMock = vi.fn(() => ({ path: "icon" }));
 
   class MockTray {
     handlers: Record<string, () => void> = {};
@@ -37,7 +38,7 @@ describe("tray click behavior", () => {
     vi.doMock("electron", () => ({
       Tray: TrayMock,
       nativeImage: {
-        createFromPath: vi.fn(() => ({ path: "icon" }))
+        createFromPath: createFromPathMock
       },
       Menu: {
         buildFromTemplate: vi.fn((template) => ({ template }))
@@ -64,6 +65,7 @@ describe("tray click behavior", () => {
     tray.handlers["right-click"]();
     expect(hidePopoverMock).toHaveBeenCalledTimes(1);
     expect(tray.popUpContextMenu).toHaveBeenCalledTimes(1);
+    expect(createFromPathMock).toHaveBeenCalledWith(expect.stringContaining("trayIconTemplate.png"));
   });
 
   it("updates the tray menu when daemon status changes", async () => {

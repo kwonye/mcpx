@@ -4,6 +4,11 @@ import { resolve } from "node:path";
 
 export default defineConfig({
   plugins: [react()],
+  define: {
+    __MCPX_DESKTOP_FLAVOR__: JSON.stringify("production"),
+    __MCPX_DESKTOP_PRODUCT_NAME__: JSON.stringify("mcpx"),
+    __MCPX_DESKTOP_DEBUG__: JSON.stringify(false)
+  },
   test: {
     environment: "jsdom",
     globals: true,

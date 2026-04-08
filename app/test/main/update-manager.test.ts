@@ -46,6 +46,7 @@ describe("update manager", () => {
     vi.useFakeTimers();
     vi.resetModules();
     vi.clearAllMocks();
+    vi.doUnmock("../../src/shared/build-constants");
     appMock.isPackaged = true;
     appMock.getName.mockReturnValue("mcpx");
     for (const key of Object.keys(updateEventHandlers)) {
@@ -146,7 +147,12 @@ describe("update manager", () => {
   });
 
   it("does not schedule checks for dev app builds", async () => {
-    appMock.getName.mockReturnValue("mcpx-dev");
+    vi.doMock("../../src/shared/build-constants", () => ({
+      DESKTOP_BUILD_FLAVOR: "dev",
+      DESKTOP_PRODUCT_NAME: "mcpx-dev",
+      DESKTOP_DEBUG: true,
+      DESKTOP_MANAGER_NAME: "mcpx-dev Manager"
+    }));
     const { setAutoUpdateEnabled } = await import("../../src/main/update-manager");
 
     setAutoUpdateEnabled(true);
@@ -156,7 +162,12 @@ describe("update manager", () => {
   });
 
   it("returns unsupported status for dev app manual checks", async () => {
-    appMock.getName.mockReturnValue("mcpx-dev");
+    vi.doMock("../../src/shared/build-constants", () => ({
+      DESKTOP_BUILD_FLAVOR: "dev",
+      DESKTOP_PRODUCT_NAME: "mcpx-dev",
+      DESKTOP_DEBUG: true,
+      DESKTOP_MANAGER_NAME: "mcpx-dev Manager"
+    }));
     const { checkForUpdatesNow } = await import("../../src/main/update-manager");
 
     const result = await checkForUpdatesNow();
