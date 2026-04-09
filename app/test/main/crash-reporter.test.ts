@@ -5,6 +5,7 @@ describe("crashReporter initialization", () => {
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();
+    vi.doUnmock("../../src/shared/build-constants");
     delete process.env.VITEST;
   });
 
@@ -177,6 +178,13 @@ describe("crashReporter initialization", () => {
 
     vi.doMock("../../src/main/update-manager", () => ({
       setAutoUpdateEnabled: vi.fn(),
+    }));
+
+    vi.doMock("../../src/shared/build-constants", () => ({
+      DESKTOP_BUILD_FLAVOR: "dev",
+      DESKTOP_PRODUCT_NAME: "mcpx-dev",
+      DESKTOP_DEBUG: true,
+      DESKTOP_MANAGER_NAME: "mcpx-dev Manager"
     }));
 
     const { startMainProcess } = await import("../../src/main/index");

@@ -7,6 +7,7 @@ import { DaemonControls } from "./DaemonControls";
 import { SettingsPanel } from "./SettingsPanel";
 import { CliCommandInput } from "./CliCommandInput";
 import type { BrowseState } from "../../shared/desktop-settings";
+import { DESKTOP_MANAGER_NAME, DESKTOP_PRODUCT_NAME } from "../../shared/build-constants";
 
 type Tab = "servers" | "browse" | "settings";
 
@@ -87,7 +88,7 @@ export function Dashboard() {
           <div className="sidebar-logo-icon">
             <span className="material-symbols-outlined">hub</span>
           </div>
-          <span className="sidebar-logo-text">mcpx Manager</span>
+          <span className="sidebar-logo-text">{DESKTOP_MANAGER_NAME}</span>
         </div>
         <DaemonControls daemon={report.daemon} onRefresh={refresh} />
         <div className="sidebar-inner glass-panel">
@@ -183,7 +184,7 @@ export function Dashboard() {
                   <div className="page-header">
                     <div>
                       <h1 className="page-title">Settings</h1>
-                      <p className="page-subtitle">Configure your mcpx installation.</p>
+                      <p className="page-subtitle">Configure your {DESKTOP_PRODUCT_NAME} installation.</p>
                     </div>
                   </div>
                   <SettingsPanel />

@@ -1,10 +1,12 @@
 import { Menu } from "electron";
 import { shell } from "electron";
+import { getDesktopProductName } from "./app-flavor";
 
 export function buildApplicationMenu(): Menu {
+  const productName = getDesktopProductName();
   const template: Electron.MenuItemConstructorOptions[] = [
     {
-      label: "mcpx",
+      label: productName,
       submenu: [
         { role: "about" },
         { type: "separator" },

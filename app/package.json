@@ -10,6 +10,7 @@
     "productName": "mcpx",
     "mac": {
       "category": "public.app-category.developer-tools",
+      "icon": "build/icons/mcpx.icns",
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.inherit.plist",
       "hardenedRuntime": true,
@@ -42,7 +43,8 @@
     "desktop-install": "bash scripts/desktop-install.sh --flavor production",
     "desktop-install:devtools": "bash scripts/desktop-install.sh --flavor production --dev",
     "desktop-install:dev-app": "bash scripts/desktop-install.sh --flavor dev",
-    "desktop-install:dev": "bash scripts/desktop-install.sh --flavor dev --dev"
+    "desktop-install:dev": "bash scripts/desktop-install.sh --flavor dev --dev",
+    "desktop-install:dev:cdp": "bash scripts/desktop-install.sh --flavor dev --dev --remote-debugging-port 9222"
   },
   "dependencies": {
     "electron-updater": "^6.6.2",

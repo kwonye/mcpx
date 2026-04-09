@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { DesktopSettings } from "../../shared/desktop-settings";
 import { Toggle } from "./ui";
+import { DESKTOP_PRODUCT_NAME } from "../../shared/build-constants";
 
 type SettingKey = keyof DesktopSettings;
 
@@ -115,7 +116,7 @@ export function SettingsPanel() {
         <div className="setting-card__item setting-card__item--stacked">
           <div>
             <span className="setting-card__label">Manual check</span>
-            <p className="setting-card__description">Check for app updates now. Any downloaded update will install the next time you restart mcpx.</p>
+            <p className="setting-card__description">Check for app updates now. Any downloaded update will install the next time you restart {DESKTOP_PRODUCT_NAME}.</p>
           </div>
           <button
             type="button"

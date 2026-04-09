@@ -94,4 +94,15 @@ describe("SettingsPanel", () => {
     });
     expect(await screen.findByText(/Downloading now and it will install on the next restart/i)).toBeDefined();
   });
+
+  it("renders product-aware restart copy", async () => {
+    mockMcpx.getDesktopSettings.mockResolvedValue({
+      autoUpdateEnabled: true,
+      startOnLoginEnabled: true
+    });
+
+    render(<SettingsPanel />);
+
+    expect(await screen.findByText(/restart mcpx\./i)).toBeDefined();
+  });
 });
