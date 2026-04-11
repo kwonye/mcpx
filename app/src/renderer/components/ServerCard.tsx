@@ -1,3 +1,6 @@
+import { Toggle } from "./ui";
+import { useServerEnabled } from "../hooks/useServerEnabled";
+
 interface ServerCardProps {
   name: string;
   enabled: boolean;
@@ -6,12 +9,14 @@ interface ServerCardProps {
   authConfigured: boolean;
   syncedCount: number;
   errorCount: number;
+  onRefresh: () => void;
   onClick: () => void;
 }
 
 export function ServerCard(props: ServerCardProps) {
   const isHealthy = props.enabled && props.errorCount === 0 && props.syncedCount > 0;
   const isWarning = props.enabled && props.errorCount > 0;
+  const { isToggling, handleEnabledChange } = useServerEnabled(props.name, props.onRefresh);
 
   return (
     <div className="glass-card server-card" data-disabled={!props.enabled} onClick={props.onClick}>
@@ -32,11 +37,23 @@ export function ServerCard(props: ServerCardProps) {
             </div>
           </div>
         </div>
-        {props.authConfigured && (
-          <div className="server-card__auth" title="Auth configured">
-            <span className="material-symbols-outlined">lock</span>
+        <div className="server-card__controls" onClick={(event) => event.stopPropagation()}>
+          {props.authConfigured && (
+            <div className="server-card__auth" title="Auth configured">
+              <span className="material-symbols-outlined">lock</span>
+            </div>
+          )}
+          <div className="server-card__toggle">
+            <span className="server-card__toggle-state">{props.enabled ? "On" : "Off"}</span>
+            <Toggle
+              id={`server-card-enabled-${props.name}`}
+              checked={props.enabled}
+              disabled={isToggling}
+              onChange={handleEnabledChange}
+              label={`${props.enabled ? "Disable" : "Enable"} ${props.name}`}
+            />
           </div>
-        )}
+        </div>
       </div>
 
       <div className="server-card__footer">
