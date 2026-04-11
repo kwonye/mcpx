@@ -1,4 +1,36 @@
+import { Toggle } from "./ui";
 import { useStatus } from "../hooks/useMcpx";
+import { useServerEnabled } from "../hooks/useServerEnabled";
+
+interface PopoverServerRowProps {
+  server: {
+    name: string;
+    enabled: boolean;
+  };
+  onRefresh: () => void;
+}
+
+function PopoverServerRow({ server, onRefresh }: PopoverServerRowProps) {
+  const { isToggling, handleEnabledChange } = useServerEnabled(server.name, onRefresh);
+
+  return (
+    <div className="popover-server-row">
+      <div className="popover-server-row__meta">
+        <span className="popover-server-row__name">{server.name}</span>
+        <span className={`popover-server-row__state ${server.enabled ? "is-enabled" : "is-disabled"}`}>
+          {server.enabled ? "Enabled" : "Disabled"}
+        </span>
+      </div>
+      <Toggle
+        id={`popover-server-enabled-${server.name}`}
+        checked={server.enabled}
+        disabled={isToggling}
+        onChange={handleEnabledChange}
+        label={`${server.enabled ? "Disable" : "Enable"} ${server.name}`}
+      />
+    </div>
+  );
+}
 
 export function StatusPopover() {
   const { status, loading, refresh } = useStatus();
@@ -10,7 +42,7 @@ export function StatusPopover() {
   const report = status as {
     daemon: { running: boolean; pid?: number; port: number };
     upstreamCount: number;
-    servers: Array<{ name: string; clients: Array<{ clientId: string; status: string; managed: boolean }> }>;
+    servers: Array<{ name: string; enabled: boolean; clients: Array<{ clientId: string; status: string; managed: boolean }> }>;
   };
 
   const errorCount = report.servers.reduce((count, server) => {
@@ -84,6 +116,23 @@ export function StatusPopover() {
             </div>
           </div>
         </section>
+
+        {report.servers.length > 0 && (
+          <section style={{ display: "flex", flexDirection: "column", gap: "8px", minHeight: 0 }}>
+            <h2 style={{ fontSize: "11px", fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.05em", padding: "0 4px" }}>
+              Servers
+            </h2>
+            <div className="popover-server-list glass-panel">
+              {report.servers.map((server) => (
+                <PopoverServerRow
+                  key={server.name}
+                  server={server}
+                  onRefresh={refresh}
+                />
+              ))}
+            </div>
+          </section>
+        )}
       </main>
 
       <footer className="popover-actions">

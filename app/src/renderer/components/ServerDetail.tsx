@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { EditServerForm } from "./EditServerForm";
 import { Toggle } from "./ui";
+import { useServerEnabled } from "../hooks/useServerEnabled";
 import type { UpstreamServerSpec } from "@mcpx/core";
 
 interface ServerDetailProps {
@@ -18,7 +19,7 @@ interface ServerDetailProps {
 
 export function ServerDetail({ server, onBack, onRefresh }: ServerDetailProps) {
   const [isEditing, setIsEditing] = useState(false);
-  const [isToggling, setIsToggling] = useState(false);
+  const { isToggling, handleEnabledChange } = useServerEnabled(server.name, onRefresh);
 
   const handleEdit = () => {
     setIsEditing(true);
@@ -36,18 +37,6 @@ export function ServerDetail({ server, onBack, onRefresh }: ServerDetailProps) {
 
   const handleEditCancel = () => {
     setIsEditing(false);
-  };
-
-  const handleEnabledChange = async (enabled: boolean) => {
-    setIsToggling(true);
-    try {
-      await window.mcpx.setServerEnabled(server.name, enabled);
-      onRefresh();
-    } catch (error) {
-      alert(`Failed to ${enabled ? "enable" : "disable"} server: ${error instanceof Error ? error.message : String(error)}`);
-    } finally {
-      setIsToggling(false);
-    }
   };
 
   if (isEditing) {

@@ -113,4 +113,12 @@ describe("Dashboard", () => {
     render(<Dashboard />);
     expect(await screen.findByText("Disabled")).toBeDefined();
   });
+
+  it("toggles a server from the my servers grid", async () => {
+    render(<Dashboard />);
+
+    fireEvent.click(await screen.findByLabelText(/Disable vercel/i));
+
+    expect(mockMcpx.setServerEnabled).toHaveBeenCalledWith("vercel", false);
+  });
 });

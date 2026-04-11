@@ -152,6 +152,7 @@ export function Dashboard() {
                         authConfigured={server.authBindings.length > 0}
                         syncedCount={server.clients.filter((c) => c.managed && c.status === "SYNCED").length}
                         errorCount={server.clients.filter((c) => c.managed && c.status === "ERROR").length}
+                        onRefresh={refresh}
                         onClick={() => setSelectedServer(server.name)}
                       />
                     ))}

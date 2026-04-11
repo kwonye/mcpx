@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeAll } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { StatusPopover } from "../../src/renderer/components/StatusPopover";
 
 const mockMcpx = {
@@ -7,14 +7,15 @@ const mockMcpx = {
     daemon: { running: true, pid: 1234, pidFile: "", logFile: "", port: 37373 },
     upstreamCount: 3,
     servers: [
-      { name: "vercel", transport: "http", target: "https://mcp.vercel.com", authBindings: [], clients: [{ clientId: "claude", status: "ERROR", managed: true }] },
-      { name: "github", transport: "http", target: "https://mcp.github.com", authBindings: [], clients: [{ clientId: "claude", status: "SYNCED", managed: true }] }
+      { name: "vercel", enabled: true, transport: "http", target: "https://mcp.vercel.com", authBindings: [], clients: [{ clientId: "claude", status: "ERROR", managed: true }] },
+      { name: "github", enabled: false, transport: "http", target: "https://mcp.github.com", authBindings: [], clients: [{ clientId: "claude", status: "SYNCED", managed: true }] }
     ]
   }),
   syncAll: vi.fn(),
   daemonStart: vi.fn().mockResolvedValue(undefined),
   daemonStop: vi.fn().mockResolvedValue(undefined),
-  openDashboard: vi.fn()
+  openDashboard: vi.fn(),
+  setServerEnabled: vi.fn().mockResolvedValue(undefined)
 };
 
 beforeAll(() => {
@@ -84,5 +85,23 @@ describe("StatusPopover", () => {
     render(<StatusPopover />);
     await screen.findByText(/Local Gateway/i);
     expect(screen.queryByText(/Sync All Clients/i)).toBeNull();
+  });
+
+  it("shows server rows with their current state", async () => {
+    render(<StatusPopover />);
+
+    expect(await screen.findByText("Servers")).toBeDefined();
+    expect(screen.getByText("vercel")).toBeDefined();
+    expect(screen.getByText("github")).toBeDefined();
+    expect(screen.getByText("Enabled")).toBeDefined();
+    expect(screen.getByText("Disabled")).toBeDefined();
+  });
+
+  it("toggles a server from the popover list", async () => {
+    render(<StatusPopover />);
+
+    fireEvent.click(await screen.findByLabelText(/Disable vercel/i));
+
+    expect(mockMcpx.setServerEnabled).toHaveBeenCalledWith("vercel", false);
   });
 });
