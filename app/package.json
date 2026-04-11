@@ -8,6 +8,10 @@
   "build": {
     "appId": "io.github.kwonye.mcpx",
     "productName": "mcpx",
+    "directories": {
+      "buildResources": "resources",
+      "output": "dist"
+    },
     "mac": {
       "category": "public.app-category.developer-tools",
       "icon": "build/icons/mcpx.icns",
@@ -24,6 +28,18 @@
         "zip"
       ]
     },
+    "asar": true,
+    "files": [
+      "out/**",
+      "resources/**"
+    ],
+    "extraResources": [
+      {
+        "from": "../cli/dist",
+        "to": "cli/dist",
+        "filter": ["**/*"]
+      }
+    ],
     "publish": [
       {
         "provider": "github",

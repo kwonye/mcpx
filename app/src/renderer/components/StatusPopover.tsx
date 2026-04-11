@@ -79,7 +79,7 @@ export function StatusPopover() {
         </div>
       </header>
 
-      <main style={{ flex: 1, display: "flex", flexDirection: "column", gap: "16px", marginTop: "4px" }}>
+      <main style={{ flex: 1, display: "flex", flexDirection: "column", gap: "16px", marginTop: "4px", overflow: "auto" }}>
         <section style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
           <h2 style={{ fontSize: "11px", fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.05em", padding: "0 4px" }}>
             Gateway Status
@@ -93,26 +93,6 @@ export function StatusPopover() {
                   {report.daemon.running ? `Port: ${report.daemon.port}` : "Offline"}
                 </span>
               </div>
-            </div>
-          </div>
-        </section>
-
-        <section style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-          <h2 style={{ fontSize: "11px", fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.05em", padding: "0 4px" }}>
-            System Health
-          </h2>
-          <div className="popover-summary glass-panel" style={{ border: "1px solid rgba(255,255,255,0.4)" }}>
-            <div className="popover-summary-stat">
-              <span>Configured Servers</span>
-              <span className="value">{report.upstreamCount}</span>
-            </div>
-            <div className="popover-summary-stat">
-              <span>Synced Clients</span>
-              <span className="value">{syncedCount}</span>
-            </div>
-            <div className="popover-summary-stat">
-              <span>Sync Errors</span>
-              <span className={`value ${errorCount > 0 ? "error" : ""}`}>{errorCount}</span>
             </div>
           </div>
         </section>

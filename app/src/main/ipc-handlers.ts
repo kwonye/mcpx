@@ -1,4 +1,6 @@
 import { app, ipcMain } from "electron";
+import fs from "node:fs";
+import path from "node:path";
 import {
   loadConfig,
   saveConfig,
@@ -30,8 +32,14 @@ import { checkForUpdatesNow, setAutoUpdateEnabled } from "./update-manager";
 // Cache the selected option between prepare and confirm calls
 let pendingAdd: { name: string; option: SelectedOption } | null = null;
 
-function daemonEntrypointArg(): string {
-  return process.argv[1] ?? app.getAppPath();
+function getCliDaemonPath(): string {
+  const resourcesPath = process.resourcesPath ?? app.getAppPath();
+  const cliPath = path.join(resourcesPath, "cli", "dist", "cli.js");
+  if (fs.existsSync(cliPath)) {
+    return cliPath;
+  }
+  // Fallback for development
+  return path.join(app.getAppPath(), "..", "cli", "dist", "cli.js");
 }
 
 function isHttpUrl(value: string): boolean {
@@ -372,7 +380,7 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(IPC.DAEMON_START, async () => {
     const config = loadConfig();
     const secrets = new SecretsManager();
-    const result = await startDaemon(config, daemonEntrypointArg(), secrets);
+    const result = await startDaemon(config, getCliDaemonPath(), secrets);
     return result;
   });
 
@@ -383,7 +391,7 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(IPC.DAEMON_RESTART, async () => {
     const config = loadConfig();
     const secrets = new SecretsManager();
-    return restartDaemon(config, daemonEntrypointArg(), secrets);
+    return restartDaemon(config, getCliDaemonPath(), secrets);
   });
 
   ipcMain.handle(IPC.REGISTRY_LIST, (_event, cursor?: string, query?: string, limit?: number) => {

@@ -74,6 +74,9 @@ if [[ "$FLAVOR" == "dev" ]]; then
 fi
 
 echo "Building ${APP_PRODUCT_NAME} desktop app..."
+rm -rf "${APP_DIR}/dist"
+rm -f "${APP_DIR}/dist/builder-effective-config.yaml"
+rm -f "${APP_DIR}/dist/builder-debug.yml"
 export MCPX_DESKTOP_FLAVOR="${FLAVOR}"
 export MCPX_DESKTOP_DEBUG="${BUILD_DEBUG}"
 export CSC_IDENTITY_AUTO_DISCOVERY="false"

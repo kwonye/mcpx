@@ -1,4 +1,6 @@
 import { app, crashReporter, dialog, Menu } from "electron";
+import fs from "node:fs";
+import path from "node:path";
 import {
   loadConfig,
   startDaemon,
@@ -42,12 +44,6 @@ export function registerLifecycleHandlers(deps: {
     // Allow quit to proceed
   });
 
-  // Clicking dock icon reopens dashboard window (macOS activate event)
-  // Ensures app responds to dock clicks even when window is closed
-  deps.app.on("activate", () => {
-    deps.openDashboard();
-  });
-
   // When all windows are closed, app stays running on macOS (menu bar app pattern)
   // Only quits on non-macOS platforms where menu bar is not available
   deps.app.on("window-all-closed", () => {
@@ -57,8 +53,14 @@ export function registerLifecycleHandlers(deps: {
   });
 }
 
-function daemonEntrypointArg(): string {
-  return process.argv[1] ?? app.getAppPath();
+function getCliDaemonPath(): string {
+  const resourcesPath = process.resourcesPath ?? app.getAppPath();
+  const cliPath = path.join(resourcesPath, "cli", "dist", "cli.js");
+  if (fs.existsSync(cliPath)) {
+    return cliPath;
+  }
+  // Fallback for development
+  return path.join(app.getAppPath(), "..", "cli", "dist", "cli.js");
 }
 
 async function maybeStartDaemonForLoginLaunch(): Promise<void> {
@@ -69,7 +71,7 @@ async function maybeStartDaemonForLoginLaunch(): Promise<void> {
 
   const config = loadConfig();
   const secrets = new SecretsManager();
-  await startDaemon(config, daemonEntrypointArg(), secrets);
+  await startDaemon(config, getCliDaemonPath(), secrets);
   daemonRunning = true;
   updateTrayForDaemonStatus(true);
 }
@@ -78,7 +80,7 @@ async function handleStartDaemon(): Promise<void> {
   try {
     const config = loadConfig();
     const secrets = new SecretsManager();
-    await startDaemon(config, daemonEntrypointArg(), secrets);
+    await startDaemon(config, getCliDaemonPath(), secrets);
     daemonRunning = true;
     updateTrayForDaemonStatus(true);
   } catch (error) {
@@ -106,7 +108,7 @@ export async function startMainProcess(): Promise<void> {
   });
 
   if (process.platform === "darwin") {
-    app.setActivationPolicy("regular");
+    app.setActivationPolicy("accessory");
   }
 
   if (await runDaemonChildIfRequested()) {
@@ -126,10 +128,6 @@ export async function startMainProcess(): Promise<void> {
   await app.whenReady();
 
   Menu.setApplicationMenu(buildApplicationMenu());
-
-  if (process.platform === "darwin") {
-    app.dock?.hide();
-  }
 
   const settings = loadDesktopSettings();
   applyStartOnLoginSetting(settings.startOnLoginEnabled);
