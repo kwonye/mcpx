@@ -1,6 +1,6 @@
 {
   "name": "mcpx-desktop",
-  "version": "0.1.0",
+  "version": "0.1.62",
   "private": true,
   "description": "mcpx desktop app",
   "author": "kwonye",
@@ -37,7 +37,9 @@
       {
         "from": "../cli/dist",
         "to": "cli/dist",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       }
     ],
     "publish": [
