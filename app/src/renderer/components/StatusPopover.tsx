@@ -71,7 +71,7 @@ export function StatusPopover() {
     <div className="popover glass-panel">
       <header className="popover-header" style={{ justifyContent: "space-between", borderBottom: "1px solid rgba(255, 255, 255, 0.4)", paddingBottom: "12px" }}>
         <div style={{ display: "flex", flexDirection: "column" }}>
-          <span style={{ fontSize: "14px", fontWeight: 700, color: "var(--text-main)", letterSpacing: "-0.015em" }}>MCP Hub</span>
+          <span style={{ fontSize: "14px", fontWeight: 700, color: "var(--text-main)", letterSpacing: "-0.015em" }}>mcpx</span>
           <span style={{ fontSize: "10px", fontWeight: 600, color: "var(--primary)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
             {report.upstreamCount} Active
           </span>
@@ -81,7 +81,7 @@ export function StatusPopover() {
       <main style={{ flex: 1, display: "flex", flexDirection: "column", gap: "16px", marginTop: "4px", overflow: "auto" }}>
         <section style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
           <h2 style={{ fontSize: "11px", fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.05em", padding: "0 4px" }}>
-            Gateway Status
+            Status
           </h2>
           <div
             className="glass-panel"
@@ -90,7 +90,7 @@ export function StatusPopover() {
             <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
               <div className={`status-dot ${report.daemon.running ? 'status-online' : 'status-offline'}`} style={{ width: "10px", height: "10px" }} />
               <div style={{ display: "flex", flexDirection: "column" }}>
-                <span style={{ fontSize: "13px", fontWeight: 600, color: "var(--text-main)" }}>Local Gateway</span>
+                <span style={{ fontSize: "13px", fontWeight: 600, color: "var(--text-main)" }}>Gateway</span>
                 <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>
                   {report.daemon.running ? `Port: ${report.daemon.port}` : "Offline"}
                 </span>

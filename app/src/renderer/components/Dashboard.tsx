@@ -133,10 +133,7 @@ export function Dashboard() {
               {tab === "servers" && (
                 <>
                   <div className="page-header">
-                    <div>
-                      <h1 className="page-title">My Servers</h1>
-                      <p className="page-subtitle">Manage your local and remote MCP integrations.</p>
-                    </div>
+                    <h1 className="page-title">My Servers</h1>
                   </div>
                   <div className="servers-controls-container">
                     <CliCommandInput onServerAdded={refresh} />
@@ -163,10 +160,7 @@ export function Dashboard() {
               {tab === "browse" && (
                 <>
                   <div className="page-header">
-                    <div>
-                      <h1 className="page-title">Registry</h1>
-                      <p className="page-subtitle">Discover and install official MCP servers.</p>
-                    </div>
+                    <h1 className="page-title">Registry</h1>
                   </div>
                   <BrowseTab
                     onServerAdded={refresh}
@@ -183,10 +177,7 @@ export function Dashboard() {
               {tab === "settings" && (
                 <>
                   <div className="page-header">
-                    <div>
-                      <h1 className="page-title">Settings</h1>
-                      <p className="page-subtitle">Configure your {DESKTOP_PRODUCT_NAME} installation.</p>
-                    </div>
+                    <h1 className="page-title">Settings</h1>
                   </div>
                   <SettingsPanel />
                 </>

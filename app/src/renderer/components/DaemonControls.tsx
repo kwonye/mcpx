@@ -18,7 +18,7 @@ export function DaemonControls({ daemon, onRefresh }: DaemonControlsProps) {
       <div className="daemon-panel__info">
         <div className={`status-dot daemon-panel__indicator ${daemon.running ? "status-online" : "status-offline"}`} />
         <div>
-          <div className="daemon-panel__title">Local Gateway {daemon.running ? "Running" : "Stopped"}</div>
+          <div className="daemon-panel__title">Gateway {daemon.running ? "Running" : "Stopped"}</div>
           {daemon.running && (
             <div className="daemon-panel__meta">
               PID {daemon.pid} • Port {daemon.port}
@@ -33,12 +33,12 @@ export function DaemonControls({ daemon, onRefresh }: DaemonControlsProps) {
         {daemon.running ? (
           <>
             <span className="material-symbols-outlined">stop_circle</span>
-            Stop Gateway
+            Stop
           </>
         ) : (
           <>
             <span className="material-symbols-outlined">play_circle</span>
-            Start Gateway
+            Start
           </>
         )}
       </button>

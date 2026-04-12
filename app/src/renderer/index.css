@@ -594,9 +594,10 @@ select {
     flex-shrink: 0;
     z-index: 10;
     -webkit-app-region: drag;
+    cursor: default;
 }
 
-.page-header > * {
+.page-header .page-title {
     -webkit-app-region: no-drag;
 }
 

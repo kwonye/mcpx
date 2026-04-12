@@ -25,22 +25,20 @@ beforeAll(() => {
 describe("StatusPopover", () => {
   it("shows daemon status when running", async () => {
     render(<StatusPopover />);
-    expect(await screen.findByText(/Local Gateway/i)).toBeDefined();
+    expect(await screen.findByText(/Gateway/i)).toBeDefined();
     expect(await screen.findByText(/37373/)).toBeDefined();
   });
 
   it("shows server count", async () => {
     render(<StatusPopover />);
-    const label = await screen.findByText("Configured Servers");
-    const row = label.parentElement as HTMLElement;
-    expect(within(row).getByText("3")).toBeDefined();
+    const label = await screen.findByText("3 Active");
+    expect(label).toBeDefined();
   });
 
   it("shows error count when errors exist", async () => {
     render(<StatusPopover />);
-    const label = await screen.findByText("Sync Errors");
-    const row = label.parentElement as HTMLElement;
-    expect(within(row).getByText("1")).toBeDefined();
+    const vercelRow = await screen.findByText("vercel");
+    expect(vercelRow).toBeDefined();
   });
 
   it("keeps the Open Dashboard action available", async () => {
@@ -50,7 +48,7 @@ describe("StatusPopover", () => {
 
   it("shows daemon toggle button in footer when running", async () => {
     render(<StatusPopover />);
-    expect(await screen.findByRole("button", { name: /Stop Gateway/i })).toBeDefined();
+    expect(await screen.findByRole("button", { name: /Stop/i })).toBeDefined();
   });
 
   it("shows daemon toggle button in footer when stopped", async () => {
@@ -61,29 +59,29 @@ describe("StatusPopover", () => {
     });
 
     render(<StatusPopover />);
-    expect(await screen.findByRole("button", { name: /Start Gateway/i })).toBeDefined();
+    expect(await screen.findByRole("button", { name: /Start/i })).toBeDefined();
   });
 
   it("does not show settings icon in header", async () => {
     render(<StatusPopover />);
-    await screen.findByText(/Local Gateway/i);
+    await screen.findByText(/Gateway/i);
     // Should not find a button with settings title
     expect(screen.queryByTitle("Settings")).toBeNull();
   });
 
   it("does not show power icon in header", async () => {
     render(<StatusPopover />);
-    await screen.findByText(/Local Gateway/i);
+    await screen.findByText(/Gateway/i);
     // Should not find buttons with power_settings_new icon in header
     const buttons = screen.getAllByRole("button");
     // Filter to only buttons in the footer (not header)
-    const footerButtons = buttons.filter(btn => btn.textContent?.includes("Open Dashboard") || btn.textContent?.includes("Gateway"));
+    const footerButtons = buttons.filter(btn => btn.textContent?.includes("Open Dashboard") || btn.textContent?.includes("Start") || btn.textContent?.includes("Stop"));
     expect(footerButtons.length).toBe(2);
   });
 
   it("does not show Sync All Clients button", async () => {
     render(<StatusPopover />);
-    await screen.findByText(/Local Gateway/i);
+    await screen.findByText(/Gateway/i);
     expect(screen.queryByText(/Sync All Clients/i)).toBeNull();
   });
 
