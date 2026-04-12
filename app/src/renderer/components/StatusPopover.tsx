@@ -94,6 +94,9 @@ export function StatusPopover() {
                 </span>
               </div>
             </div>
+            <button className="popover-btn" onClick={handleDaemonToggle} style={{ padding: "6px 12px", fontSize: "12px" }}>
+              {report.daemon.running ? "Stop" : "Start"}
+            </button>
           </div>
         </section>
 
@@ -116,12 +119,9 @@ export function StatusPopover() {
       </main>
 
       <footer className="popover-actions">
-        <button className="popover-btn primary" onClick={() => window.mcpx.openDashboard()} style={{ display: "flex", justifyContent: "center", gap: "8px" }}>
+        <button className="popover-btn primary" onClick={() => window.mcpx.openDashboard()} style={{ display: "flex", justifyContent: "center", gap: "8px", width: "100%" }}>
           <span>Open Dashboard</span>
           <span className="material-symbols-outlined" style={{ fontSize: "16px" }}>open_in_new</span>
-        </button>
-        <button className="popover-btn" onClick={handleDaemonToggle}>
-          {report.daemon.running ? "Stop Gateway" : "Start Gateway"}
         </button>
       </footer>
     </div>
