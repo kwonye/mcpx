@@ -2,6 +2,9 @@ import { useState, useEffect, useRef } from "react";
 import { useRegistryList } from "../hooks/useMcpx";
 import { AddServerForm } from "./AddServerForm";
 
+// Feature flag: disable browse registry search (temporarily disabled)
+const BROWSE_SEARCH_ENABLED = false;
+
 interface BrowseTabProps {
   onServerAdded: () => void;
   status: {
@@ -164,18 +167,20 @@ export function BrowseTab({ onServerAdded, status, initialState, onStateChange }
     <div className="browse-tab">
       <div className="browse-hero">
         <h2 className="browse-hero__title">Discover MCP Servers</h2>
-        <p className="browse-hero__subtitle">Enhance your AI with powerful context and tools from the official registry.</p>
-        <form className="glass-panel browse-search" onSubmit={handleSearch}>
-          <span className="material-symbols-outlined" style={{ color: "var(--text-muted)" }}>search</span>
-          <input
-            type="text"
-            className="browse-search__input"
-            placeholder="Search for tools, databases, APIs..."
-            value={searchInput}
-            onChange={handleSearchInputChange}
-          />
-          <button type="submit" className="btn btn-primary">Search</button>
-        </form>
+        <p className="browse-hero__subtitle">Enhance your AI with powerful context and tools from the official MCP registry.</p>
+        {BROWSE_SEARCH_ENABLED && (
+          <form className="glass-panel browse-search" onSubmit={handleSearch}>
+            <span className="material-symbols-outlined" style={{ color: "var(--text-muted)" }}>search</span>
+            <input
+              type="text"
+              className="browse-search__input"
+              placeholder="Search for tools, databases, APIs..."
+              value={searchInput}
+              onChange={handleSearchInputChange}
+            />
+            <button type="submit" className="btn btn-primary">Search</button>
+          </form>
+        )}
       </div>
 
       <div className="category-pills">
