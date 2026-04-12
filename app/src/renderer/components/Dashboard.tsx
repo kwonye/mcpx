@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import logoSvg from "../assets/logo.svg";
 import { useStatus } from "../hooks/useMcpx";
 import { ServerCard } from "./ServerCard";
 import { ServerDetail } from "./ServerDetail";
@@ -85,9 +86,7 @@ export function Dashboard() {
     <div className="dashboard-container">
       <aside className="sidebar">
         <div className="sidebar-logo">
-          <div className="sidebar-logo-icon">
-            <span className="material-symbols-outlined">hub</span>
-          </div>
+          <img src={logoSvg} alt="mcpx" className="sidebar-logo-icon" />
           <span className="sidebar-logo-text">{DESKTOP_MANAGER_NAME}</span>
         </div>
         <DaemonControls daemon={report.daemon} onRefresh={refresh} />
