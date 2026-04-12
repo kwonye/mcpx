@@ -37,7 +37,9 @@
       {
         "from": "../cli/dist",
         "to": "cli/dist",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       }
     ],
     "publish": [
@@ -74,6 +76,7 @@
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
     "@vitejs/plugin-react": "^5.2.0",
+    "canvas": "^3.2.3",
     "electron": "^41.0.0",
     "electron-builder": "^26.0.0",
     "electron-vite": "^5.0.0",

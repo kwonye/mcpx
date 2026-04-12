@@ -1,4 +1,4 @@
-import { Tray, nativeImage, Menu, app } from "electron";
+import { Tray, nativeImage, Menu, app, NativeImage } from "electron";
 import { join } from "node:path";
 import { hidePopover, togglePopover } from "./popover";
 import { getDesktopProductName, isDevDesktopApp } from "./app-flavor";
@@ -8,6 +8,19 @@ let daemonRunning = false;
 let onQuitRequested: (() => void) | null = null;
 let onStartDaemonRequested: (() => void) | null = null;
 let onStopDaemonRequested: (() => void) | null = null;
+
+interface StatusIcons {
+  green: NativeImage;
+  red: NativeImage;
+}
+
+let cachedIcons: {
+  normal: StatusIcons | null;
+  dev: StatusIcons | null;
+} = {
+  normal: null,
+  dev: null
+};
 
 export function setQuitHandler(handler: () => void): void {
   onQuitRequested = handler;
@@ -56,12 +69,40 @@ function buildContextMenu(daemonRunning: boolean): Menu {
   return Menu.buildFromTemplate(template);
 }
 
+function loadStatusIcons(): { normal: StatusIcons; dev: StatusIcons } {
+  return {
+    normal: {
+      green: nativeImage.createFromPath(join(__dirname, "../../resources/trayIconTemplate-green.png")),
+      red: nativeImage.createFromPath(join(__dirname, "../../resources/trayIconTemplate-red.png"))
+    },
+    dev: {
+      green: nativeImage.createFromPath(join(__dirname, "../../resources/trayIconDevTemplate-green.png")),
+      red: nativeImage.createFromPath(join(__dirname, "../../resources/trayIconDevTemplate-red.png"))
+    }
+  };
+}
+
+function getStatusIcon(running: boolean): NativeImage {
+  const isDev = isDevDesktopApp();
+  const icons = cachedIcons[isDev ? 'dev' : 'normal'];
+  
+  if (running) {
+    return icons?.green || nativeImage.createFromPath(join(__dirname, "../../resources", isDev ? "trayIconDevTemplate-green.png" : "trayIconTemplate-green.png"));
+  } else {
+    return icons?.red || nativeImage.createFromPath(join(__dirname, "../../resources", isDev ? "trayIconDevTemplate-red.png" : "trayIconTemplate-red.png"));
+  }
+}
+
 export function createTray(): Tray {
   const productName = getDesktopProductName();
-  const iconName = isDevDesktopApp() ? "trayIconDevTemplate.png" : "trayIconTemplate.png";
-  const icon = nativeImage.createFromPath(
-    join(__dirname, "../../resources", iconName)
-  );
+  
+  if (!cachedIcons.normal) {
+    const icons = loadStatusIcons();
+    cachedIcons.normal = icons.normal;
+    cachedIcons.dev = icons.dev;
+  }
+  
+  const icon = getStatusIcon(daemonRunning);
   tray = new Tray(icon);
   tray.setToolTip(productName);
 
@@ -82,8 +123,9 @@ export function updateTrayForDaemonStatus(running: boolean): void {
 
   daemonRunning = running;
   const productName = getDesktopProductName();
-  const tooltip = running ? `${productName} - Gateway running` : `${productName} - Gateway stopped`;
-  tray.setToolTip(tooltip);
+  const icon = getStatusIcon(running);
+  tray.setImage(icon);
+  tray.setToolTip(`${productName} - ${running ? 'Gateway running' : 'Gateway stopped'}`);
 }
 
 export function hideTray(): void {

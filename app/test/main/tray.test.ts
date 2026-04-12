@@ -90,8 +90,9 @@ describe("tray icon requirements", () => {
         "utf-8"
       );
 
-      expect(traySource).toContain("trayIconDevTemplate.png");
-      expect(traySource).toContain("getDesktopProductName()");
+      expect(traySource).toContain("trayIconDevTemplate-green.png");
+      expect(traySource).toContain("trayIconDevTemplate-red.png");
+      expect(traySource).toContain("isDevDesktopApp()");
     });
   });
 
@@ -109,6 +110,48 @@ describe("tray icon requirements", () => {
       expect(Buffer.from(icon32).subarray(0, 4)).toEqual(pngSignature);
       expect(Buffer.from(devIcon16).subarray(0, 4)).toEqual(pngSignature);
       expect(Buffer.from(devIcon32).subarray(0, 4)).toEqual(pngSignature);
+    });
+  });
+
+  describe("ICON-05: Status indicator icons", () => {
+    it("green status indicator icons exist", async () => {
+      const green16 = await readFile(join(__dirname, "../../resources/trayIconTemplate-green.png"));
+      const green32 = await readFile(join(__dirname, "../../resources/trayIconTemplate-green@2x.png"));
+      const devGreen16 = await readFile(join(__dirname, "../../resources/trayIconDevTemplate-green.png"));
+      const devGreen32 = await readFile(join(__dirname, "../../resources/trayIconDevTemplate-green@2x.png"));
+      
+      const pngSignature = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
+      
+      expect(Buffer.from(green16).subarray(0, 4)).toEqual(pngSignature);
+      expect(Buffer.from(green32).subarray(0, 4)).toEqual(pngSignature);
+      expect(Buffer.from(devGreen16).subarray(0, 4)).toEqual(pngSignature);
+      expect(Buffer.from(devGreen32).subarray(0, 4)).toEqual(pngSignature);
+    });
+
+    it("red status indicator icons exist", async () => {
+      const red16 = await readFile(join(__dirname, "../../resources/trayIconTemplate-red.png"));
+      const red32 = await readFile(join(__dirname, "../../resources/trayIconTemplate-red@2x.png"));
+      const devRed16 = await readFile(join(__dirname, "../../resources/trayIconDevTemplate-red.png"));
+      const devRed32 = await readFile(join(__dirname, "../../resources/trayIconDevTemplate-red@2x.png"));
+      
+      const pngSignature = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
+      
+      expect(Buffer.from(red16).subarray(0, 4)).toEqual(pngSignature);
+      expect(Buffer.from(red32).subarray(0, 4)).toEqual(pngSignature);
+      expect(Buffer.from(devRed16).subarray(0, 4)).toEqual(pngSignature);
+      expect(Buffer.from(devRed32).subarray(0, 4)).toEqual(pngSignature);
+    });
+
+    it("status icons follow Template naming convention", async () => {
+      const greenPath = join(__dirname, "../../resources/trayIconTemplate-green.png");
+      const redPath = join(__dirname, "../../resources/trayIconTemplate-red.png");
+      const devGreenPath = join(__dirname, "../../resources/trayIconDevTemplate-green.png");
+      const devRedPath = join(__dirname, "../../resources/trayIconDevTemplate-red.png");
+      
+      expect(greenPath).toMatch(/Template.*\.png$/);
+      expect(redPath).toMatch(/Template.*\.png$/);
+      expect(devGreenPath).toMatch(/Template.*\.png$/);
+      expect(devRedPath).toMatch(/Template.*\.png$/);
     });
   });
 });

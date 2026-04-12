@@ -12,6 +12,7 @@ describe("tray click behavior", () => {
     setToolTip = vi.fn();
     setContextMenu = vi.fn();
     popUpContextMenu = vi.fn();
+    setImage = vi.fn();
 
     on(event: string, handler: () => void): this {
       this.handlers[event] = handler;
@@ -65,16 +66,17 @@ describe("tray click behavior", () => {
     tray.handlers["right-click"]();
     expect(hidePopoverMock).toHaveBeenCalledTimes(1);
     expect(tray.popUpContextMenu).toHaveBeenCalledTimes(1);
-    expect(createFromPathMock).toHaveBeenCalledWith(expect.stringContaining("trayIconTemplate.png"));
+    expect(createFromPathMock).toHaveBeenCalledWith(expect.stringContaining("trayIconTemplate-"));
   });
 
-  it("updates the tray menu when daemon status changes", async () => {
+  it("updates the tray icon when daemon status changes", async () => {
     const { createTray, updateTrayForDaemonStatus } = await import("../../src/main/tray");
     createTray();
 
     updateTrayForDaemonStatus(true);
     updateTrayForDaemonStatus(false);
 
-    expect(trayInstances[0]?.setContextMenu).not.toHaveBeenCalled();
+    expect(trayInstances[0]?.setImage).toHaveBeenCalledTimes(2);
+    expect(trayInstances[0]?.setToolTip).toHaveBeenCalledTimes(3);
   });
 });

@@ -28,6 +28,7 @@ import type { SelectedOption } from "./server-mapper";
 import { loadDesktopSettings, updateDesktopSettings } from "./settings-store";
 import { applyStartOnLoginSetting } from "./login-item";
 import { checkForUpdatesNow, setAutoUpdateEnabled } from "./update-manager";
+import { updateTrayForDaemonStatus } from "./tray";
 
 // Cache the selected option between prepare and confirm calls
 let pendingAdd: { name: string; option: SelectedOption } | null = null;
@@ -380,17 +381,23 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(IPC.DAEMON_START, async () => {
     const config = loadConfig();
     const secrets = new SecretsManager();
-    return startDaemon(config, getCliDaemonPath(), secrets);
+    const result = await startDaemon(config, getCliDaemonPath(), secrets);
+    updateTrayForDaemonStatus(true);
+    return result;
   });
 
   ipcMain.handle(IPC.DAEMON_STOP, () => {
-    return stopDaemon();
+    const result = stopDaemon();
+    updateTrayForDaemonStatus(false);
+    return result;
   });
 
   ipcMain.handle(IPC.DAEMON_RESTART, async () => {
     const config = loadConfig();
     const secrets = new SecretsManager();
-    return restartDaemon(config, getCliDaemonPath(), secrets);
+    const result = await restartDaemon(config, getCliDaemonPath(), secrets);
+    updateTrayForDaemonStatus(true);
+    return result;
   });
 
   ipcMain.handle(IPC.REGISTRY_LIST, (_event, cursor?: string, query?: string, limit?: number) => {
