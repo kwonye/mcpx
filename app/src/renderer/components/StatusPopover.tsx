@@ -84,7 +84,13 @@ export function StatusPopover() {
           <h2 style={{ fontSize: "11px", fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.05em", padding: "0 4px" }}>
             Gateway Status
           </h2>
-          <div className="glass-panel" style={{ padding: "12px", borderRadius: "12px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div
+            className="glass-panel"
+            style={{ padding: "12px", borderRadius: "12px", display: "flex", alignItems: "center", justifyContent: "space-between" }}
+            onClick={() => window.mcpx.openDashboard()}
+            role="button"
+            tabIndex={0}
+          >
             <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
               <div className={`status-dot ${report.daemon.running ? 'status-online' : 'status-offline'}`} style={{ width: "10px", height: "10px" }} />
               <div style={{ display: "flex", flexDirection: "column" }}>
@@ -95,10 +101,8 @@ export function StatusPopover() {
               </div>
             </div>
             <button
-              onClick={(e) => {
-                e.stopPropagation();
-                handleDaemonToggle();
-              }}
+              type="button"
+              onClick={handleDaemonToggle}
               style={{
                 padding: "4px 12px",
                 fontSize: "11px",
