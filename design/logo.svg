@@ -1,0 +1,32 @@
+<svg width="210" height="64" viewBox="0 0 210 64" xmlns="http://www.w3.org/2000/svg">
+  <!--
+    mcpx Logo — mark + wordmark
+
+    Mark uses the identical canonical viewBox (0 0 100 93)
+    as icon.svg and tray-icon.svg.
+  -->
+
+  <!-- Canonical mark, scaled to 56×52, vertically centered -->
+  <svg x="3" y="6" width="56" height="52" viewBox="0 0 100 93">
+    <g fill="none" stroke="#3730a3" stroke-linecap="round" stroke-width="8.5">
+      <line x1="50" y1="29" x2="50" y2="41"/>
+      <path d="M 50 41 H 24 Q 11 41 11 54 V 70"/>
+      <line x1="50" y1="41" x2="50" y2="70"/>
+      <path d="M 50 41 H 76 Q 89 41 89 54 V 70"/>
+    </g>
+    <circle cx="50" cy="15"   r="14"   fill="#3730a3"/>
+    <circle cx="11" cy="81.5" r="11.5" fill="#3730a3"/>
+    <circle cx="50" cy="81.5" r="11.5" fill="#3730a3"/>
+    <circle cx="89" cy="81.5" r="11.5" fill="#3730a3"/>
+  </svg>
+
+  <!-- Wordmark -->
+  <text
+    x="67" y="42"
+    font-family="'SF Mono', 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Menlo', monospace"
+    font-weight="600"
+    font-size="34"
+    fill="#0f172a"
+  >mcp<tspan fill="#3730a3">x</tspan></text>
+
+</svg>

@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>mcpx Icon Preview</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #f1f5f9;
+      font-family: 'SF Pro Display', 'Inter', system-ui, sans-serif;
+      color: #0f172a;
+      padding: 48px;
+      min-height: 100vh;
+    }
+
+    h1 {
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: #64748b;
+      margin-bottom: 40px;
+    }
+
+    .section {
+      margin-bottom: 56px;
+    }
+
+    .section-label {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: #94a3b8;
+      margin-bottom: 20px;
+    }
+
+    /* ── APP ICON ── */
+    .app-icon-row {
+      display: flex;
+      align-items: flex-end;
+      gap: 32px;
+    }
+
+    .app-icon-wrap {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .app-icon-wrap span {
+      font-size: 11px;
+      color: #94a3b8;
+    }
+
+    .app-icon-wrap img {
+      border-radius: calc(var(--sz) * 0.22);
+      box-shadow: 0 8px 32px rgba(0,0,0,0.18), 0 2px 8px rgba(0,0,0,0.10);
+      display: block;
+    }
+
+    /* ── TRAY ICON ── */
+    .tray-row {
+      display: flex;
+      align-items: center;
+      gap: 32px;
+    }
+
+    .menubar-sim {
+      background: #e2e4e9;
+      border-radius: 10px;
+      padding: 6px 18px;
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      box-shadow: inset 0 1px 2px rgba(0,0,0,0.08);
+    }
+
+    .menubar-sim .time {
+      font-size: 13px;
+      font-weight: 600;
+      color: #1e293b;
+      margin-right: 4px;
+    }
+
+    .menubar-sim img.tray {
+      width: 16px;
+      height: 16px;
+      opacity: 0.8;
+    }
+
+    .menubar-dark {
+      background: #2a2c33;
+    }
+
+    .menubar-dark .time {
+      color: #f1f5f9;
+    }
+
+    .menubar-dark img.tray {
+      filter: invert(1);
+    }
+
+    /* ── LOGO ── */
+    .logo-row {
+      display: flex;
+      align-items: center;
+      gap: 32px;
+      flex-wrap: wrap;
+    }
+
+    .logo-bg-light {
+      background: #ffffff;
+      border-radius: 12px;
+      padding: 24px 32px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+    }
+
+    .logo-bg-dark {
+      background: #0f172a;
+      border-radius: 12px;
+      padding: 24px 32px;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.25);
+    }
+
+    .logo-bg-dark img {
+      filter: none;
+    }
+
+    /* Force the SVG logo to invert text on dark bg */
+    .logo-dark-svg text:not([fill="#6366f1"]) {
+      fill: #f8fafc !important;
+    }
+
+    .divider {
+      width: 1px;
+      height: 24px;
+      background: #cbd5e1;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>mcpx — Icon System</h1>
+
+  <!-- ── APP ICON ── -->
+  <div class="section">
+    <div class="section-label">App Icon</div>
+    <div class="app-icon-row">
+      <div class="app-icon-wrap" style="--sz: 256px">
+        <img src="icon.svg" width="256" height="256" alt="mcpx app icon 256">
+        <span>256 × 256</span>
+      </div>
+      <div class="app-icon-wrap" style="--sz: 128px">
+        <img src="icon.svg" width="128" height="128" alt="mcpx app icon 128">
+        <span>128 × 128</span>
+      </div>
+      <div class="app-icon-wrap" style="--sz: 64px">
+        <img src="icon.svg" width="64" height="64" alt="mcpx app icon 64">
+        <span>64 × 64</span>
+      </div>
+      <div class="app-icon-wrap" style="--sz: 32px">
+        <img src="icon.svg" width="32" height="32" alt="mcpx app icon 32">
+        <span>32 × 32</span>
+      </div>
+      <div class="app-icon-wrap" style="--sz: 16px">
+        <img src="icon.svg" width="16" height="16" alt="mcpx app icon 16">
+        <span>16 × 16</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── TRAY ICON ── -->
+  <div class="section">
+    <div class="section-label">Tray Icon — Menu Bar</div>
+    <div class="tray-row">
+      <!-- Light menu bar simulation -->
+      <div class="menubar-sim">
+        <span class="time">9:41 AM</span>
+        <div class="divider"></div>
+        <img class="tray" src="tray-icon.svg" alt="tray icon light">
+        <img class="tray" src="tray-icon.svg" alt="" style="opacity:0.4">
+        <img class="tray" src="tray-icon.svg" alt="" style="opacity:0.4">
+      </div>
+
+      <!-- Dark menu bar simulation -->
+      <div class="menubar-sim menubar-dark">
+        <span class="time">9:41 AM</span>
+        <div class="divider" style="background:#475569"></div>
+        <img class="tray" src="tray-icon.svg" alt="tray icon dark">
+        <img class="tray" src="tray-icon.svg" alt="" style="opacity:0.35">
+        <img class="tray" src="tray-icon.svg" alt="" style="opacity:0.35">
+      </div>
+
+      <!-- Standalone at various sizes -->
+      <div style="display:flex; align-items:center; gap:16px; margin-left:16px;">
+        <img src="tray-icon.svg" width="32" height="32" alt="">
+        <img src="tray-icon.svg" width="22" height="22" alt="">
+        <img src="tray-icon.svg" width="16" height="16" alt="">
+      </div>
+    </div>
+  </div>
+
+  <!-- ── LOGO ── -->
+  <div class="section">
+    <div class="section-label">Logo / Wordmark</div>
+    <div class="logo-row">
+      <!-- Light background -->
+      <div class="logo-bg-light">
+        <img src="logo.svg" width="320" height="72" alt="mcpx logo light">
+      </div>
+
+      <!-- Dark background — need inline SVG to swap text color -->
+      <div class="logo-bg-dark">
+        <svg width="320" height="72" viewBox="0 0 320 72" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <linearGradient id="dbg" x1="0" y1="0" x2="56" y2="56" gradientUnits="userSpaceOnUse">
+              <stop offset="0%"   stop-color="#07091c"/>
+              <stop offset="100%" stop-color="#170840"/>
+            </linearGradient>
+            <radialGradient id="dlnCyan" cx="38%" cy="36%" r="55%">
+              <stop offset="0%" stop-color="#ffffff"/>
+              <stop offset="40%" stop-color="#67e8f9"/>
+              <stop offset="100%" stop-color="#06b6d4"/>
+            </radialGradient>
+            <radialGradient id="dlnPurple" cx="38%" cy="36%" r="55%">
+              <stop offset="0%" stop-color="#ffffff"/>
+              <stop offset="40%" stop-color="#d8b4fe"/>
+              <stop offset="100%" stop-color="#9333ea"/>
+            </radialGradient>
+            <radialGradient id="dlnTeal" cx="38%" cy="36%" r="55%">
+              <stop offset="0%" stop-color="#ffffff"/>
+              <stop offset="40%" stop-color="#6ee7b7"/>
+              <stop offset="100%" stop-color="#10b981"/>
+            </radialGradient>
+            <radialGradient id="dlnBlue" cx="38%" cy="36%" r="55%">
+              <stop offset="0%" stop-color="#ffffff"/>
+              <stop offset="40%" stop-color="#93c5fd"/>
+              <stop offset="100%" stop-color="#3b82f6"/>
+            </radialGradient>
+            <radialGradient id="dlnHub" cx="38%" cy="36%" r="55%">
+              <stop offset="0%" stop-color="#ffffff"/>
+              <stop offset="60%" stop-color="#e0f2fe"/>
+              <stop offset="100%" stop-color="#7dd3fc"/>
+            </radialGradient>
+            <filter id="dlnGlow" x="-80%" y="-80%" width="260%" height="260%">
+              <feGaussianBlur in="SourceGraphic" stdDeviation="2.5" result="b"/>
+              <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+            </filter>
+            <filter id="dlnLineGlow" x="-30%" y="-30%" width="160%" height="160%">
+              <feGaussianBlur in="SourceGraphic" stdDeviation="1" result="b"/>
+              <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+            </filter>
+            <filter id="dlnCenterGlow" x="-200%" y="-200%" width="500%" height="500%">
+              <feGaussianBlur in="SourceGraphic" stdDeviation="6"/>
+            </filter>
+            <clipPath id="dlogoSq">
+              <rect width="56" height="56" rx="13" ry="13"/>
+            </clipPath>
+            <pattern id="dldots" x="0" y="0" width="14" height="14" patternUnits="userSpaceOnUse">
+              <circle cx="7" cy="7" r="0.6" fill="#ffffff" opacity="0.07"/>
+            </pattern>
+          </defs>
+          <g transform="translate(8,8)">
+            <rect width="56" height="56" rx="13" ry="13" fill="url(#dbg)"/>
+            <g clip-path="url(#dlogoSq)">
+              <rect width="56" height="56" fill="url(#dldots)"/>
+              <circle cx="28" cy="28" r="20" fill="#4f46e5" opacity="0.10" filter="url(#dlnCenterGlow)"/>
+              <g filter="url(#dlnLineGlow)">
+                <line x1="15" y1="15" x2="28" y2="28" stroke="#22d3ee" stroke-width="1.5" stroke-linecap="round" opacity="0.85"/>
+                <line x1="41" y1="15" x2="28" y2="28" stroke="#a855f7" stroke-width="1.5" stroke-linecap="round" opacity="0.85"/>
+                <line x1="41" y1="41" x2="28" y2="28" stroke="#34d399" stroke-width="1.5" stroke-linecap="round" opacity="0.85"/>
+                <line x1="15" y1="41" x2="28" y2="28" stroke="#60a5fa" stroke-width="1.5" stroke-linecap="round" opacity="0.85"/>
+              </g>
+              <circle cx="28" cy="28" r="7" fill="#93c5fd" opacity="0.4" filter="url(#dlnCenterGlow)"/>
+              <circle cx="28" cy="28" r="10" fill="none" stroke="#bfdbfe" stroke-width="0.8" opacity="0.25"/>
+              <circle cx="28" cy="28" r="5.5" fill="#0c1a4a"/>
+              <circle cx="28" cy="28" r="4.5" fill="url(#dlnHub)"/>
+              <circle cx="26" cy="26" r="1.5" fill="white" opacity="0.65"/>
+              <circle cx="15" cy="15" r="7" fill="#06b6d4" opacity="0.15" filter="url(#dlnGlow)"/>
+              <circle cx="15" cy="15" r="5" fill="#040e18"/>
+              <circle cx="15" cy="15" r="4" fill="url(#dlnCyan)"/>
+              <circle cx="13.5" cy="13.5" r="1.2" fill="white" opacity="0.6"/>
+              <circle cx="41" cy="15" r="7" fill="#9333ea" opacity="0.15" filter="url(#dlnGlow)"/>
+              <circle cx="41" cy="15" r="5" fill="#0f0520"/>
+              <circle cx="41" cy="15" r="4" fill="url(#dlnPurple)"/>
+              <circle cx="39.5" cy="13.5" r="1.2" fill="white" opacity="0.6"/>
+              <circle cx="41" cy="41" r="7" fill="#10b981" opacity="0.15" filter="url(#dlnGlow)"/>
+              <circle cx="41" cy="41" r="5" fill="#01100c"/>
+              <circle cx="41" cy="41" r="4" fill="url(#dlnTeal)"/>
+              <circle cx="39.5" cy="39.5" r="1.2" fill="white" opacity="0.6"/>
+              <circle cx="15" cy="41" r="7" fill="#3b82f6" opacity="0.15" filter="url(#dlnGlow)"/>
+              <circle cx="15" cy="41" r="5" fill="#030c1c"/>
+              <circle cx="15" cy="41" r="4" fill="url(#dlnBlue)"/>
+              <circle cx="13.5" cy="39.5" r="1.2" fill="white" opacity="0.6"/>
+            </g>
+          </g>
+          <!-- Dark bg wordmark — white text -->
+          <text x="80" y="50"
+            font-family="'SF Mono', 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Menlo', monospace"
+            font-weight="600" font-size="38" letter-spacing="-0.5" fill="#f8fafc"
+          >mcp<tspan fill="#818cf8">x</tspan></text>
+          <text x="81" y="64"
+            font-family="'SF Pro Text', 'Inter', 'Helvetica Neue', system-ui, sans-serif"
+            font-weight="400" font-size="10" letter-spacing="0.8" fill="#475569"
+          >MCP GATEWAY</text>
+        </svg>
+      </div>
+    </div>
+  </div>
+
+</body>
+</html>

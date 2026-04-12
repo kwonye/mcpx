@@ -1,0 +1,56 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <!--
+    mcpx App Icon — 1024×1024
+
+    The mark is defined in canonical space viewBox="0 0 100 93"
+    and embedded as a nested <svg> — identical paths used in
+    tray-icon.svg and logo.svg.
+  -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1024" y2="1024" gradientUnits="userSpaceOnUse">
+      <stop offset="0%"   stop-color="#2e2b8f"/>
+      <stop offset="100%" stop-color="#3d3ab8"/>
+    </linearGradient>
+    <radialGradient id="vignette" cx="50%" cy="45%" r="60%">
+      <stop offset="0%"   stop-color="#ffffff" stop-opacity="0.06"/>
+      <stop offset="100%" stop-color="#000000" stop-opacity="0.20"/>
+    </radialGradient>
+    <clipPath id="sq">
+      <rect width="1024" height="1024" rx="224" ry="224"/>
+    </clipPath>
+  </defs>
+
+  <g clip-path="url(#sq)">
+    <rect width="1024" height="1024" fill="url(#bg)"/>
+    <rect width="1024" height="1024" fill="url(#vignette)"/>
+
+    <!--
+      ══ CANONICAL MARK ══  viewBox 0 0 100 93
+      Stouter: root r=14 (large), trunk only 12 units tall
+      Rounder: bezier corner radius ≈13 units
+      M-like:  arms sweep 26 units horizontally before curving,
+               spread 78 units wide total
+
+      Root       cx=50  cy=15   r=14
+      Trunk      (50,29)→(50,41)
+      Left arm   M 50 41  H 24  Q 11 41  11 54  V 70
+      Centre arm (50,41)→(50,70)
+      Right arm  M 50 41  H 76  Q 89 41  89 54  V 70
+      Terminals  cx=11/50/89  cy=81.5  r=11.5
+      Stroke     8.5, round caps
+    -->
+    <svg x="122" y="150" width="780" height="725" viewBox="0 0 100 93">
+      <g fill="none" stroke="#ffffff" stroke-linecap="round" stroke-width="8.5">
+        <line x1="50" y1="29" x2="50" y2="41"/>
+        <path d="M 50 41 H 24 Q 11 41 11 54 V 70"/>
+        <line x1="50" y1="41" x2="50" y2="70"/>
+        <path d="M 50 41 H 76 Q 89 41 89 54 V 70"/>
+      </g>
+      <circle cx="50" cy="15"   r="14"   fill="#ffffff"/>
+      <circle cx="11" cy="81.5" r="11.5" fill="#ffffff"/>
+      <circle cx="50" cy="81.5" r="11.5" fill="#ffffff"/>
+      <circle cx="89" cy="81.5" r="11.5" fill="#ffffff"/>
+    </svg>
+
+  </g>
+</svg>
