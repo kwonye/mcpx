@@ -94,7 +94,19 @@ export function StatusPopover() {
                 </span>
               </div>
             </div>
-            <button className="popover-btn" onClick={handleDaemonToggle} style={{ padding: "6px 12px", fontSize: "12px" }}>
+            <button
+              onClick={handleDaemonToggle}
+              style={{
+                padding: "4px 12px",
+                fontSize: "11px",
+                fontWeight: 600,
+                borderRadius: "6px",
+                border: "1px solid rgba(255, 255, 255, 0.3)",
+                backgroundColor: report.daemon.running ? "rgba(255, 100, 100, 0.2)" : "rgba(100, 200, 100, 0.2)",
+                color: "var(--text-main)",
+                cursor: "pointer",
+              }}
+            >
               {report.daemon.running ? "Stop" : "Start"}
             </button>
           </div>
