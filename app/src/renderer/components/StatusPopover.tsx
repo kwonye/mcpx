@@ -62,10 +62,9 @@ export function StatusPopover() {
   function handleDaemonToggle(): void {
     if (report.daemon.running) {
       void window.mcpx.daemonStop().then(() => refresh());
-      return;
+    } else {
+      void window.mcpx.daemonStart().then(() => refresh());
     }
-
-    void window.mcpx.daemonStart().then(() => refresh());
   }
 
   return (
@@ -87,9 +86,6 @@ export function StatusPopover() {
           <div
             className="glass-panel"
             style={{ padding: "12px", borderRadius: "12px", display: "flex", alignItems: "center", justifyContent: "space-between" }}
-            onClick={() => window.mcpx.openDashboard()}
-            role="button"
-            tabIndex={0}
           >
             <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
               <div className={`status-dot ${report.daemon.running ? 'status-online' : 'status-offline'}`} style={{ width: "10px", height: "10px" }} />

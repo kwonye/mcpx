@@ -121,9 +121,13 @@ export async function startMainProcess(): Promise<void> {
     return;
   }
 
-  app.on("second-instance", () => {
-    openDashboard();
-  });
+  // Only open the dashboard for genuine second-instance launches (not daemon child spawns).
+  // The daemon child is spawned with argv [..., "daemon", "run", "--port", ...].
+  // A second instance launching (e.g. double-clicking the app) just quits — the
+  // tray icon is already visible. We intentionally do NOT open the dashboard here
+  // because the daemon is spawned as a child Electron process and would also
+  // trigger this event, opening the dashboard every time the gateway starts.
+  app.on("second-instance", () => {});
 
   await app.whenReady();
 

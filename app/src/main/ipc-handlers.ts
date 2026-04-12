@@ -380,8 +380,7 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(IPC.DAEMON_START, async () => {
     const config = loadConfig();
     const secrets = new SecretsManager();
-    const result = await startDaemon(config, getCliDaemonPath(), secrets);
-    return result;
+    return startDaemon(config, getCliDaemonPath(), secrets);
   });
 
   ipcMain.handle(IPC.DAEMON_STOP, () => {
