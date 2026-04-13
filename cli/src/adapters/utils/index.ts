@@ -2,6 +2,7 @@ import type {
   ClientId,
   ClientImportScanResult,
   ClientImportSkippedEntry,
+  ManagedGatewayEntry,
   ManagedIndex,
   SyncResult,
   UpstreamServerSpec
@@ -178,4 +179,17 @@ export function removeSourceEntries(entries: Record<string, unknown>, names: str
   for (const name of names ?? []) {
     delete entries[name];
   }
+}
+
+export function syncDisabledMcpServersArray(
+  raw: Record<string, unknown>,
+  managedNames: string[],
+  managedEntries: ManagedGatewayEntry[]
+): void {
+  const existingDisabled = ((raw.disabledMcpServers as string[] | undefined) ?? [])
+    .filter((name) => !managedNames.includes(name));
+  const disabledManaged = managedEntries
+    .filter((entry) => !entry.enabled)
+    .map((entry) => entry.name);
+  raw.disabledMcpServers = [...existingDisabled, ...disabledManaged];
 }

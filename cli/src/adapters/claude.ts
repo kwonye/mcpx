@@ -12,7 +12,8 @@ import {
   okResult,
   pruneStaleManagedEntries,
   removeSourceEntries,
-  setManagedEntries
+  setManagedEntries,
+  syncDisabledMcpServersArray
 } from "./utils/index.js";
 
 type JsonObject = Record<string, unknown>;
@@ -48,6 +49,16 @@ export class ClaudeAdapter implements ClientAdapter {
 
     const raw = readJsonFile<JsonObject>(configPath, {});
     const topLevelServers = ((raw.mcpServers as JsonObject | undefined) ?? {}) as JsonObject;
+    
+    const disabledMcpServers = new Set((raw.disabledMcpServers as string[] | undefined) ?? []);
+    const projects = (raw.projects as Record<string, JsonObject> | undefined) ?? {};
+    for (const project of Object.values(projects)) {
+      const projectDisabled = (project?.disabledMcpServers as string[] | undefined) ?? [];
+      for (const name of projectDisabled) {
+        disabledMcpServers.add(name);
+      }
+    }
+    
     for (const [name, rawEntry] of Object.entries(topLevelServers)) {
       if (isManagedGatewayProjection(name) || managedIndex.managed[this.id]?.entries?.[name]) {
         continue;
@@ -60,6 +71,7 @@ export class ClaudeAdapter implements ClientAdapter {
       }
 
       const entry = parsed.data;
+      const isDisabled = entry.disabled === true || disabledMcpServers.has(name);
       if ((entry.type === undefined || entry.type === "http") && entry.url && !entry.command) {
         result.candidates.push({
           clientId: this.id,
@@ -70,7 +82,7 @@ export class ClaudeAdapter implements ClientAdapter {
             transport: "http",
             url: entry.url,
             headers: entry.headers,
-            enabled: entry.disabled !== true
+            enabled: !isDisabled
           }
         });
         continue;
@@ -88,7 +100,7 @@ export class ClaudeAdapter implements ClientAdapter {
             args: entry.args,
             env: entry.env,
             cwd: entry.cwd,
-            enabled: entry.disabled !== true
+            enabled: !isDisabled
           }
         });
         continue;
@@ -113,8 +125,7 @@ export class ClaudeAdapter implements ClientAdapter {
         options.managedEntries.map((entry) => [entry.name, {
           type: "http",
           url: entry.url,
-          headers: entry.headers,
-          disabled: !entry.enabled
+          headers: entry.headers
         }])
       ) as Record<string, unknown>;
 
@@ -137,6 +148,16 @@ export class ClaudeAdapter implements ClientAdapter {
         topLevelServers[name] = entry;
       }
       raw.mcpServers = topLevelServers;
+
+      syncDisabledMcpServersArray(raw, managedNames, options.managedEntries);
+
+      const projects = (raw.projects as Record<string, JsonObject> | undefined) ?? {};
+      for (const projectPath of Object.keys(projects)) {
+        const project = projects[projectPath] ?? {};
+        syncDisabledMcpServersArray(project, managedNames, options.managedEntries);
+        projects[projectPath] = project;
+      }
+      raw.projects = projects;
 
       writeJsonAtomic(configPath, raw);
       setManagedEntries(

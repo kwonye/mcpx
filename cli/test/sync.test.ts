@@ -704,4 +704,45 @@ describe("sync engine", () => {
     expect(secondFingerprint).not.toBe(firstFingerprint);
     expect(thirdFingerprint).not.toBe(secondFingerprint);
   });
+
+  it("syncs Claude disabled servers to disabledMcpServers array instead of disabled property", () => {
+    const env = setupTempEnv("mcpx-sync-claude-disabled-array-");
+    cleanups.push(env.restore);
+
+    const config = defaultConfig();
+    config.servers.vercel = {
+      transport: "http",
+      url: "https://mcp.vercel.com",
+      enabled: false
+    };
+    config.servers.context7 = {
+      transport: "http",
+      url: "https://context7.com/mcp",
+      enabled: true
+    };
+    saveConfig(config);
+
+    const claudePath = path.join(env.root, ".claude.json");
+    fs.mkdirSync(path.dirname(claudePath), { recursive: true });
+    fs.writeFileSync(claudePath, JSON.stringify({
+      disabledMcpServers: ["existing_disabled", "vercel (mcpx)"]
+    }, null, 2));
+
+    const summary = syncAllClients(config, new SecretsManager());
+    expect(summary.hasErrors).toBe(false);
+
+    const syncedClaude = JSON.parse(fs.readFileSync(claudePath, "utf8")) as {
+      mcpServers: Record<string, { type: string; disabled?: boolean }>;
+      disabledMcpServers?: string[];
+    };
+
+    expect(syncedClaude.mcpServers["vercel (mcpx)"]?.type).toBe("http");
+    expect(syncedClaude.mcpServers["vercel (mcpx)"]?.disabled).toBeUndefined();
+    expect(syncedClaude.mcpServers["context7 (mcpx)"]?.type).toBe("http");
+    expect(syncedClaude.mcpServers["context7 (mcpx)"]?.disabled).toBeUndefined();
+
+    expect(syncedClaude.disabledMcpServers).toContain("vercel (mcpx)");
+    expect(syncedClaude.disabledMcpServers).not.toContain("context7 (mcpx)");
+    expect(syncedClaude.disabledMcpServers).toContain("existing_disabled");
+  });
 });
