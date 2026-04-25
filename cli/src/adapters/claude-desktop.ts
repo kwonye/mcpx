@@ -4,7 +4,6 @@ import path from "node:path";
 import { z } from "zod";
 import type { ClientAdapter, ManagedIndex, ManagedGatewayEntry, McpxConfig, SyncClientOptions, SyncResult } from "../types.js";
 import { readJsonFile, writeJsonAtomic } from "../util/fs.js";
-import { APP_VERSION } from "../version.js";
 import {
   buildImportSkip,
   emptyImportScan,
@@ -36,7 +35,7 @@ function buildProxyEntry(entry: ManagedGatewayEntry): { command: string; args: s
     const mcpxPath = execFileSync("which", ["mcpx"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
     if (mcpxPath) return { command: mcpxPath, args: ["proxy", upstreamName] };
   } catch {}
-  return { command: "npx", args: ["-y", `@kwonye/mcpx@${APP_VERSION}`, "proxy", upstreamName] };
+  return { command: "npx", args: ["-y", "@kwonye/mcpx@latest", "proxy", upstreamName] };
 }
 
 export class ClaudeDesktopAdapter implements ClientAdapter {
