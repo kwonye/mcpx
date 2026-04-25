@@ -40,6 +40,7 @@ import { STATUS_CLIENTS, buildStatusReport, type StatusAuthBinding, type StatusR
 import { APP_VERSION } from "./version.js";
 import { getStagedCliPath, getStagedUpdate, clearStagedUpdate, checkForUpdates } from "./core/update.js";
 import { performUpdate, performRollback, runBackgroundUpdate } from "./core/update-manager.js";
+import { runStdioProxy } from "./core/proxy.js";
 
 const VALID_CLIENTS: ClientId[] = STATUS_CLIENTS;
 
@@ -1461,6 +1462,15 @@ function registerUpdateCommand(program: Command): void {
     });
 }
 
+function registerProxyCommand(program: Command): void {
+  program
+    .command("proxy <name>")
+    .description("Run a stdio MCP proxy bridging to the local mcpx HTTP gateway for the given upstream server")
+    .action(async (name: string) => {
+      await runStdioProxy(name);
+    });
+}
+
 function registerMcpCompat(program: Command): void {
   const mcp = program.command("mcp").description("Compatibility namespace for MCP commands");
   registerAddCommand(mcp);
@@ -1528,6 +1538,7 @@ export async function runCli(argv = process.argv): Promise<void> {
   registerSecretsCommands(program);
   registerAuthCommands(program);
   registerClientsCommands(program);
+  registerProxyCommand(program);
   registerMcpCompat(program);
   registerUpdateCommand(program);
 

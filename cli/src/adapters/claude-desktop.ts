@@ -1,9 +1,10 @@
-import os from "node:os";
+import { execFileSync } from "node:child_process";
 import { homeDir } from "../core/paths.js";
 import path from "node:path";
 import { z } from "zod";
-import type { ClientAdapter, ManagedIndex, McpxConfig, SyncClientOptions, SyncResult } from "../types.js";
+import type { ClientAdapter, ManagedIndex, ManagedGatewayEntry, McpxConfig, SyncClientOptions, SyncResult } from "../types.js";
 import { readJsonFile, writeJsonAtomic } from "../util/fs.js";
+import { APP_VERSION } from "../version.js";
 import {
   buildImportSkip,
   emptyImportScan,
@@ -28,6 +29,15 @@ const claudeDesktopEntrySchema = z.object({
   cwd: z.string().min(1).optional(),
   disabled: z.boolean().optional()
 }).passthrough();
+
+function buildProxyEntry(entry: ManagedGatewayEntry): { command: string; args: string[] } {
+  const upstreamName = entry.name.replace(/ \(mcpx\)$/, "");
+  try {
+    const mcpxPath = execFileSync("which", ["mcpx"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    if (mcpxPath) return { command: mcpxPath, args: ["proxy", upstreamName] };
+  } catch {}
+  return { command: "npx", args: ["-y", `@kwonye/mcpx@${APP_VERSION}`, "proxy", upstreamName] };
+}
 
 export class ClaudeDesktopAdapter implements ClientAdapter {
   readonly id = "claude-desktop" as const;
@@ -111,11 +121,10 @@ export class ClaudeDesktopAdapter implements ClientAdapter {
       const raw = readJsonFile<JsonObject>(configPath, {});
       const enabledEntries = options.managedEntries.filter((entry) => entry.enabled);
       const serverEntries = Object.fromEntries(
-        enabledEntries.map((entry) => [entry.name, {
-          type: "streamable_http",
-          url: entry.url,
-          headers: entry.headers
-        }])
+        enabledEntries.map((entry) => {
+          const { command, args } = buildProxyEntry(entry);
+          return [entry.name, { command, args }];
+        })
       ) as Record<string, unknown>;
       const enabledManagedNames = enabledEntries.map((entry) => entry.name);
 
@@ -145,10 +154,10 @@ export class ClaudeDesktopAdapter implements ClientAdapter {
         this.id,
         configPath,
         Object.fromEntries(
-          options.managedEntries.map((entry) => [
-            entry.name,
-            JSON.stringify({ type: "streamable_http", url: entry.url, headers: entry.headers, enabled: entry.enabled })
-          ])
+          options.managedEntries.map((entry) => {
+            const { command, args } = buildProxyEntry(entry);
+            return [entry.name, JSON.stringify({ command, args, enabled: entry.enabled })];
+          })
         )
       );
       return okResult(this.id, configPath);
