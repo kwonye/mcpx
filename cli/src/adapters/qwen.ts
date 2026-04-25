@@ -12,7 +12,8 @@ import {
   okResult,
   pruneStaleManagedEntries,
   removeSourceEntries,
-  setManagedEntries
+  setManagedEntries,
+  syncMcpExcludedArray
 } from "./utils/index.js";
 
 type JsonObject = Record<string, unknown>;
@@ -46,6 +47,9 @@ export class QwenAdapter implements ClientAdapter {
     }
 
     const raw = readJsonFile<JsonObject>(configPath, {});
+    const excludedSet = new Set<string>(
+      (((raw.mcp as Record<string, unknown> | undefined)?.excluded as string[] | undefined) ?? [])
+    );
     const topLevelServers = ((raw.mcpServers as JsonObject | undefined) ?? {}) as JsonObject;
     for (const [name, rawEntry] of Object.entries(topLevelServers)) {
       if (isManagedGatewayProjection(name) || managedIndex.managed[this.id]?.entries?.[name]) {
@@ -69,7 +73,7 @@ export class QwenAdapter implements ClientAdapter {
             transport: "http",
             url: entry.httpUrl,
             headers: entry.headers,
-            enabled: entry.disabled !== true
+            enabled: !(entry.disabled === true || excludedSet.has(name))
           }
         });
         continue;
@@ -87,7 +91,7 @@ export class QwenAdapter implements ClientAdapter {
             args: entry.args,
             env: entry.env,
             cwd: entry.cwd,
-            enabled: entry.disabled !== true
+            enabled: !(entry.disabled === true || excludedSet.has(name))
           }
         });
         continue;
@@ -111,8 +115,7 @@ export class QwenAdapter implements ClientAdapter {
       const serverEntries = Object.fromEntries(
         options.managedEntries.map((entry) => [entry.name, {
           httpUrl: entry.url,
-          headers: entry.headers,
-          disabled: !entry.enabled
+          headers: entry.headers
         }])
       ) as Record<string, unknown>;
 
@@ -135,13 +138,19 @@ export class QwenAdapter implements ClientAdapter {
         topLevelServers[name] = entry;
       }
       raw.mcpServers = topLevelServers;
+      syncMcpExcludedArray(raw, managedNames, options.managedEntries);
 
       writeJsonAtomic(configPath, raw);
       setManagedEntries(
         options.managedIndex,
         this.id,
         configPath,
-        Object.fromEntries(Object.entries(serverEntries).map(([name, entry]) => [name, JSON.stringify(entry)]))
+        Object.fromEntries(
+          options.managedEntries.map((entry) => [
+            entry.name,
+            JSON.stringify({ httpUrl: entry.url, headers: entry.headers, enabled: entry.enabled })
+          ])
+        )
       );
       return okResult(this.id, configPath);
     } catch (error) {

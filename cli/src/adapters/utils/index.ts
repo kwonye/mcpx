@@ -193,3 +193,18 @@ export function syncDisabledMcpServersArray(
     .map((entry) => entry.name);
   raw.disabledMcpServers = [...existingDisabled, ...disabledManaged];
 }
+
+export function syncMcpExcludedArray(
+  raw: Record<string, unknown>,
+  managedNames: string[],
+  managedEntries: ManagedGatewayEntry[]
+): void {
+  const mcp = ((raw.mcp as Record<string, unknown> | undefined) ?? {}) as Record<string, unknown>;
+  const existingExcluded = ((mcp.excluded as string[] | undefined) ?? [])
+    .filter((name) => !managedNames.includes(name));
+  const disabledManaged = managedEntries
+    .filter((entry) => !entry.enabled)
+    .map((entry) => entry.name);
+  mcp.excluded = [...existingExcluded, ...disabledManaged];
+  raw.mcp = mcp;
+}

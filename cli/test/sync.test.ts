@@ -597,7 +597,7 @@ describe("sync engine", () => {
     expect(config.servers.broken).toBeUndefined();
   });
 
-  it("syncs disabled servers as disabled managed entries instead of removing them", () => {
+  it("syncs disabled servers correctly per client convention", () => {
     const env = setupTempEnv("mcpx-sync-disabled-");
     cleanups.push(env.restore);
 
@@ -613,15 +613,14 @@ describe("sync engine", () => {
 
     expect(summary.hasErrors).toBe(false);
 
+    // VS Code has no native disabled field — omit the entry entirely
     const vscodePath = path.join(env.root, "Library", "Application Support", "Code", "User", "mcp.json");
     const vscodeDoc = JSON.parse(fs.readFileSync(vscodePath, "utf8")) as {
       servers: Record<string, { disabled?: boolean; type?: string }>;
     };
-    expect(vscodeDoc.servers["vercel (mcpx)"]).toMatchObject({
-      type: "http",
-      disabled: true
-    });
+    expect(vscodeDoc.servers["vercel (mcpx)"]).toBeUndefined();
 
+    // Codex uses per-entry enabled: false
     const codexPath = path.join(env.root, ".codex", "config.toml");
     const codexDoc = parse(fs.readFileSync(codexPath, "utf8")) as {
       mcp_servers?: Record<string, { enabled?: boolean; url?: string }>;
@@ -667,12 +666,11 @@ describe("sync engine", () => {
       enabled: false
     });
 
+    // VS Code omits disabled entries entirely rather than writing disabled: true
     const syncedVscode = JSON.parse(fs.readFileSync(vscodePath, "utf8")) as {
       servers: Record<string, { disabled?: boolean; url?: string }>;
     };
-    expect(syncedVscode.servers["disabled_remote (mcpx)"]).toMatchObject({
-      disabled: true
-    });
+    expect(syncedVscode.servers["disabled_remote (mcpx)"]).toBeUndefined();
   });
 
   it("updates managed fingerprints when a server is toggled off and back on", () => {
@@ -744,5 +742,171 @@ describe("sync engine", () => {
     expect(syncedClaude.disabledMcpServers).toContain("vercel (mcpx)");
     expect(syncedClaude.disabledMcpServers).not.toContain("context7 (mcpx)");
     expect(syncedClaude.disabledMcpServers).toContain("existing_disabled");
+  });
+
+  it("omits disabled managed servers from Claude Desktop config instead of writing disabled field", () => {
+    const env = setupTempEnv("mcpx-sync-claude-desktop-disabled-");
+    cleanups.push(env.restore);
+
+    const config = defaultConfig();
+    config.servers.vercel = {
+      transport: "http",
+      url: "https://mcp.vercel.com",
+      enabled: false
+    };
+    config.servers.context7 = {
+      transport: "http",
+      url: "https://context7.com/mcp",
+      enabled: true
+    };
+    saveConfig(config);
+
+    const claudeDesktopPath = path.join(env.root, "Library", "Application Support", "Claude", "claude_desktop_config.json");
+    fs.mkdirSync(path.dirname(claudeDesktopPath), { recursive: true });
+    fs.writeFileSync(claudeDesktopPath, JSON.stringify({
+      mcpServers: {
+        existing_unmanaged: {
+          type: "stdio",
+          command: "npx",
+          args: ["-y", "@example/existing"]
+        }
+      }
+    }, null, 2));
+
+    const summary = syncAllClients(config, new SecretsManager());
+    expect(summary.hasErrors).toBe(false);
+
+    const synced = JSON.parse(fs.readFileSync(claudeDesktopPath, "utf8")) as {
+      mcpServers: Record<string, { type?: string; disabled?: boolean }>;
+    };
+
+    expect(synced.mcpServers["context7 (mcpx)"]?.type).toBe("http");
+    expect(synced.mcpServers["context7 (mcpx)"]?.disabled).toBeUndefined();
+    expect(synced.mcpServers["vercel (mcpx)"]).toBeUndefined();
+    expect(synced.mcpServers["existing_unmanaged (mcpx)"]).toBeDefined();
+  });
+
+  it("omits disabled managed servers from Cursor config instead of writing disabled field", () => {
+    const env = setupTempEnv("mcpx-sync-cursor-disabled-");
+    cleanups.push(env.restore);
+
+    const config = defaultConfig();
+    config.servers.vercel = {
+      transport: "http",
+      url: "https://mcp.vercel.com",
+      enabled: false
+    };
+    config.servers.context7 = {
+      transport: "http",
+      url: "https://context7.com/mcp",
+      enabled: true
+    };
+    saveConfig(config);
+
+    const cursorPath = path.join(env.root, "Library", "Application Support", "Cursor", "User", "mcp.json");
+    fs.mkdirSync(path.dirname(cursorPath), { recursive: true });
+    fs.writeFileSync(cursorPath, JSON.stringify({
+      servers: {
+        existingServer: { url: "https://example.com/mcp" }
+      }
+    }, null, 2));
+
+    const summary = syncAllClients(config, new SecretsManager());
+    expect(summary.hasErrors).toBe(false);
+
+    const synced = JSON.parse(fs.readFileSync(cursorPath, "utf8")) as {
+      servers: Record<string, { type?: string; url?: string; disabled?: boolean }>;
+    };
+
+    expect(synced.servers["context7 (mcpx)"]?.type).toBe("http");
+    expect(synced.servers["context7 (mcpx)"]?.disabled).toBeUndefined();
+    expect(synced.servers["vercel (mcpx)"]).toBeUndefined();
+    expect(synced.servers["existingServer"]).toBeUndefined();
+    expect(synced.servers["existingServer (mcpx)"]).toBeDefined();
+  });
+
+  it("omits disabled managed servers from VS Code config instead of writing disabled field", () => {
+    const env = setupTempEnv("mcpx-sync-vscode-disabled-");
+    cleanups.push(env.restore);
+
+    const config = defaultConfig();
+    config.servers.vercel = {
+      transport: "http",
+      url: "https://mcp.vercel.com",
+      enabled: false
+    };
+    config.servers.context7 = {
+      transport: "http",
+      url: "https://context7.com/mcp",
+      enabled: true
+    };
+    saveConfig(config);
+
+    const vscodePath = path.join(env.root, "Library", "Application Support", "Code", "User", "mcp.json");
+    fs.mkdirSync(path.dirname(vscodePath), { recursive: true });
+    fs.writeFileSync(vscodePath, JSON.stringify({
+      servers: {
+        existingServer: {
+          type: "stdio",
+          command: "npx",
+          args: ["-y", "@example/existing"]
+        }
+      }
+    }, null, 2));
+
+    const summary = syncAllClients(config, new SecretsManager());
+    expect(summary.hasErrors).toBe(false);
+
+    const synced = JSON.parse(fs.readFileSync(vscodePath, "utf8")) as {
+      servers: Record<string, { type?: string; url?: string; disabled?: boolean }>;
+    };
+
+    expect(synced.servers["context7 (mcpx)"]?.type).toBe("http");
+    expect(synced.servers["context7 (mcpx)"]?.disabled).toBeUndefined();
+    expect(synced.servers["vercel (mcpx)"]).toBeUndefined();
+    expect(synced.servers["existingServer"]).toBeUndefined();
+    expect(synced.servers["existingServer (mcpx)"]).toBeDefined();
+  });
+
+  it("syncs Qwen disabled servers to mcp.excluded array instead of disabled property", () => {
+    const env = setupTempEnv("mcpx-sync-qwen-disabled-");
+    cleanups.push(env.restore);
+
+    const config = defaultConfig();
+    config.servers.vercel = {
+      transport: "http",
+      url: "https://mcp.vercel.com",
+      enabled: false
+    };
+    config.servers.context7 = {
+      transport: "http",
+      url: "https://context7.com/mcp",
+      enabled: true
+    };
+    saveConfig(config);
+
+    const qwenDir = path.join(env.root, ".qwen");
+    fs.mkdirSync(qwenDir, { recursive: true });
+    const qwenPath = path.join(qwenDir, "settings.json");
+    fs.writeFileSync(qwenPath, JSON.stringify({
+      mcp: { excluded: ["existing_disabled"] }
+    }, null, 2));
+
+    const summary = syncAllClients(config, new SecretsManager());
+    expect(summary.hasErrors).toBe(false);
+
+    const synced = JSON.parse(fs.readFileSync(qwenPath, "utf8")) as {
+      mcpServers: Record<string, { httpUrl?: string; disabled?: boolean }>;
+      mcp?: { excluded?: string[] };
+    };
+
+    expect(synced.mcpServers["vercel (mcpx)"]?.httpUrl).toBeDefined();
+    expect(synced.mcpServers["vercel (mcpx)"]?.disabled).toBeUndefined();
+    expect(synced.mcpServers["context7 (mcpx)"]?.httpUrl).toBeDefined();
+    expect(synced.mcpServers["context7 (mcpx)"]?.disabled).toBeUndefined();
+
+    expect(synced.mcp?.excluded).toContain("vercel (mcpx)");
+    expect(synced.mcp?.excluded).not.toContain("context7 (mcpx)");
+    expect(synced.mcp?.excluded).toContain("existing_disabled");
   });
 });

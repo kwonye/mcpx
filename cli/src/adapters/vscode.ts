@@ -118,16 +118,16 @@ export class VsCodeAdapter implements ClientAdapter {
         ...(raw.servers ?? {})
       };
       removeSourceEntries(servers, options.sourceEntriesToRemove);
-      const managedNames = options.managedEntries.map((entry) => entry.name);
+      const enabledEntries = options.managedEntries.filter((entry) => entry.enabled);
       const serverEntries = Object.fromEntries(
-        options.managedEntries.map((entry) => [entry.name, {
+        enabledEntries.map((entry) => [entry.name, {
           type: "http",
           url: entry.url,
-          headers: entry.headers,
-          disabled: !entry.enabled
+          headers: entry.headers
         }])
       ) as Record<string, unknown>;
-      for (const name of managedNames) {
+      const enabledManagedNames = enabledEntries.map((entry) => entry.name);
+      for (const name of enabledManagedNames) {
         const conflict = ensureManagedEntryWritable(
           options.managedIndex,
           this.id,
@@ -139,7 +139,7 @@ export class VsCodeAdapter implements ClientAdapter {
         }
       }
 
-      pruneStaleManagedEntries(options.managedIndex, this.id, servers, managedNames);
+      pruneStaleManagedEntries(options.managedIndex, this.id, servers, enabledManagedNames);
       for (const [name, entry] of Object.entries(serverEntries)) {
         servers[name] = entry;
       }
@@ -154,7 +154,12 @@ export class VsCodeAdapter implements ClientAdapter {
         options.managedIndex,
         this.id,
         configPath,
-        Object.fromEntries(Object.entries(serverEntries).map(([name, entry]) => [name, JSON.stringify(entry)]))
+        Object.fromEntries(
+          options.managedEntries.map((entry) => [
+            entry.name,
+            JSON.stringify({ type: "http", url: entry.url, headers: entry.headers, enabled: entry.enabled })
+          ])
+        )
       );
       return okResult(this.id, configPath);
     } catch (error) {
