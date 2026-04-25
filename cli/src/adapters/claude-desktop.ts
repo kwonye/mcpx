@@ -61,7 +61,7 @@ export class ClaudeDesktopAdapter implements ClientAdapter {
       }
 
       const entry = parsed.data;
-      if ((entry.type === undefined || entry.type === "http") && entry.url && !entry.command) {
+      if ((entry.type === undefined || entry.type === "http" || entry.type === "streamable_http") && entry.url && !entry.command) {
         result.candidates.push({
           clientId: this.id,
           configPath,
@@ -112,7 +112,7 @@ export class ClaudeDesktopAdapter implements ClientAdapter {
       const enabledEntries = options.managedEntries.filter((entry) => entry.enabled);
       const serverEntries = Object.fromEntries(
         enabledEntries.map((entry) => [entry.name, {
-          type: "http",
+          type: "streamable_http",
           url: entry.url,
           headers: entry.headers
         }])
@@ -147,7 +147,7 @@ export class ClaudeDesktopAdapter implements ClientAdapter {
         Object.fromEntries(
           options.managedEntries.map((entry) => [
             entry.name,
-            JSON.stringify({ type: "http", url: entry.url, headers: entry.headers, enabled: entry.enabled })
+            JSON.stringify({ type: "streamable_http", url: entry.url, headers: entry.headers, enabled: entry.enabled })
           ])
         )
       );
