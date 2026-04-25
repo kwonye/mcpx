@@ -1,4 +1,5 @@
 import os from "node:os";
+import { homeDir } from "../core/paths.js";
 import path from "node:path";
 import { z } from "zod";
 import type { ClientAdapter, ManagedIndex, McpxConfig, SyncClientOptions, SyncResult } from "../types.js";
@@ -34,7 +35,7 @@ export class KiroAdapter implements ClientAdapter {
   readonly id = "kiro" as const;
 
   detectConfigPath(): string | null {
-    return path.join(os.homedir(), ".kiro", "settings", "mcp.json");
+    return path.join(homeDir(), ".kiro", "settings", "mcp.json");
   }
 
   supportsHttp(): boolean {

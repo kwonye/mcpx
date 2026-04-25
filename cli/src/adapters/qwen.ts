@@ -1,4 +1,5 @@
 import os from "node:os";
+import { homeDir } from "../core/paths.js";
 import path from "node:path";
 import { z } from "zod";
 import type { ClientAdapter, ManagedIndex, McpxConfig, SyncClientOptions, SyncResult } from "../types.js";
@@ -32,7 +33,7 @@ export class QwenAdapter implements ClientAdapter {
   readonly id = "qwen" as const;
 
   detectConfigPath(): string | null {
-    return path.join(os.homedir(), ".qwen", "settings.json");
+    return path.join(homeDir(), ".qwen", "settings.json");
   }
 
   supportsHttp(): boolean {

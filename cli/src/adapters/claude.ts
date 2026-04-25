@@ -1,4 +1,5 @@
 import os from "node:os";
+import { homeDir } from "../core/paths.js";
 import path from "node:path";
 import { z } from "zod";
 import type { ClientAdapter, ManagedIndex, McpxConfig, SyncClientOptions, SyncResult } from "../types.js";
@@ -33,7 +34,7 @@ export class ClaudeAdapter implements ClientAdapter {
   readonly id = "claude" as const;
 
   detectConfigPath(): string | null {
-    return path.join(os.homedir(), ".claude.json");
+    return path.join(homeDir(), ".claude.json");
   }
 
   supportsHttp(): boolean {

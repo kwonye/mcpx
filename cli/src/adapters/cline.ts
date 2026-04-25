@@ -1,4 +1,5 @@
 import os from "node:os";
+import { homeDir } from "../core/paths.js";
 import path from "node:path";
 import fs from "node:fs";
 import { z } from "zod";
@@ -34,8 +35,8 @@ const clineEntrySchema = z.object({
 
 function getCandidatePaths(): string[] {
   return [
-    path.join(os.homedir(), "Library", "Application Support", "Code", "User", "globalStorage", "saoudrizwan.claude-dev", "settings", "cline_mcp_settings.json"),
-    path.join(os.homedir(), "Library", "Application Support", "Cursor", "User", "globalStorage", "saoudrizwan.claude-dev", "settings", "cline_mcp_settings.json")
+    path.join(homeDir(), "Library", "Application Support", "Code", "User", "globalStorage", "saoudrizwan.claude-dev", "settings", "cline_mcp_settings.json"),
+    path.join(homeDir(), "Library", "Application Support", "Cursor", "User", "globalStorage", "saoudrizwan.claude-dev", "settings", "cline_mcp_settings.json")
   ];
 }
 

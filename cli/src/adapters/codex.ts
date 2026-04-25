@@ -1,4 +1,5 @@
 import os from "node:os";
+import { homeDir } from "../core/paths.js";
 import path from "node:path";
 import fs from "node:fs";
 import { parse, stringify } from "@iarna/toml";
@@ -38,7 +39,7 @@ export class CodexAdapter implements ClientAdapter {
   readonly id = "codex" as const;
 
   detectConfigPath(): string | null {
-    return path.join(os.homedir(), ".codex", "config.toml");
+    return path.join(homeDir(), ".codex", "config.toml");
   }
 
   supportsHttp(): boolean {

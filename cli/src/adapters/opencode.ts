@@ -1,4 +1,5 @@
 import os from "node:os";
+import { homeDir } from "../core/paths.js";
 import path from "node:path";
 import { z } from "zod";
 import type { ClientAdapter, ManagedIndex, McpxConfig, SyncClientOptions, SyncResult } from "../types.js";
@@ -35,7 +36,7 @@ export class OpenCodeAdapter implements ClientAdapter {
   readonly id = "opencode" as const;
 
   detectConfigPath(): string | null {
-    return path.join(os.homedir(), ".config", "opencode", "opencode.json");
+    return path.join(homeDir(), ".config", "opencode", "opencode.json");
   }
 
   supportsHttp(): boolean {

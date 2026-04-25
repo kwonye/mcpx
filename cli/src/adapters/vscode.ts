@@ -1,4 +1,5 @@
 import os from "node:os";
+import { homeDir } from "../core/paths.js";
 import path from "node:path";
 import { z } from "zod";
 import type { ClientAdapter, ManagedIndex, McpxConfig, SyncClientOptions, SyncResult } from "../types.js";
@@ -35,7 +36,7 @@ export class VsCodeAdapter implements ClientAdapter {
   readonly id = "vscode" as const;
 
   detectConfigPath(): string | null {
-    return path.join(os.homedir(), "Library", "Application Support", "Code", "User", "mcp.json");
+    return path.join(homeDir(), "Library", "Application Support", "Code", "User", "mcp.json");
   }
 
   supportsHttp(): boolean {

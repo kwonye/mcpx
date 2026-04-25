@@ -9,16 +9,22 @@ function envOrDefault(value: string | undefined, fallback: string): string {
   return fallback;
 }
 
+// Bun's os.homedir() ignores runtime HOME mutations (native syscall). Read
+// process.env.HOME first so tests can override the home directory.
+export function homeDir(): string {
+  return process.env.HOME ?? os.homedir();
+}
+
 export function getConfigRoot(): string {
-  return envOrDefault(process.env.MCPX_CONFIG_HOME ?? process.env.XDG_CONFIG_HOME, path.join(os.homedir(), ".config"));
+  return envOrDefault(process.env.MCPX_CONFIG_HOME ?? process.env.XDG_CONFIG_HOME, path.join(homeDir(),".config"));
 }
 
 export function getDataRoot(): string {
-  return envOrDefault(process.env.MCPX_DATA_HOME ?? process.env.XDG_DATA_HOME, path.join(os.homedir(), ".local", "share"));
+  return envOrDefault(process.env.MCPX_DATA_HOME ?? process.env.XDG_DATA_HOME, path.join(homeDir(),".local", "share"));
 }
 
 export function getStateRoot(): string {
-  return envOrDefault(process.env.MCPX_STATE_HOME ?? process.env.XDG_STATE_HOME, path.join(os.homedir(), ".local", "state"));
+  return envOrDefault(process.env.MCPX_STATE_HOME ?? process.env.XDG_STATE_HOME, path.join(homeDir(),".local", "state"));
 }
 
 export function getConfigPath(): string {
