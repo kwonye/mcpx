@@ -1545,7 +1545,7 @@ export async function runCli(argv = process.argv): Promise<void> {
   await program.parseAsync(argv);
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (process.argv[1] && import.meta.url === pathToFileURL(fs.realpathSync(process.argv[1])).href) {
   void runCli().catch((error) => {
     process.stderr.write(`${(error as Error).message}\n`);
     process.exit(1);
