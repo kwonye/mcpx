@@ -76,12 +76,14 @@
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
     "@vitejs/plugin-react": "^5.2.0",
+    "@xmldom/xmldom": "^0.8.13",
     "canvas": "^3.2.3",
     "electron": "^41.0.0",
     "electron-builder": "^26.0.0",
     "electron-vite": "^5.0.0",
     "jsdom": "^29.0.1",
     "typescript": "^6.0.2",
+    "vite": "^6.4.2",
     "vitest": "^4.1.2"
   }
 }

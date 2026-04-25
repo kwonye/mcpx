@@ -54,6 +54,7 @@
     "@iarna/toml": "^2.2.5",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "commander": "^14.0.1",
+    "hono": "^4.12.14",
     "zod": "^4.1.12"
   },
   "devDependencies": {
