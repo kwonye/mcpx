@@ -451,6 +451,7 @@ select {
     padding-top: var(--titlebar-safe-top);
     position: relative;
     z-index: 10;
+    -webkit-app-region: drag;
 }
 
 .sidebar-logo {
@@ -486,6 +487,7 @@ select {
     gap: 14px;
     padding: 16px;
     border-radius: var(--radius-md);
+    -webkit-app-region: no-drag;
 }
 
 .daemon-panel__info {
@@ -570,6 +572,7 @@ select {
     overflow-y: auto;
     padding: calc(var(--titlebar-safe-top) + var(--space-2)) var(--space-2) var(--space-4);
     position: relative;
+    -webkit-app-region: drag;
 }
 
 .main-content-inner {
@@ -578,6 +581,7 @@ select {
     display: flex;
     flex-direction: column;
     gap: var(--section-gap);
+    -webkit-app-region: no-drag;
     padding-bottom: var(--space-8);
 }
 

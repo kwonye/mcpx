@@ -38,11 +38,6 @@ export function ServerCard(props: ServerCardProps) {
           </div>
         </div>
         <div className="server-card__controls" onClick={(event) => event.stopPropagation()}>
-          {props.authConfigured && (
-            <div className="server-card__auth" title="Auth configured">
-              <span className="material-symbols-outlined">lock</span>
-            </div>
-          )}
           <div className="server-card__toggle">
             <span className="server-card__toggle-state">{props.enabled ? "On" : "Off"}</span>
             <Toggle
@@ -53,6 +48,11 @@ export function ServerCard(props: ServerCardProps) {
               label={`${props.enabled ? "Disable" : "Enable"} ${props.name}`}
             />
           </div>
+          {props.authConfigured && (
+            <div className="server-card__auth" title="Auth configured">
+              <span className="material-symbols-outlined">lock</span>
+            </div>
+          )}
         </div>
       </div>
 
