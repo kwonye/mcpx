@@ -28,10 +28,10 @@
 ## Development
 
 ### Key Commands
-- `npm run dev -- [args]`: Run the CLI from source using `tsx`.
-- `npm run build`: Compile TypeScript to `dist/`.
-- `npm run sync-version`: Synchronizes versioning metadata across the repo.
-- `npm test`: Run the test suite (Vitest).
+- `bun run dev -- [args]`: Run the CLI from source using `tsx` (runs TS directly, no compile step).
+- `bun run build`: Bundle with Bun for JS output; `tsc` is used for declaration files only.
+- `bun run sync-version`: Synchronizes versioning metadata across the repo.
+- `bun test`: Run the test suite (bun:test native runner).
 
 ### Core Export
 This package exports a barrel at `src/core/index.ts` which is consumed as a library by the `@mcpx/core` alias in the desktop app.

@@ -55,9 +55,9 @@
     "dev:inspect": "electron-vite dev --remoteDebuggingPort 9222",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "e2e": "playwright test",
+    "test": "bunx vitest run",
+    "test:watch": "bunx vitest",
+    "e2e": "bunx playwright test",
     "desktop-install": "bash scripts/desktop-install.sh --flavor production",
     "desktop-install:devtools": "bash scripts/desktop-install.sh --flavor production --dev",
     "desktop-install:dev-app": "bash scripts/desktop-install.sh --flavor dev",
@@ -77,7 +77,6 @@
     "@types/react-dom": "^19.1.0",
     "@vitejs/plugin-react": "^5.2.0",
     "@xmldom/xmldom": "^0.8.13",
-    "canvas": "^3.2.3",
     "electron": "^41.0.0",
     "electron-builder": "^26.0.0",
     "electron-vite": "^5.0.0",
@@ -85,5 +84,6 @@
     "typescript": "^6.0.2",
     "vite": "^6.4.2",
     "vitest": "^4.1.2"
-  }
+  },
+  "trustedDependencies": ["electron", "electron-builder", "app-builder-bin", "dmg-license"]
 }

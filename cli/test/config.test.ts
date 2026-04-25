@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "bun:test";
 import { loadConfig } from "../src/core/config.js";
 import { getConfigPath } from "../src/core/paths.js";
 import { setupTempEnv } from "./helpers.js";

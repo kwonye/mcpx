@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { parse, stringify } from "@iarna/toml";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "bun:test";
 import { defaultConfig, saveConfig } from "../src/core/config.js";
 import { syncAllClients } from "../src/core/sync.js";
 import { SecretsManager } from "../src/core/secrets.js";

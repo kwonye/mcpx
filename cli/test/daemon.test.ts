@@ -1,5 +1,5 @@
 import net from "node:net";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "bun:test";
 import { defaultConfig } from "../src/core/config.js";
 import { resolveGatewayPort } from "../src/core/daemon.js";
 import { setupTempEnv } from "./helpers.js";

@@ -41,31 +41,33 @@ The desktop app is tightly integrated with the CLI's core logic. It does not use
 ## Building and Running
 
 ### Prerequisites
-- Node.js >= 20
+- Bun >= 1.2 (https://bun.sh)
 - macOS (required for keychain and desktop app features)
+
+Note: the tray/app icon generation scripts (`generate-status-icons.js`, `generate-app-icons.sh`) have been removed. The committed PNGs in `app/resources/` and `app/build/icons/` are the source of truth.
 
 ### CLI
 ```bash
 cd cli
-npm install
-npm run build           # Build to dist/
-npm run dev -- [args]    # Run src/cli.ts via tsx
-npm test                # Run unit tests
+bun install
+bun run build           # Build to dist/
+bun run dev -- [args]    # Run src/cli.ts via tsx
+bun test                # Run unit tests
 ```
 
 ### Desktop App
 ```bash
 cd app
-npm install
-npm run dev             # Start Electron dev server with HMR
-npm run build           # Build Electron app for production
-npm test                # Run unit/component tests
-npm run e2e             # Run Playwright E2E tests
+bun install
+bun run dev             # Start Electron dev server with HMR
+bun run build           # Build Electron app for production
+bun run test            # Run unit/component tests
+bun run e2e             # Run Playwright E2E tests
 ```
 
 ### Testing & Verifying Changes
 
-All UI verification must be done on the installed app, not the dev server. The dev server (`npm run dev`) serves content from `ELECTRON_RENDERER_URL` which differs from the bundled app.
+All UI verification must be done on the installed app, not the dev server. The dev server (`bun run dev`) serves content from `ELECTRON_RENDERER_URL` which differs from the bundled app.
 
 **Step-by-step:**
 
@@ -79,13 +81,13 @@ All UI verification must be done on the installed app, not the dev server. The d
 2. Build and install the side-by-side dev app with DevTools open:
    ```bash
    cd app
-   npm run desktop-install:dev
+   bun run desktop-install:dev
    ```
    This builds the dev app, installs it to `/Applications/mcpx-dev.app`, and launches it with DevTools auto-opened on the dashboard.
 
    To rebuild the normal production bundle locally instead:
    ```bash
-   npm run desktop-install
+   bun run desktop-install
    ```
 
 3. Inspect the dashboard in the DevTools panel that appears.
@@ -158,6 +160,6 @@ The app has 2 CDP tabs: the dashboard (main window) and the popover (menubar tra
 
 The project uses a **single monotonic version stream** across both components. Every release increments a shared patch version.
 
-- **CLI Release:** Triggered by `cli/**` changes. Publishes to npm and creates a git tag.
+- **CLI Release:** Triggered by `cli/**` changes. Publishes via `bun publish` to the npm registry and creates a git tag.
 - **Desktop Release:** Triggered by `app/**` or `cli/**` changes. Builds signed/notarized macOS artifacts.
 - **Mixed Releases:** If both components change, the CLI workflow owns the tag creation, and the Desktop workflow attaches artifacts to that tag.

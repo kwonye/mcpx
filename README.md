@@ -28,10 +28,12 @@ This is a monorepo containing:
 
 ## Install
 
-Prerequisite: Node.js `>=20`
+Prerequisite: Bun >= 1.2 (https://bun.sh) or Node.js `>=20`
 
 ```bash
 npm install -g @kwonye/mcpx@latest
+# or
+bun add -g @kwonye/mcpx@latest
 ```
 
 ## Quick Start
@@ -117,10 +119,10 @@ The desktop app provides a visual interface for managing MCP servers:
 
 ```bash
 cd app
-npm install
-npm run dev      # Start Electron dev server
-npm test         # Run unit tests
-npm run e2e      # Run Playwright E2E tests
+bun install
+bun run dev      # Start Electron dev server
+bun run test     # Run unit tests
+bun run e2e      # Run Playwright E2E tests
 ```
 
 ## Supported Clients
@@ -199,15 +201,15 @@ mcpx sync --json
 ```bash
 # CLI
 cd cli
-npm install
-npm run build
-npm test
+bun install
+bun run build
+bun test
 
 # Desktop app
 cd app
-npm install
-npm run build
-npm test
+bun install
+bun run build
+bun run test
 ```
 
 ## CI/CD Workflows

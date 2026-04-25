@@ -1,5 +1,5 @@
 import http from "node:http";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "bun:test";
 import { probeHttpAuthRequirement } from "../src/core/auth-probe.js";
 import { SecretsManager } from "../src/core/secrets.js";
 

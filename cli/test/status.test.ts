@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import { defaultConfig } from "../src/core/config.js";
 import { buildStatusReport } from "../src/core/status.js";
 import type { DaemonStatus } from "../src/core/daemon.js";

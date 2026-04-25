@@ -80,10 +80,10 @@ rm -f "${APP_DIR}/dist/builder-debug.yml"
 export MCPX_DESKTOP_FLAVOR="${FLAVOR}"
 export MCPX_DESKTOP_DEBUG="${BUILD_DEBUG}"
 export CSC_IDENTITY_AUTO_DISCOVERY="false"
-npm run build
+bun run build
 
 echo "Creating app bundle..."
-npx electron-builder "${BUILDER_ARGS[@]}"
+bunx electron-builder "${BUILDER_ARGS[@]}"
 
 SOURCE_APP_PATH="$(find "${DIST_DIR}" -maxdepth 2 -type d -name "${APP_BUNDLE_NAME}" -print -quit)"
 if [[ -z "$SOURCE_APP_PATH" ]]; then

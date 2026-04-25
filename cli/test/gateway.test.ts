@@ -1,6 +1,6 @@
 import http from "node:http";
 import { fileURLToPath } from "node:url";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "bun:test";
 import { createGatewayServer } from "../src/gateway/server.js";
 import { defaultConfig, saveConfig } from "../src/core/config.js";
 import { SecretsManager } from "../src/core/secrets.js";

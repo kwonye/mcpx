@@ -2,7 +2,7 @@
  * Tests for client-native compatibility layer.
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect } from "bun:test";
 import { parseCompatibilityArgs } from "../src/compat/index.js";
 import { parseClaudeArgs } from "../src/compat/claude.js";
 import { parseCodexArgs } from "../src/compat/codex.js";

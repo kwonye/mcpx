@@ -99,7 +99,7 @@ function parseArgs(argv) {
   return { command, args };
 }
 
-function cmdNextVersion(args) {
+async function cmdNextVersion(args) {
   const includeCli = parseBoolean(args["include-cli"], "--include-cli");
   parseBoolean(args["include-desktop"], "--include-desktop");
 
@@ -115,8 +115,14 @@ function cmdNextVersion(args) {
   versions.push(latestTagVersion || "0.0.0");
 
   if (includeCli) {
-    const npmVersion =
-      runOrEmpty("npm view @kwonye/mcpx version 2>/dev/null") || "0.0.0";
+    const npmVersion = await (async () => {
+      try {
+        const res = await fetch("https://registry.npmjs.org/@kwonye%2fmcpx/latest");
+        if (!res.ok) return "";
+        const data = await res.json();
+        return data.version ?? "";
+      } catch { return ""; }
+    })() || "0.0.0";
     versions.push(npmVersion);
   }
 
@@ -171,14 +177,14 @@ function cmdReleaseBody(args) {
   process.stdout.write(`${body}\n`);
 }
 
-function main() {
+async function main() {
   const { command, args } = parseArgs(process.argv.slice(2));
   if (!command) {
     throw new Error("Missing command. Expected next-version, tag-body, or release-body.");
   }
 
   if (command === "next-version") {
-    cmdNextVersion(args);
+    await cmdNextVersion(args);
     return;
   }
   if (command === "tag-body") {
@@ -194,10 +200,8 @@ function main() {
   );
 }
 
-try {
-  main();
-} catch (error) {
+main().catch((error) => {
   const message = error instanceof Error ? error.message : String(error);
   process.stderr.write(`${message}\n`);
   process.exit(1);
-}
+});
