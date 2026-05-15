@@ -155,6 +155,53 @@ describe("sync engine", () => {
     expect(Object.keys(managed.managed.vscode?.entries ?? {})).toEqual(["circleback (mcpx)"]);
   });
 
+  it("prunes orphaned (mcpx) entries not tracked in the managed index", () => {
+    const env = setupTempEnv("mcpx-sync-orphaned-");
+    cleanups.push(env.restore);
+
+    const config = defaultConfig();
+    config.servers.vercel = {
+      transport: "http",
+      url: "https://mcp.vercel.com"
+    };
+    saveConfig(config);
+
+    const vscodePath = path.join(env.root, "Library", "Application Support", "Code", "User", "mcp.json");
+    fs.mkdirSync(path.dirname(vscodePath), { recursive: true });
+    fs.writeFileSync(
+      vscodePath,
+      JSON.stringify({
+        servers: {
+          "alive (mcpx)": {
+            type: "http",
+            url: "http://127.0.0.1:37373/mcp?upstream=alive"
+          },
+          "ghost (mcpx)": {
+            type: "http",
+            url: "http://127.0.0.1:37373/mcp?upstream=ghost"
+          },
+          unmanaged: {
+            type: "stdio",
+            command: "npx",
+            args: ["-y", "@example/unmanaged"]
+          }
+        }
+      }, null, 2)
+    );
+
+    const summary = syncAllClients(config, new SecretsManager());
+    expect(summary.hasErrors).toBe(false);
+
+    const synced = JSON.parse(fs.readFileSync(vscodePath, "utf8")) as {
+      servers: Record<string, unknown>;
+    };
+
+    expect(synced.servers["vercel (mcpx)"]).toBeDefined();
+    expect(synced.servers["ghost (mcpx)"]).toBeUndefined();
+    expect(synced.servers.unmanaged).toBeUndefined();
+    expect(synced.servers["unmanaged (mcpx)"]).toBeDefined();
+  });
+
   it("syncs Claude only at root mcpServers and leaves project mcpServers untouched", () => {
     const env = setupTempEnv("mcpx-sync-claude-root-only-");
     cleanups.push(env.restore);

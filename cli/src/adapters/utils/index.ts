@@ -30,6 +30,12 @@ export function pruneStaleManagedEntries(
       delete servers[name];
     }
   }
+
+  for (const name of Object.keys(servers)) {
+    if (!keep.has(name) && name.endsWith(" (mcpx)")) {
+      delete servers[name];
+    }
+  }
 }
 
 export function ensureManagedEntryWritable(
