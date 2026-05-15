@@ -112,12 +112,17 @@ export function getDaemonStatus(config: McpxConfig): DaemonStatus {
 export async function startDaemon(config: McpxConfig, cliPath: string, secrets: SecretsManager): Promise<DaemonStartResult> {
   const existingStatus = getDaemonStatus(config);
   if (existingStatus.running && existingStatus.pid) {
-    return {
-      started: false,
-      pid: existingStatus.pid,
-      port: config.gateway.port,
-      message: "mcpx daemon already running."
-    };
+    const portAvailable = await isPortAvailable(config.gateway.port);
+    if (!portAvailable) {
+      return {
+        started: false,
+        pid: existingStatus.pid,
+        port: config.gateway.port,
+        message: "mcpx daemon already running."
+      };
+    }
+
+    try { fs.unlinkSync(getPidPath()); } catch {}
   }
 
   const port = await resolveGatewayPort(config);
