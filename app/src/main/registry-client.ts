@@ -74,13 +74,18 @@ export interface RegistryDetailResponse {
 export async function fetchRegistryServers(
   cursor?: string,
   query?: string,
-  limit = DEFAULT_LIMIT
+  limit = DEFAULT_LIMIT,
+  updatedSince?: string
 ): Promise<RegistryListResponse> {
   const params = new URLSearchParams({ limit: String(limit) });
+  params.set("version", "latest");
   const normalizedQuery = query?.trim();
   if (cursor) params.set("cursor", cursor);
   if (normalizedQuery) {
     params.set("search", normalizedQuery);
+  }
+  if (updatedSince) {
+    params.set("updated_since", updatedSince);
   }
 
   const response = await fetch(`${REGISTRY_BASE}/v0.1/servers?${params}`, {

@@ -404,8 +404,8 @@ export function registerIpcHandlers(): void {
     return result;
   });
 
-  ipcMain.handle(IPC.REGISTRY_LIST, (_event, cursor?: string, query?: string, limit?: number) => {
-    return fetchRegistryServers(cursor, query, limit);
+  ipcMain.handle(IPC.REGISTRY_LIST, (_event, cursor?: string, query?: string, limit?: number, updatedSince?: string) => {
+    return fetchRegistryServers(cursor, query, limit, updatedSince ?? undefined);
   });
 
   ipcMain.handle(IPC.REGISTRY_GET, (_event, name: string) => {

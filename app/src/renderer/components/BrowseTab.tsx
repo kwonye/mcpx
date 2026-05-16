@@ -1,9 +1,6 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { useRegistryList } from "../hooks/useMcpx";
 import { AddServerForm } from "./AddServerForm";
-
-// Feature flag: disable browse registry search (temporarily disabled)
-const BROWSE_SEARCH_ENABLED = false;
 
 interface BrowseTabProps {
   onServerAdded: () => void;
@@ -24,19 +21,71 @@ interface RequiredInput {
   kind: "env" | "arg" | "header";
 }
 
+interface RegistryIcon {
+  src: string;
+  mimeType?: string;
+}
+
+function fourteenDaysAgo(): string {
+  const d = new Date();
+  d.setDate(d.getDate() - 14);
+  return d.toISOString();
+}
+
 const CATEGORIES = [
-  { id: "all", label: "All Servers", query: "" },
-  { id: "trending", label: "Trending 🔥", query: "browser agent sqlite" },
-  { id: "databases", label: "Databases 💾", query: "postgres sqlite neon mysql" },
-  { id: "devtools", label: "Developer Tools 🛠️", query: "github git fetch" },
-  { id: "web", label: "Web & Browser 🌐", query: "puppeteer brave browser" }
+  { id: "all", label: "All Servers", query: "", updatedSince: undefined as string | undefined },
+  { id: "recent", label: "Recently Updated", query: "", updatedSince: fourteenDaysAgo() },
 ];
+
+function getTransportLabel(entry: {
+  server: {
+    packages?: Array<{ transport: { type: string } }>;
+    remotes?: Array<{ type: string }>;
+  };
+}): string | null {
+  if (entry.server.packages?.some(p => p.transport.type === "stdio")) return "stdio";
+  if (entry.server.remotes?.some(r => r.type === "streamable-http")) return "HTTP";
+  if (entry.server.remotes?.some(r => r.type === "sse")) return "SSE";
+  return null;
+}
+
+function getStatus(entry: {
+  _meta?: Record<string, unknown>;
+}): string | null {
+  const meta = entry._meta as Record<string, any> | undefined;
+  const official = meta?.["io.modelcontextprotocol.registry/official"] as Record<string, any> | undefined;
+  if (!official) return null;
+  const status: string = official.status;
+  if (status === "active") return null;
+  return status;
+}
+
+function getIcon(entry: {
+  server: { icons?: RegistryIcon[] };
+}): RegistryIcon | null {
+  const icons = entry.server.icons;
+  if (!icons || icons.length === 0) return null;
+  return icons[0];
+}
+
+function getRepoUrl(entry: {
+  server: { repository?: { url?: string } };
+}): string | null {
+  return entry.server.repository?.url ?? null;
+}
+
+function getWebsiteUrl(entry: {
+  server: { websiteUrl?: string };
+}): string | null {
+  return entry.server.websiteUrl ?? null;
+}
 
 export function BrowseTab({ onServerAdded, status, initialState, onStateChange }: BrowseTabProps) {
   const { servers, loading, search, debouncedSearch, loadMore, hasMore } = useRegistryList();
   const [searchInput, setSearchInput] = useState(initialState?.searchQuery ?? "");
   const [activeQuery, setActiveQuery] = useState("");
   const [activeCategory, setActiveCategory] = useState(initialState?.activeCategory ?? "all");
+  const [activeUpdatedSince, setActiveUpdatedSince] = useState<string | undefined>();
   const [adding, setAdding] = useState<{
     registryName: string;
     shortName: string;
@@ -44,11 +93,11 @@ export function BrowseTab({ onServerAdded, status, initialState, onStateChange }
   } | null>(null);
   const [addStatus, setAddStatus] = useState<string | null>(null);
   const [isError, setIsError] = useState(false);
+  const [sortBy, setSortBy] = useState<"default" | "name" | "name-desc" | "updated">("default");
   const initialSearchTriggered = useRef(false);
 
   const installedServerNames = new Set(status.servers.map(s => s.name));
 
-  // Trigger initial search on mount if initialState has searchQuery or activeCategory
   useEffect(() => {
     if (initialSearchTriggered.current) return;
     initialSearchTriggered.current = true;
@@ -58,11 +107,11 @@ export function BrowseTab({ onServerAdded, status, initialState, onStateChange }
       setActiveQuery(query);
       search(query);
     } else if (initialState?.activeCategory && initialState.activeCategory !== "all") {
-      // Find the category query for the persisted category
       const category = CATEGORIES.find(c => c.id === initialState.activeCategory);
       if (category) {
         setActiveQuery(category.query);
-        search(category.query);
+        setActiveUpdatedSince(category.updatedSince);
+        search(category.query, category.updatedSince);
       }
     }
   }, [initialState, search]);
@@ -71,9 +120,9 @@ export function BrowseTab({ onServerAdded, status, initialState, onStateChange }
     e.preventDefault();
     const normalizedQuery = searchInput.trim();
     setActiveCategory("");
+    setActiveUpdatedSince(undefined);
     setActiveQuery(normalizedQuery);
-    search(normalizedQuery);  // Immediate search on form submit
-    // Persist state on explicit search action
+    search(normalizedQuery);
     onStateChange?.({ searchQuery: normalizedQuery, activeCategory: "" });
   };
 
@@ -81,15 +130,16 @@ export function BrowseTab({ onServerAdded, status, initialState, onStateChange }
     const value = e.target.value;
     setSearchInput(value);
     setActiveCategory("");
-    debouncedSearch(value);  // Debounced real-time search
+    setActiveUpdatedSince(undefined);
+    debouncedSearch(value);
   };
 
-  const handleCategoryClick = (categoryId: string, categoryQuery: string) => {
+  const handleCategoryClick = (categoryId: string, categoryQuery: string, updatedSince?: string) => {
     setActiveCategory(categoryId);
     setSearchInput("");
     setActiveQuery(categoryQuery);
-    search(categoryQuery);
-    // Persist state on category selection
+    setActiveUpdatedSince(updatedSince);
+    search(categoryQuery, updatedSince);
     onStateChange?.({ searchQuery: "", activeCategory: categoryId });
   };
 
@@ -99,7 +149,6 @@ export function BrowseTab({ onServerAdded, status, initialState, onStateChange }
       setAddStatus("Preparing...");
       const result = await window.mcpx.registryPrepareAdd(registryName);
       if (result.requiredInputs.length === 0) {
-        // No inputs needed — add directly
         const addResult = await window.mcpx.registryConfirmAdd({});
         setAddStatus(`Added "${addResult.added}" successfully!`);
         onServerAdded();
@@ -123,7 +172,7 @@ export function BrowseTab({ onServerAdded, status, initialState, onStateChange }
       setAddStatus("Removing...");
       await window.mcpx.removeServer(serverName);
       setAddStatus(`Removed "${serverName}" successfully!`);
-      onServerAdded(); // Refresh status
+      onServerAdded();
     } catch (err) {
       setIsError(true);
       setAddStatus(`Error: ${err instanceof Error ? err.message : String(err)}`);
@@ -161,40 +210,68 @@ export function BrowseTab({ onServerAdded, status, initialState, onStateChange }
     );
   }
 
-  const serverEntries = servers as Array<{ server: { name: string; title?: string; description?: string } }>;
+  const serverEntries = useMemo(() => {
+    const entries = servers as Array<any>;
+    if (sortBy === "default") return entries;
+
+    return [...entries].sort((a, b) => {
+      const nameA = (a.server.title ?? a.server.name).toLowerCase();
+      const nameB = (b.server.title ?? b.server.name).toLowerCase();
+      if (sortBy === "name") return nameA.localeCompare(nameB);
+      if (sortBy === "name-desc") return nameB.localeCompare(nameA);
+
+      const updatedA = a._meta?.["io.modelcontextprotocol.registry/official"]?.updatedAt ?? "";
+      const updatedB = b._meta?.["io.modelcontextprotocol.registry/official"]?.updatedAt ?? "";
+      return updatedB.localeCompare(updatedA);
+    });
+  }, [servers, sortBy]);
 
   return (
     <div className="browse-tab">
       <div className="browse-hero">
         <h2 className="browse-hero__title">Discover MCP Servers</h2>
         <p className="browse-hero__subtitle">Enhance your AI with powerful context and tools from the official MCP registry.</p>
-        {BROWSE_SEARCH_ENABLED && (
-          <form className="glass-panel browse-search" onSubmit={handleSearch}>
-            <span className="material-symbols-outlined" style={{ color: "var(--text-muted)" }}>search</span>
-            <input
-              type="text"
-              className="browse-search__input"
-              placeholder="Search for tools, databases, APIs..."
-              value={searchInput}
-              onChange={handleSearchInputChange}
-            />
-            <button type="submit" className="btn btn-primary">Search</button>
-          </form>
-        )}
+        <form className="glass-panel browse-search" onSubmit={handleSearch}>
+          <span className="material-symbols-outlined" style={{ color: "var(--text-muted)" }}>search</span>
+          <input
+            type="text"
+            className="browse-search__input"
+            placeholder="Search for tools, databases, APIs..."
+            value={searchInput}
+            onChange={handleSearchInputChange}
+          />
+          <button type="submit" className="btn btn-primary">Search</button>
+        </form>
       </div>
 
-      <div className="category-pills">
-        {CATEGORIES.map(cat => (
-          <button
-            key={cat.id}
-            type="button"
-            className="category-pill"
-            data-active={activeCategory === cat.id}
-            onClick={() => handleCategoryClick(cat.id, cat.query)}
+      <div className="browse-toolbar">
+        <div className="category-pills">
+          {CATEGORIES.map(cat => (
+            <button
+              key={cat.id}
+              type="button"
+              className="category-pill"
+              data-active={activeCategory === cat.id}
+              onClick={() => handleCategoryClick(cat.id, cat.query, cat.updatedSince)}
+            >
+              {cat.label}
+            </button>
+          ))}
+        </div>
+        <div className="browse-sort">
+          <label className="browse-sort__label" htmlFor="browse-sort">Sort</label>
+          <select
+            id="browse-sort"
+            className="browse-sort__select"
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
           >
-            {cat.label}
-          </button>
-        ))}
+            <option value="default">Default</option>
+            <option value="name">Name A-Z</option>
+            <option value="name-desc">Name Z-A</option>
+            <option value="updated">Recently Updated</option>
+          </select>
+        </div>
       </div>
 
       {addStatus && <div className={`add-status ${isError ? 'add-status-error' : ''}`}>{addStatus}</div>}
@@ -202,18 +279,50 @@ export function BrowseTab({ onServerAdded, status, initialState, onStateChange }
       {loading && <div className="browse-empty">Loading registry...</div>}
 
       <div className="browse-grid">
-        {serverEntries.map((entry) => {
+        {serverEntries.map((entry: any) => {
           const shortName = entry.server.name.split("/").pop() ?? entry.server.name;
           const isInstalled = installedServerNames.has(shortName);
+          const icon = getIcon(entry);
+          const transport = getTransportLabel(entry);
+          const statusBadge = getStatus(entry);
+          const repoUrl = getRepoUrl(entry);
+          const websiteUrl = getWebsiteUrl(entry);
 
           return (
-            <div key={entry.server.name} className="glass-card registry-card">
-              <div className="registry-card__icon">
-                <span className="material-symbols-outlined">extension</span>
-              </div>
+            <div key={entry.server.name} className={`glass-card registry-card ${statusBadge ? "registry-card--deprecated" : ""}`}>
+              {icon ? (
+                <img
+                  className="registry-card__icon-img"
+                  src={icon.src}
+                  alt=""
+                  onError={(e) => { (e.target as HTMLElement).style.display = "none"; }}
+                />
+              ) : (
+                <div className="registry-card__icon">
+                  <span className="material-symbols-outlined">extension</span>
+                </div>
+              )}
               <div className="registry-card__content">
-                <h3 className="registry-card__title">{entry.server.title ?? entry.server.name}</h3>
+                <div className="registry-card__title-row">
+                  <h3 className="registry-card__title">{entry.server.title ?? entry.server.name}</h3>
+                  {transport && <span className="registry-card__badge">{transport}</span>}
+                  {statusBadge && <span className="registry-card__badge registry-card__badge--warn">{statusBadge}</span>}
+                </div>
                 <p className="registry-card__description">{entry.server.description || entry.server.name}</p>
+                {(repoUrl || websiteUrl) && (
+                  <div className="registry-card__links">
+                    {repoUrl && (
+                      <a className="registry-card__link" href={repoUrl} target="_blank" rel="noopener noreferrer" title={repoUrl}>
+                        <span className="material-symbols-outlined">code</span> Source
+                      </a>
+                    )}
+                    {websiteUrl && (
+                      <a className="registry-card__link" href={websiteUrl} target="_blank" rel="noopener noreferrer" title={websiteUrl}>
+                        <span className="material-symbols-outlined">open_in_new</span> Site
+                      </a>
+                    )}
+                  </div>
+                )}
               </div>
 
               {isInstalled ? (
