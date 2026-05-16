@@ -276,15 +276,16 @@ describe("sync engine", () => {
     expect(summary.results.some((result) => result.clientId === "claude-desktop" && result.status === "SYNCED")).toBe(true);
 
     const syncedClaudeDesktop = JSON.parse(fs.readFileSync(claudeDesktopPath, "utf8")) as {
-      mcpServers: Record<string, { type: string; url?: string; headers?: Record<string, string> }>;
+      mcpServers: Record<string, { command: string; args: string[] }>;
     };
 
-    expect(syncedClaudeDesktop.mcpServers["vercel (mcpx)"]?.type).toBe("http");
-    expect(syncedClaudeDesktop.mcpServers["vercel (mcpx)"]?.url).toContain("127.0.0.1");
-    expect(syncedClaudeDesktop.mcpServers["vercel (mcpx)"]?.url).toContain("upstream=vercel");
-    expect(typeof syncedClaudeDesktop.mcpServers["vercel (mcpx)"].headers?.["Authorization"]).toBe("string");
+    expect(syncedClaudeDesktop.mcpServers["vercel (mcpx)"]?.command).toBeDefined();
+    expect(syncedClaudeDesktop.mcpServers["vercel (mcpx)"]?.args).toContain("proxy");
+    expect(syncedClaudeDesktop.mcpServers["vercel (mcpx)"]?.args).toContain("vercel");
     expect(syncedClaudeDesktop.mcpServers.existing_mcp).toBeUndefined();
-    expect(syncedClaudeDesktop.mcpServers["existing_mcp (mcpx)"]?.type).toBe("http");
+    expect(syncedClaudeDesktop.mcpServers["existing_mcp (mcpx)"]?.command).toBeDefined();
+    expect(syncedClaudeDesktop.mcpServers["existing_mcp (mcpx)"]?.args).toContain("proxy");
+    expect(syncedClaudeDesktop.mcpServers["existing_mcp (mcpx)"]?.args).toContain("existing_mcp");
     expect(config.servers.existing_mcp).toEqual({
       transport: "stdio",
       command: "npx",
@@ -824,11 +825,14 @@ describe("sync engine", () => {
     expect(summary.hasErrors).toBe(false);
 
     const synced = JSON.parse(fs.readFileSync(claudeDesktopPath, "utf8")) as {
-      mcpServers: Record<string, { type?: string; disabled?: boolean }>;
+      mcpServers: Record<string, { command?: string; args?: string[] }>;
     };
 
-    expect(synced.mcpServers["context7 (mcpx)"]?.type).toBe("http");
-    expect(synced.mcpServers["context7 (mcpx)"]?.disabled).toBeUndefined();
+    expect(synced.mcpServers["context7 (mcpx)"]?.command).toBeDefined();
+    expect(synced.mcpServers["context7 (mcpx)"]?.args).toContain("proxy");
+    expect(synced.mcpServers["context7 (mcpx)"]?.args).toContain("context7");
+    expect(synced.mcpServers["next-devtools (mcpx)"]).toBeUndefined();
+
     expect(synced.mcpServers["vercel (mcpx)"]).toBeUndefined();
     expect(synced.mcpServers["existing_unmanaged (mcpx)"]).toBeDefined();
   });

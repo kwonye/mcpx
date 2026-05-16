@@ -5,12 +5,21 @@ import { loadConfig } from "./config.js";
 import { SecretsManager } from "./secrets.js";
 import { ensureGatewayToken } from "./registry.js";
 import { getGatewayUrl } from "./sync.js";
+import { getDaemonStatus, startDaemon } from "./daemon.js";
 
 export async function runStdioProxy(serverName: string): Promise<void> {
   const config = loadConfig();
   const secrets = new SecretsManager();
   const localToken = ensureGatewayToken(config, secrets);
   const gatewayUrl = getGatewayUrl(config);
+
+  if (process.env.MCPX_SKIP_DAEMON_AUTOSTART !== "1") {
+    const status = getDaemonStatus(config);
+    if (!status.running) {
+      const cliPath = process.argv[1] ?? "";
+      await startDaemon(config, cliPath, secrets);
+    }
+  }
 
   const upstreamUrl = new URL(`${gatewayUrl}?upstream=${encodeURIComponent(serverName)}`);
 

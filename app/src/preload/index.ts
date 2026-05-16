@@ -21,6 +21,12 @@ const api = {
   registryPrepareAdd: (registryName: string) => ipcRenderer.invoke(IPC.REGISTRY_PREPARE_ADD, registryName),
   registryConfirmAdd: (resolvedValues: Record<string, string>) => ipcRenderer.invoke(IPC.REGISTRY_CONFIRM_ADD, resolvedValues),
   openDashboard: () => ipcRenderer.invoke(IPC.OPEN_DASHBOARD),
+  skills: {
+    list: () => ipcRenderer.invoke(IPC.LIST_SKILLS),
+    get: (id: string) => ipcRenderer.invoke(IPC.GET_SKILL, id),
+    save: (id: string, content: string) => ipcRenderer.invoke(IPC.SAVE_SKILL, id, content),
+    delete: (id: string) => ipcRenderer.invoke(IPC.DELETE_SKILL, id)
+  },
   invoke: (channel: string, ...args: unknown[]) => ipcRenderer.invoke(channel, ...args)
 };
 

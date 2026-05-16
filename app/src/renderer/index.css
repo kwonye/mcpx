@@ -1551,3 +1551,117 @@ select {
         align-items: stretch;
     }
 }
+
+/* Skills Tab & Editor */
+.skills-tab {
+    display: flex;
+    flex-direction: column;
+    gap: var(--section-gap);
+}
+
+.create-skill-panel {
+    padding: var(--panel-padding);
+    border-radius: var(--radius-md);
+}
+
+.create-skill-form {
+    display: flex;
+    gap: 12px;
+}
+
+.create-skill-form .cli-input {
+    flex: 1;
+}
+
+.skill-editor {
+    display: flex;
+    flex-direction: column;
+    gap: var(--section-gap);
+    height: 100%;
+}
+
+.skill-editor-content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    padding: 0;
+    overflow: hidden;
+    min-height: 400px;
+    border-radius: var(--radius-md);
+}
+
+.skill-textarea {
+    flex: 1;
+    width: 100%;
+    border: none;
+    background: transparent;
+    padding: 24px;
+    font-family: ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
+    font-size: 1rem;
+    line-height: 1.6;
+    color: var(--text-main);
+    resize: none;
+}
+
+.skill-textarea:focus {
+    outline: none;
+}
+
+.page-header-left {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+.back-button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.58);
+    border: 1px solid rgba(17, 24, 39, 0.08);
+    color: var(--text-main);
+}
+
+.back-button:hover {
+    background: rgba(255, 255, 255, 0.88);
+}
+
+.action-button {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 16px;
+    height: 40px;
+    border-radius: 10px;
+    font-weight: 600;
+    font-size: 0.94rem;
+    background: rgba(255, 255, 255, 0.6);
+    border: 1px solid rgba(17, 24, 39, 0.08);
+}
+
+.action-button--primary {
+    background: var(--primary);
+    color: #fff;
+    border: none;
+    box-shadow: var(--shadow-glow);
+}
+
+.action-button--primary:hover {
+    background: var(--primary-hover);
+}
+
+.delete-button {
+    color: var(--text-subtle);
+}
+
+.delete-button:hover {
+    color: var(--error);
+}
+
+.server-icon {
+    font-size: 24px;
+    color: var(--primary);
+}

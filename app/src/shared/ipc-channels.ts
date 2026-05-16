@@ -17,5 +17,11 @@ export const IPC = {
   REGISTRY_PREPARE_ADD: "mcpx:registry-prepare-add",
   REGISTRY_CONFIRM_ADD: "mcpx:registry-confirm-add",
   OPEN_DASHBOARD: "mcpx:open-dashboard",
-  EXECUTE_CLI_COMMAND: "mcpx:execute-cli-command"
+  EXECUTE_CLI_COMMAND: "mcpx:execute-cli-command",
+
+  // Skills
+  LIST_SKILLS: "mcpx:list-skills",
+  GET_SKILL: "mcpx:get-skill",
+  SAVE_SKILL: "mcpx:save-skill",
+  DELETE_SKILL: "mcpx:delete-skill"
 } as const;

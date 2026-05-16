@@ -121,12 +121,18 @@ export interface SyncResult {
   message?: string;
 }
 
+export interface Skill {
+  id: string; // The filename without .md
+  content: string;
+}
+
 export interface ClientAdapter {
   id: ClientId;
   detectConfigPath(): string | null;
   supportsHttp(): boolean;
   scanForImports(config: McpxConfig, managedIndex: ManagedIndex): ClientImportScanResult;
   syncGateway(config: McpxConfig, options: SyncClientOptions): SyncResult;
+  syncSkills?(skills: Skill[]): void;
 }
 
 export interface SyncClientOptions {

@@ -14,6 +14,10 @@ import {
   setServerEnabled,
   updateServer,
   listAuthBindings,
+  listSkills,
+  getSkill,
+  saveSkill,
+  deleteSkill,
   SecretsManager,
   buildStatusReport,
   loadManagedIndex
@@ -443,5 +447,24 @@ export function registerIpcHandlers(): void {
     } catch (error) {
       throw new Error(`Failed to parse command: ${error instanceof Error ? error.message : String(error)}`);
     }
+  });
+
+  // Skills
+  ipcMain.handle(IPC.LIST_SKILLS, () => {
+    return listSkills();
+  });
+
+  ipcMain.handle(IPC.GET_SKILL, (_event, id: string) => {
+    return getSkill(id);
+  });
+
+  ipcMain.handle(IPC.SAVE_SKILL, (_event, id: string, content: string) => {
+    saveSkill(id, content);
+    return { id, success: true };
+  });
+
+  ipcMain.handle(IPC.DELETE_SKILL, (_event, id: string) => {
+    deleteSkill(id);
+    return { id, success: true };
   });
 }

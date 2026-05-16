@@ -19,6 +19,9 @@ export type { SyncSummary } from "./sync.js";
 // Registry (server add/remove)
 export { addServer, removeServer, updateServer, setServerEnabled } from "./registry.js";
 
+// Skills
+export { listSkills, getSkill, saveSkill, deleteSkill } from "./skills.js";
+
 // Secrets
 export { SecretsManager } from "./secrets.js";
 

@@ -4,13 +4,14 @@ import { useStatus } from "../hooks/useMcpx";
 import { ServerCard } from "./ServerCard";
 import { ServerDetail } from "./ServerDetail";
 import { BrowseTab } from "./BrowseTab";
+import { SkillsTab } from "./SkillsTab";
 import { DaemonControls } from "./DaemonControls";
 import { SettingsPanel } from "./SettingsPanel";
 import { CliCommandInput } from "./CliCommandInput";
 import type { BrowseState } from "../../shared/desktop-settings";
 import { DESKTOP_MANAGER_NAME, DESKTOP_PRODUCT_NAME } from "../../shared/build-constants";
 
-type Tab = "servers" | "browse" | "settings";
+type Tab = "servers" | "browse" | "skills" | "settings";
 
 export function Dashboard() {
   const { status, loading, refresh } = useStatus();
@@ -107,6 +108,14 @@ export function Dashboard() {
             <span className="material-symbols-outlined">explore</span>
             <span className="nav-button__label">Browse Registry</span>
           </button>
+          <button
+            className="nav-button"
+            data-active={tab === "skills"}
+            onClick={() => handleTabChange("skills")}
+          >
+            <span className="material-symbols-outlined">psychology</span>
+            <span className="nav-button__label">Skills</span>
+          </button>
           <div className="nav-spacer" />
           <button
             className="nav-button"
@@ -170,10 +179,15 @@ export function Dashboard() {
                     }}
                     onStateChange={handleBrowseStateChange}
                   />
-                </>
-              )}
+                />
+                )}
 
-              {tab === "settings" && (
+                {tab === "skills" && (
+                <SkillsTab />
+                )}
+
+                {tab === "settings" && (
+
                 <>
                   <div className="page-header">
                     <h1 className="page-title">Settings</h1>

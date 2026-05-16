@@ -13,6 +13,7 @@ import { getManagedIndexPath } from "./paths.js";
 import { ensureGatewayToken } from "./registry.js";
 import { saveConfig } from "./config.js";
 import { SecretsManager } from "./secrets.js";
+import { listSkills } from "./skills.js";
 
 export interface SyncSummary {
   gatewayUrl: string;
@@ -109,10 +110,19 @@ export function syncAllClients(config: McpxConfig, secrets: SecretsManager, targ
   const localToken = ensureGatewayToken(config, secrets);
   const gatewayUrl = getGatewayUrl(config);
   const managedEntries = buildManagedEntries(config, gatewayUrl, localToken);
+  const skills = listSkills();
 
   const results: SyncResult[] = [];
 
   for (const adapter of filteredAdapters) {
+    if (adapter.syncSkills) {
+      try {
+        adapter.syncSkills(skills);
+      } catch (error) {
+        // Log or handle skill sync error if needed, for now we continue
+      }
+    }
+
     if (!adapter.supportsHttp()) {
       results.push({
         clientId: adapter.id,

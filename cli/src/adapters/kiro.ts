@@ -1,8 +1,9 @@
 import os from "node:os";
+import fs from "node:fs";
 import { homeDir } from "../core/paths.js";
 import path from "node:path";
 import { z } from "zod";
-import type { ClientAdapter, ManagedIndex, McpxConfig, SyncClientOptions, SyncResult } from "../types.js";
+import type { ClientAdapter, ManagedIndex, McpxConfig, Skill, SyncClientOptions, SyncResult } from "../types.js";
 import { readJsonFile, writeJsonAtomic } from "../util/fs.js";
 import {
   buildImportSkip,
@@ -159,6 +160,32 @@ export class KiroAdapter implements ClientAdapter {
       return okResult(this.id, configPath);
     } catch (error) {
       return errorResult(this.id, configPath, (error as Error).message);
+    }
+  }
+
+  syncSkills(skills: Skill[]): void {
+    const skillsDir = path.join(homeDir(), ".kiro", "skills");
+    if (!fs.existsSync(skillsDir)) {
+      fs.mkdirSync(skillsDir, { recursive: true });
+    }
+
+    // List existing skills in target to prune ones we no longer manage
+    const existingFiles = fs.readdirSync(skillsDir);
+    const managedIds = new Set(skills.map(s => s.id));
+    
+    for (const file of existingFiles) {
+      if (file.endsWith(".md")) {
+        const id = path.basename(file, ".md");
+        if (!managedIds.has(id)) {
+          fs.unlinkSync(path.join(skillsDir, file));
+        }
+      }
+    }
+
+    // Write/update skills
+    for (const skill of skills) {
+      const targetPath = path.join(skillsDir, `${skill.id}.md`);
+      fs.writeFileSync(targetPath, skill.content, "utf-8");
     }
   }
 }

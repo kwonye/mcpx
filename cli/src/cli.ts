@@ -10,6 +10,7 @@ import { emitKeypressEvents } from "node:readline";
 import { createInterface, type Interface as ReadlineInterface } from "node:readline/promises";
 import { loadConfig, saveConfig } from "./core/config.js";
 import { addServer, removeServer, setServerEnabled } from "./core/registry.js";
+import { listSkills, getSkill, saveSkill, deleteSkill } from "./core/skills.js";
 import { SecretsManager, readSecretValueFromStdin } from "./core/secrets.js";
 import { probeHttpAuthRequirement } from "./core/auth-probe.js";
 import { syncAllClients } from "./core/sync.js";
@@ -262,9 +263,9 @@ async function ensureDaemonIfEnabled(cliPath: string, secrets: SecretsManager): 
   await startDaemon(config, cliPath, secrets);
 }
 
-async function autoSyncManagedEntries(config: McpxConfig): Promise<void> {
+async function autoSyncManagedEntries(config: McpxConfig, cliPath: string): Promise<void> {
   const secrets = new SecretsManager();
-  await ensureDaemonIfEnabled(process.argv[1] ?? "", secrets);
+  await ensureDaemonIfEnabled(cliPath, secrets);
   const summary = syncAllClients(config, secrets);
   printSyncSummary(summary, false);
   ensureExitCodeForSyncFailures(summary.hasErrors);
@@ -778,10 +779,10 @@ async function clearServerAuthInteractively(rl: ReadlineInterface, serverName: s
   saveConfig(config);
 }
 
-async function reconnectGatewayAndSync(): Promise<void> {
+async function reconnectGatewayAndSync(cliPath: string): Promise<void> {
   const config = loadConfig();
   const secrets = new SecretsManager();
-  const restart = await restartDaemon(config, process.argv[1] ?? "", secrets);
+  const restart = await restartDaemon(config, cliPath, secrets);
   process.stdout.write(`${restart.message} pid=${restart.pid} port=${restart.port}\n`);
   const summary = syncAllClients(config, secrets);
   printSyncSummary(summary, false);
@@ -790,7 +791,8 @@ async function reconnectGatewayAndSync(): Promise<void> {
 async function setServerEnabledInteractively(
   rl: ReadlineInterface,
   serverName: string,
-  enabled: boolean
+  enabled: boolean,
+  cliPath: string
 ): Promise<boolean> {
   const action = enabled ? "enable" : "disable";
   const confirmation = await promptLine(rl, `Type "${serverName}" to ${action} this MCP (blank to cancel): `);
@@ -804,7 +806,7 @@ async function setServerEnabledInteractively(
   saveConfig(config);
   process.stdout.write(`${enabled ? "Enabled" : "Disabled"} server: ${serverName}\n`);
   process.stdout.write("Auto-syncing managed gateway entries across all supported clients...\n");
-  await autoSyncManagedEntries(config);
+  await autoSyncManagedEntries(config, cliPath);
   return true;
 }
 
@@ -849,7 +851,7 @@ function buildServerMenuDetail(server: StatusServerEntry): string {
   return `${authSummary}${syncSummary}${errorSummary}`;
 }
 
-async function runServerActionsMenu(rl: ReadlineInterface, serverName: string): Promise<void> {
+async function runServerActionsMenu(rl: ReadlineInterface, serverName: string, cliPath: string): Promise<void> {
   while (true) {
     const report = loadStatusReport();
     const server = report.servers.find((entry) => entry.name === serverName);
@@ -884,12 +886,12 @@ async function runServerActionsMenu(rl: ReadlineInterface, serverName: string): 
       } else if (action === 2) {
         await clearServerAuthInteractively(rl, serverName);
       } else if (action === 3) {
-        const updated = await setServerEnabledInteractively(rl, serverName, !server.enabled);
+        const updated = await setServerEnabledInteractively(rl, serverName, !server.enabled, cliPath);
         if (updated) {
           return;
         }
       } else if (action === 4) {
-        await reconnectGatewayAndSync();
+        await reconnectGatewayAndSync(cliPath);
       }
     } catch (error) {
       process.stdout.write(`${(error as Error).message}\n`);
@@ -899,7 +901,7 @@ async function runServerActionsMenu(rl: ReadlineInterface, serverName: string): 
   }
 }
 
-async function runInteractiveStatusMenu(): Promise<void> {
+async function runInteractiveStatusMenu(cliPath: string): Promise<void> {
   const rl = createInterface({
     input: process.stdin,
     output: process.stdout
@@ -942,14 +944,14 @@ async function runInteractiveStatusMenu(): Promise<void> {
         continue;
       }
 
-      await runServerActionsMenu(rl, server.name);
+      await runServerActionsMenu(rl, server.name, cliPath);
     }
   } finally {
     rl.close();
   }
 }
 
-function registerEnabledCommand(parent: Command, enabled: boolean): void {
+function registerEnabledCommand(parent: Command, enabled: boolean, cliPath: string): void {
   parent
     .command(enabled ? "enable <name>" : "disable <name>")
     .description(`${enabled ? "Enable" : "Disable"} an upstream MCP server`)
@@ -960,11 +962,11 @@ function registerEnabledCommand(parent: Command, enabled: boolean): void {
 
       process.stdout.write(`${enabled ? "Enabled" : "Disabled"} server: ${name}\n`);
       process.stdout.write("Auto-syncing managed gateway entries across all supported clients...\n");
-      await autoSyncManagedEntries(config);
+      await autoSyncManagedEntries(config, cliPath);
     });
 }
 
-function registerAddCommand(parent: Command): void {
+function registerAddCommand(parent: Command, cliPath: string): void {
   parent
     .command("add [values...]")
     .allowUnknownOption(true)
@@ -984,11 +986,11 @@ function registerAddCommand(parent: Command): void {
 
       process.stdout.write(`Added server: ${parsed.name} (${parsed.spec.transport})\n`);
       process.stdout.write("Auto-syncing managed gateway entries across all supported clients...\n");
-      await autoSyncManagedEntries(config);
+      await autoSyncManagedEntries(config, cliPath);
     });
 }
 
-function registerRemoveCommand(parent: Command): void {
+function registerRemoveCommand(parent: Command, cliPath: string): void {
   parent
     .command("remove <name>")
     .option("--force", "Do not error if server does not exist")
@@ -1000,7 +1002,7 @@ function registerRemoveCommand(parent: Command): void {
 
       process.stdout.write(`Removed server: ${name}\n`);
       process.stdout.write("Auto-syncing managed gateway entries across all supported clients...\n");
-      await autoSyncManagedEntries(config);
+      await autoSyncManagedEntries(config, cliPath);
     });
 }
 
@@ -1035,7 +1037,7 @@ function registerListCommand(parent: Command): void {
     });
 }
 
-function registerSyncCommand(program: Command): void {
+function registerSyncCommand(program: Command, cliPath: string): void {
   program
     .command("sync [clients...]")
     .option("--client <id>", "Limit sync to specific client(s), comma-separated or repeated", (value, prev: string[] = []) => [...prev, value], [])
@@ -1045,14 +1047,14 @@ function registerSyncCommand(program: Command): void {
       const config = loadConfig();
       const targetClients = parseClientList([...(clients ?? []), ...(options.client ?? [])]);
       const secrets = new SecretsManager();
-      await ensureDaemonIfEnabled(process.argv[1] ?? "", secrets);
+      await ensureDaemonIfEnabled(cliPath, secrets);
       const summary = syncAllClients(config, secrets, targetClients);
       printSyncSummary(summary, options.json ?? false);
       ensureExitCodeForSyncFailures(summary.hasErrors);
     });
 }
 
-function registerStatusCommand(program: Command): void {
+function registerStatusCommand(program: Command, cliPath: string): void {
   program
     .command("status")
     .option("--no-interactive", "Disable interactive status menu")
@@ -1068,7 +1070,7 @@ function registerStatusCommand(program: Command): void {
 
       const interactive = (options.interactive ?? true) && process.stdin.isTTY && process.stdout.isTTY;
       if (interactive) {
-        await runInteractiveStatusMenu();
+        await runInteractiveStatusMenu(cliPath);
         return;
       }
 
@@ -1371,6 +1373,45 @@ function registerAuthCommands(program: Command): void {
     });
 }
 
+function registerSkillsCommands(program: Command): void {
+  const skill = program.command("skill").description("Manage shared agent skills");
+
+  skill
+    .command("ls")
+    .description("List all skills")
+    .action(() => {
+      const skills = listSkills();
+      if (skills.length === 0) {
+        process.stdout.write("No skills found.\n");
+        return;
+      }
+      for (const s of skills) {
+        process.stdout.write(`- ${s.id}\n`);
+      }
+    });
+
+  skill
+    .command("add <id>")
+    .description("Add a new skill")
+    .action(async (id: string) => {
+      const existing = getSkill(id);
+      if (existing) {
+        process.stderr.write(`Skill "${id}" already exists.\n`);
+        process.exit(1);
+      }
+      saveSkill(id, `# ${id}\n\nAdd your instructions here.`);
+      process.stdout.write(`Skill "${id}" created.\n`);
+    });
+
+  skill
+    .command("rm <id>")
+    .description("Remove a skill")
+    .action((id: string) => {
+      deleteSkill(id);
+      process.stdout.write(`Skill "${id}" removed.\n`);
+    });
+}
+
 function registerClientsCommands(program: Command): void {
   const clients = program.command("clients").description("Client adapter utilities");
 
@@ -1471,12 +1512,12 @@ function registerProxyCommand(program: Command): void {
     });
 }
 
-function registerMcpCompat(program: Command): void {
+function registerMcpCompat(program: Command, cliPath: string): void {
   const mcp = program.command("mcp").description("Compatibility namespace for MCP commands");
-  registerAddCommand(mcp);
-  registerRemoveCommand(mcp);
-  registerEnabledCommand(mcp, true);
-  registerEnabledCommand(mcp, false);
+  registerAddCommand(mcp, cliPath);
+  registerRemoveCommand(mcp, cliPath);
+  registerEnabledCommand(mcp, true, cliPath);
+  registerEnabledCommand(mcp, false, cliPath);
   registerListCommand(mcp);
 }
 
@@ -1523,23 +1564,26 @@ export async function runCli(argv = process.argv): Promise<void> {
     }
   }
 
+  const cliPath = argv[1] ?? "";
+
   const program = new Command();
   program.name("mcpx").description("HTTP-first MCP gateway and multi-client installer").version(APP_VERSION);
 
-  registerAddCommand(program);
-  registerRemoveCommand(program);
-  registerEnabledCommand(program, true);
-  registerEnabledCommand(program, false);
+  registerAddCommand(program, cliPath);
+  registerRemoveCommand(program, cliPath);
+  registerEnabledCommand(program, true, cliPath);
+  registerEnabledCommand(program, false, cliPath);
   registerListCommand(program);
-  registerSyncCommand(program);
-  registerStatusCommand(program);
+  registerSyncCommand(program, cliPath);
+  registerStatusCommand(program, cliPath);
   registerDoctorCommand(program);
   registerDaemonCommands(program);
   registerSecretsCommands(program);
   registerAuthCommands(program);
   registerClientsCommands(program);
+  registerSkillsCommands(program);
   registerProxyCommand(program);
-  registerMcpCompat(program);
+  registerMcpCompat(program, cliPath);
   registerUpdateCommand(program);
 
   await program.parseAsync(argv);
