@@ -16,22 +16,23 @@ import {
   listAuthBindings,
   SecretsManager,
   buildStatusReport,
-  loadManagedIndex
+  loadManagedIndex,
+  probeHttpAuthRequirement
 } from "@mcpx/core";
-import type { UpstreamServerSpec } from "@mcpx/core";
+import type { StdioServerSpec, UpstreamServerSpec } from "@mcpx/core";
 import { IPC } from "../shared/ipc-channels";
 import type { DesktopSettingsPatch } from "../shared/desktop-settings";
 import { openDashboard } from "./dashboard";
 import { fetchRegistryServers, fetchServerDetail } from "./registry-client";
 import { selectBestPackage, extractRequiredInputs, mapServerToSpec } from "./server-mapper";
-import type { SelectedOption } from "./server-mapper";
+import type { RequiredInput, SelectedOption } from "./server-mapper";
 import { loadDesktopSettings, updateDesktopSettings } from "./settings-store";
 import { applyStartOnLoginSetting } from "./login-item";
 import { checkForUpdatesNow, setAutoUpdateEnabled } from "./update-manager";
 import { updateTrayForDaemonStatus } from "./tray";
 
-// Cache the selected option between prepare and confirm calls
-let pendingAdd: { name: string; option: SelectedOption } | null = null;
+// Cache the selected option and required inputs between prepare and confirm calls
+let pendingAdd: { name: string; option: SelectedOption; requiredInputs: RequiredInput[] } | null = null;
 
 function getCliDaemonPath(): string {
   const resourcesPath = process.resourcesPath ?? app.getAppPath();
@@ -326,13 +327,24 @@ export function registerIpcHandlers(): void {
     return checkForUpdatesNow();
   });
 
-  ipcMain.handle(IPC.ADD_SERVER, (_event, name: string, spec: UpstreamServerSpec) => {
+  ipcMain.handle(IPC.ADD_SERVER, async (_event, name: string, spec: UpstreamServerSpec) => {
     const config = loadConfig();
     addServer(config, name, spec, true);
     saveConfig(config);
     const secrets = new SecretsManager();
     const summary = syncAllClients(config, secrets);
-    return { added: name, sync: summary };
+
+    const result: { added: string; sync: typeof summary; authRequired?: boolean; authStatus?: number } = { added: name, sync: summary };
+
+    if (spec.transport === "http") {
+      const probe = await probeHttpAuthRequirement(spec, secrets);
+      if (probe.authRequired) {
+        result.authRequired = true;
+        result.authStatus = probe.status;
+      }
+    }
+
+    return result;
   });
 
   ipcMain.handle(IPC.REMOVE_SERVER, (_event, name: string) => {
@@ -363,6 +375,32 @@ export function registerIpcHandlers(): void {
         if (value) {
           secrets.setSecret(key, value);
         }
+      }
+    }
+
+    // Auto-migrate plain-text values that look like secrets but weren't marked
+    const secretKeyPattern = /^(api.?key|token|secret|password|auth.?token|access.?key|service.?role.?key)/i;
+    const entries = spec.transport === "http"
+      ? Object.entries(spec.headers ?? {}).map(([k, v]) => ["header" as const, k, v] as const)
+      : Object.entries((spec as StdioServerSpec).env ?? {}).map(([k, v]) => ["env" as const, k, v] as const);
+
+    for (const [kind, key, value] of entries) {
+      if (!value || value.startsWith("secret://")) continue;
+      if (!secretKeyPattern.test(key.replace(/[_-]/g, "."))) continue;
+
+      const secretName = `auth_${name.toLowerCase().replace(/[^a-z0-9._-]/g, "_")}_${kind}_${key.toLowerCase().replace(/[^a-z0-9._-]/g, "_")}`;
+      if (!secrets.getSecret(secretName)) {
+        secrets.setSecret(secretName, value);
+      }
+
+      if (kind === "header") {
+        const headers = { ...(spec.headers ?? {}) };
+        headers[key] = `secret://${secretName}`;
+        spec.headers = Object.keys(headers).length > 0 ? headers : undefined;
+      } else {
+        const env = { ...((spec as StdioServerSpec).env ?? {}) };
+        env[key] = `secret://${secretName}`;
+        (spec as StdioServerSpec).env = Object.keys(env).length > 0 ? env : undefined;
       }
     }
     
@@ -414,24 +452,56 @@ export function registerIpcHandlers(): void {
     const requiredInputs = extractRequiredInputs(option);
     // Derive a short local name from the registry name
     const shortName = registryName.split("/").pop() ?? registryName;
-    pendingAdd = { name: shortName, option };
+    pendingAdd = { name: shortName, option, requiredInputs };
     return { shortName, requiredInputs, option };
   });
 
-  ipcMain.handle(IPC.REGISTRY_CONFIRM_ADD, (_event, resolvedValues: Record<string, string>) => {
+  ipcMain.handle(IPC.REGISTRY_CONFIRM_ADD, async (_event, resolvedValues: Record<string, string>) => {
     if (!pendingAdd) throw new Error("No pending add operation");
-    const { name, option } = pendingAdd;
+    const { name, option, requiredInputs } = pendingAdd;
     pendingAdd = null;
     const spec = mapServerToSpec(name, option, resolvedValues);
     const config = loadConfig();
+    const secrets = new SecretsManager();
+
+    // Store secret values in the keychain and replace plain values with secret:// refs
+    for (const input of requiredInputs) {
+      if (!input.isSecret) continue;
+      const rawValue = resolvedValues[input.name];
+      if (!rawValue) continue;
+
+      const secretName = `auth_${name.toLowerCase().replace(/[^a-z0-9._-]/g, "_")}_${input.kind}_${input.name.toLowerCase().replace(/[^a-z0-9._-]/g, "_")}`;
+      secrets.setSecret(secretName, rawValue);
+
+      if (input.kind === "header" && spec.transport === "http") {
+        const headers = { ...(spec.headers ?? {}) };
+        headers[input.name] = `secret://${secretName}`;
+        spec.headers = Object.keys(headers).length > 0 ? headers : undefined;
+      } else if (input.kind === "env" && spec.transport === "stdio") {
+        const env = { ...(spec.env ?? {}) };
+        env[input.name] = `secret://${secretName}`;
+        spec.env = Object.keys(env).length > 0 ? env : undefined;
+      }
+    }
+
     addServer(config, name, spec, true);
     saveConfig(config);
-    const secrets = new SecretsManager();
     const summary = syncAllClients(config, secrets);
-    return { added: name, sync: summary };
+
+    const result: { added: string; sync: typeof summary; authRequired?: boolean; authStatus?: number } = { added: name, sync: summary };
+
+    if (spec.transport === "http") {
+      const probe = await probeHttpAuthRequirement(spec, secrets);
+      if (probe.authRequired) {
+        result.authRequired = true;
+        result.authStatus = probe.status;
+      }
+    }
+
+    return result;
   });
 
-  ipcMain.handle(IPC.EXECUTE_CLI_COMMAND, (_event, command: string) => {
+  ipcMain.handle(IPC.EXECUTE_CLI_COMMAND, async (_event, command: string) => {
     try {
       const { name, spec } = parseCliAddCommand(command);
       const config = loadConfig();
@@ -439,7 +509,18 @@ export function registerIpcHandlers(): void {
       saveConfig(config);
       const secrets = new SecretsManager();
       const summary = syncAllClients(config, secrets);
-      return { added: name, sync: summary };
+
+      const result: { added: string; sync: typeof summary; authRequired?: boolean; authStatus?: number } = { added: name, sync: summary };
+
+      if (spec.transport === "http") {
+        const probe = await probeHttpAuthRequirement(spec, secrets);
+        if (probe.authRequired) {
+          result.authRequired = true;
+          result.authStatus = probe.status;
+        }
+      }
+
+      return result;
     } catch (error) {
       throw new Error(`Failed to parse command: ${error instanceof Error ? error.message : String(error)}`);
     }
