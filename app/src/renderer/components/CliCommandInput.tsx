@@ -25,8 +25,11 @@ const [success, setSuccess] = useState<string | null>(null);
     setSuccess(null);
 
     try {
-      const result = await window.mcpx.invoke(IPC.EXECUTE_CLI_COMMAND, command);
-      setSuccess(`Successfully added "${result.added}"`);
+      const result: { added: string; authRequired?: boolean; authStatus?: number } = await window.mcpx.invoke(IPC.EXECUTE_CLI_COMMAND, command);
+      const msg = result.authRequired
+        ? `Successfully added "${result.added}" — but the server responded with ${result.authStatus ?? 401} and may require auth. Edit the server to configure it.`
+        : `Successfully added "${result.added}"`;
+      setSuccess(msg);
       setCommand("");
       onServerAdded();
     } catch (err) {

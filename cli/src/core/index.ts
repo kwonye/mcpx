@@ -56,6 +56,15 @@ export { checkForUpdates, getStagedUpdate, getStagedCliPath, clearStagedUpdate, 
 export type { UpdateStatus, StagedUpdateInfo } from "./update.js";
 export { startBackgroundUpdateCheck, performUpdate, performRollback } from "./update-manager.js";
 
+// Registry Client
+export {
+  fetchRegistryServerDetail,
+  selectBestPackage,
+  extractRequiredInputs,
+  mapRegistryToSpec
+} from "./registry-client.js";
+export type { RequiredInput } from "./registry-client.js";
+
 // Types (re-export from parent)
 export type {
   McpxConfig,

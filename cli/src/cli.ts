@@ -14,6 +14,8 @@ import { addServer, removeServer, setServerEnabled, registerProject, unregisterP
 import { listSkills, getSkill, saveSkill, deleteSkill } from "./core/skills.js";
 import { SecretsManager, readSecretValueFromStdin } from "./core/secrets.js";
 import { probeHttpAuthRequirement } from "./core/auth-probe.js";
+import { fetchRegistryServerDetail, selectBestPackage, extractRequiredInputs, mapRegistryToSpec } from "./core/registry-client.js";
+import type { RequiredInput } from "./core/registry-client.js";
 import { syncAllClients } from "./core/sync.js";
 import { isServerEnabled, type ClientId, type ClientStatus, type HttpServerSpec, type McpxConfig, type StdioServerSpec, type UpstreamServerSpec } from "./types.js";
 import { parseCompatibilityArgs } from "./compat/index.js";
@@ -285,10 +287,18 @@ async function maybeAutoConfigureAuthForAddedServer(
   spec: UpstreamServerSpec,
   secrets: SecretsManager
 ): Promise<void> {
-  if (spec.transport !== "http") {
-    return;
+  if (spec.transport === "http") {
+    await maybeConfigureHttpAuth(serverName, spec as HttpServerSpec, secrets);
+  } else {
+    await maybeConfigureStdioAuth(serverName, spec, secrets);
   }
+}
 
+async function maybeConfigureHttpAuth(
+  serverName: string,
+  spec: HttpServerSpec,
+  secrets: SecretsManager
+): Promise<void> {
   const probe = await probeHttpAuthRequirement(spec, secrets);
   if (!probe.authRequired) {
     return;
@@ -359,6 +369,51 @@ async function maybeAutoConfigureAuthForAddedServer(
     process.stdout.write(`Auth check after setup could not be completed: ${verify.error}\n`);
   } else {
     process.stdout.write("Auth check passed.\n");
+  }
+}
+
+async function maybeConfigureStdioAuth(
+  serverName: string,
+  spec: UpstreamServerSpec,
+  secrets: SecretsManager
+): Promise<void> {
+  const binds = listAuthBindings(spec);
+  const plainEnvVars = binds.filter((b) => b.kind === "env" && !secretRefName(b.value));
+
+  if (plainEnvVars.length === 0) {
+    return;
+  }
+
+  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+    process.stdout.write(`Server "${serverName}" has plain-text env vars. Run \`mcpx auth set ${serverName} --env KEY=VALUE --value "<token>"\` to store them securely.\n`);
+    return;
+  }
+
+  process.stdout.write(`Server "${serverName}" has ${plainEnvVars.length} env var(s) stored in plain text.\n`);
+
+  const rl = createInterface({
+    input: process.stdin,
+    output: process.stdout
+  });
+
+  try {
+    const shouldMigrate = await promptLine(rl, "Store them in the system keychain instead? (Y/n): ");
+    if (isNegativeChoice(shouldMigrate)) {
+      process.stdout.write("Skipping keychain migration.\n");
+      return;
+    }
+
+    for (const binding of plainEnvVars) {
+      const target = { kind: "env" as const, key: binding.key };
+      const secretName = defaultAuthSecretName(serverName, target);
+      secrets.setSecret(secretName, binding.value);
+      applyAuthReference(spec, target, toSecretRef(secretName));
+      process.stdout.write(`Stored ${binding.key} as secret://${secretName}\n`);
+    }
+  } catch (error) {
+    process.stdout.write(`Keychain migration skipped: ${(error as Error).message}\n`);
+  } finally {
+    rl.close();
   }
 }
 
@@ -1040,23 +1095,101 @@ function registerAddCommand(parent: Command, cliPath: string): void {
     .description("Add an upstream MCP server")
     .action(async (values: string[], options: AddCommandOptions) => {
       const context = resolveActiveConfig({ global: options.global, local: options.local });
-      const parsed = parseAddServerSpec(values ?? [], options);
+      const safeValues = values ?? [];
+      const secrets = new SecretsManager();
 
-      let resolvedServerName = parsed.name;
-      if (context.type === "project") {
-        const globalConfig = loadConfig();
-        registerProject(globalConfig, context.projectPath!, context.config.name);
-        saveConfig(globalConfig);
+      if (safeValues.length === 1 && safeValues[0]?.includes("/")) {
+        // Registry-aware add: "mcpx add @org/package"
+        const registryName = safeValues[0];
+        const shortName = registryName.split("/").pop() ?? registryName;
 
-        const projectName = context.config.name || path.basename(context.projectPath!);
-        resolvedServerName = `${projectName}.${parsed.name}`;
+        process.stdout.write(`Fetching "${registryName}" from registry...\n`);
+        const detail = await fetchRegistryServerDetail(registryName);
+        const option = selectBestPackage(detail.packages, detail.remotes);
+        const requiredInputs = extractRequiredInputs(option);
+
+        const resolvedValues: Record<string, string> = {};
+
+        if (requiredInputs.length > 0) {
+          if (!process.stdin.isTTY || !process.stdout.isTTY) {
+            throw new Error(`Server "${registryName}" requires inputs: ${requiredInputs.map((i) => `${i.name} (${i.kind})`).join(", ")}. Run in an interactive terminal.`);
+          }
+
+          const rl = createInterface({ input: process.stdin, output: process.stdout });
+          try {
+            for (const input of requiredInputs) {
+              const promptText = input.description
+                ? `${input.name} (${input.kind}): ${input.description}\nValue: `
+                : `${input.name} (${input.kind}): `;
+              const value = await promptLine(rl, promptText);
+              if (!value) {
+                process.stdout.write(`Skipping ${input.name} (empty value).\n`);
+                continue;
+              }
+              resolvedValues[input.name] = value;
+            }
+          } finally {
+            rl.close();
+          }
+        } else {
+          process.stdout.write("No required inputs.\n");
+        }
+
+        let spec = mapRegistryToSpec(shortName, option, resolvedValues) as UpstreamServerSpec;
+
+        // Store secret inputs in keychain
+        for (const input of requiredInputs) {
+          if (!input.isSecret) continue;
+          const rawValue = resolvedValues[input.name];
+          if (!rawValue) continue;
+
+          const secretName = `auth_${shortName.toLowerCase().replace(/[^a-z0-9._-]/g, "_")}_${input.kind}_${input.name.toLowerCase().replace(/[^a-z0-9._-]/g, "_")}`;
+          secrets.setSecret(secretName, rawValue);
+
+          if (input.kind === "header" && spec.transport === "http") {
+            const headers = { ...(spec.headers ?? {}) };
+            headers[input.name] = `secret://${secretName}`;
+            spec.headers = Object.keys(headers).length > 0 ? headers : undefined;
+          } else if (input.kind === "env" && spec.transport === "stdio") {
+            const env = { ...(spec.env ?? {}) };
+            env[input.name] = `secret://${secretName}`;
+            spec.env = Object.keys(env).length > 0 ? env : undefined;
+          }
+        }
+
+        let resolvedServerName = shortName;
+        if (context.type === "project") {
+          const globalConfig = loadConfig();
+          registerProject(globalConfig, context.projectPath!, context.config.name);
+          saveConfig(globalConfig);
+
+          const projectName = context.config.name || path.basename(context.projectPath!);
+          resolvedServerName = `${projectName}.${shortName}`;
+        }
+
+        addServer(context.config, shortName, spec, options.force ?? false);
+        context.save();
+        process.stdout.write(`Added server: ${shortName} (${spec.transport}) from registry "${registryName}" ${context.type === "project" ? `to project: ${context.projectPath}` : "globally"}\n`);
+      } else {
+        const parsed = parseAddServerSpec(safeValues, options);
+
+        let resolvedServerName = parsed.name;
+        if (context.type === "project") {
+          const globalConfig = loadConfig();
+          registerProject(globalConfig, context.projectPath!, context.config.name);
+          saveConfig(globalConfig);
+
+          const projectName = context.config.name || path.basename(context.projectPath!);
+          resolvedServerName = `${projectName}.${parsed.name}`;
+        }
+
+        addServer(context.config, parsed.name, parsed.spec, options.force ?? false);
+        await maybeAutoConfigureAuthForAddedServer(resolvedServerName, parsed.spec, secrets);
+        context.save();
+
+        process.stdout.write(`Added server: ${parsed.name} (${parsed.spec.transport}) ${context.type === "project" ? `to project: ${context.projectPath}` : "globally"}\n`);
       }
 
-      addServer(context.config, parsed.name, parsed.spec, options.force ?? false);
-      await maybeAutoConfigureAuthForAddedServer(resolvedServerName, parsed.spec, new SecretsManager());
-      context.save();
-
-      process.stdout.write(`Added server: ${parsed.name} (${parsed.spec.transport}) ${context.type === "project" ? `to project: ${context.projectPath}` : "globally"}\n`);
       process.stdout.write("Auto-syncing managed gateway entries across all supported clients...\n");
       const mergedConfig = loadMergedConfig();
       await autoSyncManagedEntries(mergedConfig, cliPath);

@@ -149,8 +149,12 @@ export function BrowseTab({ onServerAdded, status, initialState, onStateChange }
       setAddStatus("Preparing...");
       const result = await window.mcpx.registryPrepareAdd(registryName);
       if (result.requiredInputs.length === 0) {
-        const addResult = await window.mcpx.registryConfirmAdd({});
-        setAddStatus(`Added "${addResult.added}" successfully!`);
+        // No inputs needed — add directly
+        const addResult: { added: string; authRequired?: boolean; authStatus?: number } = await window.mcpx.registryConfirmAdd({});
+        const msg = addResult.authRequired
+          ? `Added "${addResult.added}" — but the server responded with ${addResult.authStatus ?? 401} and may require auth. Edit the server to configure it.`
+          : `Added "${addResult.added}" successfully!`;
+        setAddStatus(msg);
         onServerAdded();
       } else {
         setAdding({
@@ -183,8 +187,11 @@ export function BrowseTab({ onServerAdded, status, initialState, onStateChange }
     try {
       setIsError(false);
       setAddStatus("Adding...");
-      const result = await window.mcpx.registryConfirmAdd(values);
-      setAddStatus(`Added "${result.added}" successfully!`);
+      const result: { added: string; authRequired?: boolean; authStatus?: number } = await window.mcpx.registryConfirmAdd(values);
+      const msg = result.authRequired
+        ? `Added "${result.added}" — but the server responded with ${result.authStatus ?? 401} and may require auth. Edit the server to configure it.`
+        : `Added "${result.added}" successfully!`;
+      setAddStatus(msg);
       setAdding(null);
       onServerAdded();
     } catch (err) {
