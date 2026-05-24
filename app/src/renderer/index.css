@@ -1451,8 +1451,8 @@ select {
     flex-direction: column;
     width: 100%;
     height: 100%;
-    padding: 16px;
-    gap: 16px;
+    padding: 12px;
+    gap: 12px;
     border-radius: 0;
     border: none;
     box-shadow: none;
@@ -1462,8 +1462,8 @@ select {
 .popover-header {
     display: flex;
     align-items: center;
-    gap: 12px;
-    padding-bottom: 16px;
+    gap: 8px;
+    padding-bottom: 10px;
     border-bottom: 1px solid var(--border-color);
 }
 
@@ -1513,7 +1513,6 @@ select {
     display: flex;
     flex-direction: column;
     gap: 10px;
-    max-height: 132px;
     overflow-y: auto;
     padding: 12px;
     background-color: rgba(255, 255, 255, 0.32);
@@ -1589,40 +1588,91 @@ select {
     background-color: var(--primary-hover);
 }
 
-/* Popover CLI Command Panel adjustments */
-.popover .cli-command-panel {
-    padding: 12px;
-    border-radius: var(--radius-md);
+/* Compact CLI Input (used in popover) */
+.compact-cli-input {
+    flex-shrink: 0;
 }
 
-.popover .cli-command-form {
-    gap: 10px;
+.compact-cli-input__row {
+    display: flex;
+    gap: 6px;
+    align-items: center;
 }
 
-.popover .cli-command-supports,
-.popover .cli-command-example {
-    display: none; /* Hide detailed lists in popover to save space */
-}
-
-.popover .cli-command-input-wrap .cli-command-icon {
-    left: 10px;
-    font-size: 16px;
-}
-
-.popover .cli-command-input {
-    padding-left: 32px;
-    font-size: 0.8rem;
+.compact-cli-input__field {
+    flex: 1;
     height: 32px;
-}
-
-.popover .cli-command-row {
-    gap: 8px;
-}
-
-.popover .cli-command-row .btn {
     padding: 0 10px;
     font-size: 0.8rem;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: rgba(0, 0, 0, 0.15);
+    color: var(--text-main);
+    outline: none;
+    font-family: var(--font-mono);
+}
+
+.compact-cli-input__field:focus {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2);
+}
+
+.compact-cli-input__btn {
     height: 32px;
+    padding: 0 12px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--primary);
+    background: var(--primary);
+    color: white;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: all var(--transition-fast);
+    flex-shrink: 0;
+}
+
+.compact-cli-input__btn:disabled {
+    opacity: 0.4;
+    cursor: default;
+}
+
+.compact-cli-input__btn:not(:disabled):hover {
+    background: var(--primary-hover);
+}
+
+.compact-cli-input__feedback {
+    font-size: 0.7rem;
+    padding: 2px 0;
+}
+
+.compact-cli-input__feedback.error {
+    color: var(--error);
+}
+
+.compact-cli-input__feedback.success {
+    color: var(--success);
+}
+
+.popover-add-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-color);
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    padding: 0;
+}
+
+.popover-add-btn:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--text-main);
+    border-color: var(--primary);
 }
 
 @keyframes spin {

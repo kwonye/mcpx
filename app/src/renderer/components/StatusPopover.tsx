@@ -1,7 +1,8 @@
+import { useState } from "react";
 import { Toggle } from "./ui";
 import { useStatus } from "../hooks/useMcpx";
 import { useServerEnabled } from "../hooks/useServerEnabled";
-import { CliCommandInput } from "./CliCommandInput";
+import { CompactCliInput } from "./CompactCliInput";
 import { formatTokenApprox } from "../utils/tokenHelper";
 
 interface PopoverServerRowProps {
@@ -44,6 +45,7 @@ function PopoverServerRow({ server, onRefresh }: PopoverServerRowProps) {
 
 export function StatusPopover() {
   const { status, loading, refresh } = useStatus();
+  const [showAddServer, setShowAddServer] = useState(false);
 
   if (loading || !status) {
     return <div className="popover glass-panel">Loading...</div>;
@@ -116,19 +118,25 @@ export function StatusPopover() {
         </button>
       </header>
 
-      <main style={{ flex: 1, display: "flex", flexDirection: "column", gap: "16px", marginTop: "4px", overflow: "auto" }}>
-        <section style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-          <h2 style={{ fontSize: "11px", fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.05em", padding: "0 4px" }}>
-            Add Server
-          </h2>
-          <CliCommandInput onServerAdded={refresh} />
-        </section>
-
-        {report.servers.length > 0 && (
-          <section style={{ display: "flex", flexDirection: "column", gap: "8px", minHeight: 0 }}>
-            <h2 style={{ fontSize: "11px", fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.05em", padding: "0 4px" }}>
-              Servers
-            </h2>
+      <main style={{ flex: 1, display: "flex", flexDirection: "column", gap: "12px", overflow: "auto", minHeight: 0 }}>
+        {report.servers.length > 0 ? (
+          <section style={{ display: "flex", flexDirection: "column", gap: "8px", minHeight: 0, flex: 1 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 4px" }}>
+              <h2 style={{ fontSize: "11px", fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                Servers
+              </h2>
+              <button
+                type="button"
+                onClick={() => setShowAddServer(prev => !prev)}
+                className="popover-add-btn"
+                title="Add Server"
+              >
+                <span className="material-symbols-outlined" style={{ fontSize: "16px" }}>
+                  {showAddServer ? "close" : "add"}
+                </span>
+              </button>
+            </div>
+            {showAddServer && <CompactCliInput onServerAdded={refresh} />}
             <div className="popover-server-list glass-panel">
               {report.servers.map((server) => (
                 <PopoverServerRow
@@ -138,6 +146,13 @@ export function StatusPopover() {
                 />
               ))}
             </div>
+          </section>
+        ) : (
+          <section style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+            <h2 style={{ fontSize: "11px", fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.05em", padding: "0 4px" }}>
+              Add Your First Server
+            </h2>
+            <CompactCliInput onServerAdded={refresh} />
           </section>
         )}
       </main>
