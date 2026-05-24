@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { IPC } from "../../shared/ipc-channels";
+import { AuthModal } from "./AuthModal";
 
 interface CliCommandInputProps {
   onServerAdded: () => void;
@@ -7,9 +8,10 @@ interface CliCommandInputProps {
 
 export function CliCommandInput({ onServerAdded }: CliCommandInputProps) {
   const [command, setCommand] = useState("");
-const [loading, setLoading] = useState(false);
-const [error, setError] = useState<string | null>(null);
-const [success, setSuccess] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+  const [authServer, setAuthServer] = useState<string | null>(null);
   const supportedCommands = [
     "claude mcp add",
     "codex mcp add",
@@ -26,12 +28,12 @@ const [success, setSuccess] = useState<string | null>(null);
 
     try {
       const result: { added: string; authRequired?: boolean; authStatus?: number } = await window.mcpx.invoke(IPC.EXECUTE_CLI_COMMAND, command);
-      const msg = result.authRequired
-        ? `Successfully added "${result.added}" — but the server responded with ${result.authStatus ?? 401} and may require auth. Edit the server to configure it.`
-        : `Successfully added "${result.added}"`;
-      setSuccess(msg);
       setCommand("");
+      setSuccess(`Successfully added "${result.added}"`);
       onServerAdded();
+      if (result.authRequired) {
+        setAuthServer(result.added);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to execute command");
     } finally {
@@ -88,6 +90,13 @@ const [success, setSuccess] = useState<string | null>(null);
         {error && <div className="feedback-message error">{error}</div>}
         {success && <div className="feedback-message success">{success}</div>}
       </form>
+      {authServer && (
+        <AuthModal
+          serverName={authServer}
+          onClose={() => setAuthServer(null)}
+          onConfigured={() => { setAuthServer(null); onServerAdded(); }}
+        />
+      )}
     </div>
   );
 }

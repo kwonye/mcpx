@@ -21,6 +21,7 @@ const api = {
   registryPrepareAdd: (registryName: string) => ipcRenderer.invoke(IPC.REGISTRY_PREPARE_ADD, registryName),
   registryConfirmAdd: (resolvedValues: Record<string, string>) => ipcRenderer.invoke(IPC.REGISTRY_CONFIRM_ADD, resolvedValues),
   openDashboard: () => ipcRenderer.invoke(IPC.OPEN_DASHBOARD),
+  getPendingAuth: () => ipcRenderer.invoke(IPC.GET_PENDING_AUTH),
   skills: {
     list: () => ipcRenderer.invoke(IPC.LIST_SKILLS),
     get: (id: string) => ipcRenderer.invoke(IPC.GET_SKILL, id),

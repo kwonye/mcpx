@@ -19,9 +19,14 @@ export function CompactCliInput({ onServerAdded }: CompactCliInputProps) {
 
     try {
       const result = await window.mcpx.invoke(IPC.EXECUTE_CLI_COMMAND, command);
-      setSuccess(`Added "${result.added}"`);
       setCommand("");
       onServerAdded();
+      if (result.authRequired) {
+        setSuccess(`Added "${result.added}" — auth required, opening dashboard...`);
+        window.mcpx.openDashboard();
+      } else {
+        setSuccess(`Added "${result.added}"`);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed");
     } finally {

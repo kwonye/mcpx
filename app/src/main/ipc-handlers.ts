@@ -26,7 +26,10 @@ import {
   SecretsManager,
   buildStatusReport,
   loadManagedIndex,
-  probeHttpAuthRequirement
+  probeHttpAuthRequirement,
+  applyAuthReference,
+  resolveAuthTarget,
+  toSecretRef
 } from "@mcpx/core";
 import type { StdioServerSpec, UpstreamServerSpec } from "@mcpx/core";
 import { IPC } from "../shared/ipc-channels";
@@ -42,6 +45,7 @@ import { updateTrayForDaemonStatus } from "./tray";
 
 // Cache the selected option and required inputs between prepare and confirm calls
 let pendingAdd: { name: string; option: SelectedOption; requiredInputs: RequiredInput[] } | null = null;
+let pendingAuth: { serverName: string } | null = null;
 
 function getCliDaemonPath(): string {
   const resourcesPath = process.resourcesPath ?? app.getAppPath();
@@ -350,9 +354,35 @@ export function registerIpcHandlers(): void {
       if (probe.authRequired) {
         result.authRequired = true;
         result.authStatus = probe.status;
+        pendingAuth = { serverName: name };
       }
     }
 
+    return result;
+  });
+
+  ipcMain.handle(IPC.CONFIGURE_AUTH, async (_event, { serverName, headerName, authValue, secretName }: { serverName: string; headerName: string; authValue: string; secretName?: string }) => {
+    const config = loadConfig();
+    const spec = config.servers[serverName];
+    if (!spec) throw new Error(`Server "${serverName}" not found`);
+
+    const secrets = new SecretsManager();
+    const resolvedSecretName = secretName ?? `auth_${serverName.toLowerCase().replace(/[^a-z0-9._-]/g, "_")}_header_${headerName.toLowerCase().replace(/[^a-z0-9._-]/g, "_")}`;
+    secrets.setSecret(resolvedSecretName, authValue);
+
+    const target = resolveAuthTarget(spec, headerName);
+    applyAuthReference(spec, target, toSecretRef(resolvedSecretName));
+    saveConfig(config);
+
+    const summary = syncAllClients(config, secrets);
+
+    pendingAuth = null;
+    return { configured: true, sync: summary };
+  });
+
+  ipcMain.handle(IPC.GET_PENDING_AUTH, () => {
+    const result = pendingAuth;
+    pendingAuth = null;
     return result;
   });
 
@@ -615,6 +645,7 @@ export function registerIpcHandlers(): void {
       if (probe.authRequired) {
         result.authRequired = true;
         result.authStatus = probe.status;
+        pendingAuth = { serverName: name };
       }
     }
 
@@ -637,6 +668,7 @@ export function registerIpcHandlers(): void {
         if (probe.authRequired) {
           result.authRequired = true;
           result.authStatus = probe.status;
+          pendingAuth = { serverName: name };
         }
       }
 

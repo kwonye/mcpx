@@ -6,6 +6,8 @@ export const IPC = {
   UPDATE_SERVER: "mcpx:update-server",
   REMOVE_SERVER: "mcpx:remove-server",
   SET_SERVER_ENABLED: "mcpx:set-server-enabled",
+  CONFIGURE_AUTH: "mcpx:configure-auth",
+  GET_PENDING_AUTH: "mcpx:get-pending-auth",
   UPDATE_DESKTOP_SETTINGS: "mcpx:update-desktop-settings",
   CHECK_FOR_UPDATES: "mcpx:check-for-updates",
   SYNC_ALL: "mcpx:sync-all",

@@ -12,9 +12,15 @@ const AUTH_KEYWORDS = [
   "authorization",
   "api key",
   "api_key",
+  "apikey",
   "credentials",
   "access denied",
-  "auth required"
+  "auth required",
+  "x-api-key",
+  "invalid key",
+  "missing header",
+  "not authenticated",
+  "auth token"
 ];
 
 export interface HttpAuthProbeResult {

@@ -3,6 +3,7 @@ import logoSvg from "../assets/logo.svg";
 import { useStatus } from "../hooks/useMcpx";
 import { ServerCard } from "./ServerCard";
 import { ServerDetail } from "./ServerDetail";
+import { AuthModal } from "./AuthModal";
 import { BrowseTab } from "./BrowseTab";
 import { SkillsTab } from "./SkillsTab";
 import { DaemonControls } from "./DaemonControls";
@@ -23,6 +24,18 @@ export function Dashboard() {
   const [selectedServer, setSelectedServer] = useState<string | null>(null);
   const [browseState, setBrowseState] = useState<BrowseState>({});
   const [settingsLoaded, setSettingsLoaded] = useState(false);
+  const [pendingAuth, setPendingAuth] = useState<string | null>(null);
+
+  useEffect(() => {
+    window.mcpx.getPendingAuth().then((result: { serverName: string } | null) => {
+      if (result) {
+        setPendingAuth(result.serverName);
+        setTab("servers");
+      }
+    }).catch(() => {
+      // Handler may not be registered yet — ignore
+    });
+  }, []);
 
   // Load settings on mount to restore persisted state
   useEffect(() => {
@@ -230,6 +243,14 @@ export function Dashboard() {
           )}
         </div>
       </main>
+
+      {pendingAuth && (
+        <AuthModal
+          serverName={pendingAuth}
+          onClose={() => setPendingAuth(null)}
+          onConfigured={() => { setPendingAuth(null); refresh(); }}
+        />
+      )}
     </div>
   );
 }

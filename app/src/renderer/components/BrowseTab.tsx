@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { useRegistryList } from "../hooks/useMcpx";
 import { AddServerForm } from "./AddServerForm";
+import { AuthModal } from "./AuthModal";
 
 interface BrowseTabProps {
   onServerAdded: () => void;
@@ -92,6 +93,7 @@ export function BrowseTab({ onServerAdded, status, initialState, onStateChange }
     requiredInputs: RequiredInput[];
   } | null>(null);
   const [addStatus, setAddStatus] = useState<string | null>(null);
+  const [authServer, setAuthServer] = useState<string | null>(null);
   const [isError, setIsError] = useState(false);
   const [sortBy, setSortBy] = useState<"default" | "name" | "name-desc" | "updated">("default");
   const initialSearchTriggered = useRef(false);
@@ -151,11 +153,11 @@ export function BrowseTab({ onServerAdded, status, initialState, onStateChange }
       if (result.requiredInputs.length === 0) {
         // No inputs needed — add directly
         const addResult: { added: string; authRequired?: boolean; authStatus?: number } = await window.mcpx.registryConfirmAdd({});
-        const msg = addResult.authRequired
-          ? `Added "${addResult.added}" — but the server responded with ${addResult.authStatus ?? 401} and may require auth. Edit the server to configure it.`
-          : `Added "${addResult.added}" successfully!`;
-        setAddStatus(msg);
+        setAddStatus(`Added "${addResult.added}" successfully!`);
         onServerAdded();
+        if (addResult.authRequired) {
+          setAuthServer(addResult.added);
+        }
       } else {
         setAdding({
           registryName,
@@ -188,12 +190,12 @@ export function BrowseTab({ onServerAdded, status, initialState, onStateChange }
       setIsError(false);
       setAddStatus("Adding...");
       const result: { added: string; authRequired?: boolean; authStatus?: number } = await window.mcpx.registryConfirmAdd(values);
-      const msg = result.authRequired
-        ? `Added "${result.added}" — but the server responded with ${result.authStatus ?? 401} and may require auth. Edit the server to configure it.`
-        : `Added "${result.added}" successfully!`;
-      setAddStatus(msg);
+      setAddStatus(`Added "${result.added}" successfully!`);
       setAdding(null);
       onServerAdded();
+      if (result.authRequired) {
+        setAuthServer(result.added);
+      }
     } catch (err) {
       setIsError(true);
       setAddStatus(`Error: ${err instanceof Error ? err.message : String(err)}`);
@@ -367,6 +369,14 @@ export function BrowseTab({ onServerAdded, status, initialState, onStateChange }
             Load More Results
           </button>
         </div>
+      )}
+
+      {authServer && (
+        <AuthModal
+          serverName={authServer}
+          onClose={() => setAuthServer(null)}
+          onConfigured={() => { setAuthServer(null); onServerAdded(); }}
+        />
       )}
     </div>
   );
