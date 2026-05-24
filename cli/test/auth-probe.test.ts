@@ -89,6 +89,46 @@ describe("http auth probe", () => {
     expect(probe.status).toBe(200);
   });
 
+  it("detects auth required from JSON-RPC error body on HTTP 200", async () => {
+    const upstream = await startServer((_req, res) => {
+      res.statusCode = 200;
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ jsonrpc: "2.0", id: "1", error: { code: -32000, message: "unauthorized" } }));
+    });
+    cleanups.push(() => closeServer(upstream.server));
+
+    const probe = await probeHttpAuthRequirement(
+      {
+        transport: "http",
+        url: `http://127.0.0.1:${upstream.port}/mcp`
+      },
+      new SecretsManager()
+    );
+
+    expect(probe.authRequired).toBe(true);
+    expect(probe.status).toBe(200);
+  });
+
+  it("does not flag non-auth JSON-RPC errors on HTTP 200", async () => {
+    const upstream = await startServer((_req, res) => {
+      res.statusCode = 200;
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ jsonrpc: "2.0", id: "1", error: { code: -32601, message: "method not found" } }));
+    });
+    cleanups.push(() => closeServer(upstream.server));
+
+    const probe = await probeHttpAuthRequirement(
+      {
+        transport: "http",
+        url: `http://127.0.0.1:${upstream.port}/mcp`
+      },
+      new SecretsManager()
+    );
+
+    expect(probe.authRequired).toBe(false);
+    expect(probe.status).toBe(200);
+  });
+
   it("respects existing Authorization header values", async () => {
     const upstream = await startServer(async (req, res) => {
       if (req.headers.authorization !== "Bearer good-token") {

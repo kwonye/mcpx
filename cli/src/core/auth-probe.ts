@@ -4,11 +4,29 @@ import { SecretsManager } from "./secrets.js";
 const JSON_RPC_VERSION = "2.0";
 const DEFAULT_AUTH_PROBE_TIMEOUT_MS = 8000;
 
+const AUTH_KEYWORDS = [
+  "unauthorized",
+  "unauthenticated",
+  "forbidden",
+  "authentication",
+  "authorization",
+  "api key",
+  "api_key",
+  "credentials",
+  "access denied",
+  "auth required"
+];
+
 export interface HttpAuthProbeResult {
   authRequired: boolean;
   status?: number;
   wwwAuthenticate?: string;
   error?: string;
+}
+
+function isAuthRelatedMessage(message: string): boolean {
+  const lower = message.toLowerCase();
+  return AUTH_KEYWORDS.some((kw) => lower.includes(kw));
 }
 
 function resolveHeaders(spec: HttpServerSpec, secrets: SecretsManager): Record<string, string> {
@@ -52,6 +70,32 @@ export async function probeHttpAuthRequirement(
         status: response.status,
         wwwAuthenticate: response.headers.get("www-authenticate") ?? undefined
       };
+    }
+
+    if (response.status === 200) {
+      try {
+        const body = (await response.json()) as Record<string, unknown>;
+        const err = body?.error;
+        if (
+          err &&
+          typeof err === "object" &&
+          !("result" in body)
+        ) {
+          const message =
+            typeof (err as { message?: unknown }).message === "string"
+              ? (err as { message: string }).message
+              : "";
+          if (message && isAuthRelatedMessage(message)) {
+            return {
+              authRequired: true,
+              status: response.status,
+              error: `JSON-RPC error: ${message}`
+            };
+          }
+        }
+      } catch {
+        // Response body is not valid JSON — not an auth indicator
+      }
     }
 
     return {
