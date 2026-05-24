@@ -1,7 +1,9 @@
 import { getDaemonStatus, type DaemonStatus } from "./daemon.js";
 import { getGatewayUrl } from "./sync.js";
 import { listAuthBindings, secretRefName } from "./server-auth.js";
-import { isServerEnabled, type ClientId, type ClientStatus, type ManagedIndex, type McpxConfig, type UpstreamServerSpec } from "../types.js";
+import { isServerEnabled, type ClientId, type ClientStatus, type ManagedIndex, type McpxConfig, type UpstreamServerSpec, type UpstreamTokenCount } from "../types.js";
+import { SecretsManager } from "./secrets.js";
+import { ensureGatewayToken } from "./registry.js";
 
 export const STATUS_CLIENTS: ClientId[] = ["claude", "claude-desktop", "codex", "cursor", "cline", "opencode", "kiro", "vscode", "qwen"];
 
@@ -28,6 +30,7 @@ export interface StatusServerEntry {
   target: string;
   authBindings: StatusAuthBinding[];
   clients: StatusClientMapping[];
+  tokenCount?: UpstreamTokenCount;
 }
 
 export interface StatusReport {
@@ -36,6 +39,9 @@ export interface StatusReport {
   upstreamCount: number;
   servers: StatusServerEntry[];
   clients: McpxConfig["clients"];
+  projects?: McpxConfig["projects"];
+  totalGlobalTokens?: number;
+  totalProjectTokens?: Record<string, number>;
 }
 
 function describeServerTarget(spec: UpstreamServerSpec): string {
@@ -83,29 +89,83 @@ function buildAuthBindings(spec: UpstreamServerSpec): StatusAuthBinding[] {
   }));
 }
 
-export function buildStatusReport(
+async function fetchTokenCounts(gatewayUrl: string, token: string): Promise<Record<string, UpstreamTokenCount>> {
+  try {
+    const res = await fetch(gatewayUrl, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "authorization": `Bearer ${token}`
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: "status-tokens",
+        method: "custom/tokenCounts",
+        params: {}
+      })
+    });
+    if (!res.ok) {
+      return {};
+    }
+    const data = await res.json() as any;
+    return data?.result ?? {};
+  } catch (error) {
+    return {};
+  }
+}
+
+export async function buildStatusReport(
   config: McpxConfig,
   managedIndex: ManagedIndex,
   daemon: DaemonStatus = getDaemonStatus(config)
-): StatusReport {
+): Promise<StatusReport> {
+  const secrets = new SecretsManager();
+  const token = ensureGatewayToken(config, secrets);
+  const gatewayUrl = getGatewayUrl(config);
+
+  let tokenCounts: Record<string, UpstreamTokenCount> = {};
+  if (daemon.running) {
+    tokenCounts = await fetchTokenCounts(gatewayUrl, token);
+  }
+
+  const projectEntries = Object.values(config.projects ?? {});
+  let totalGlobalTokens = 0;
+  const totalProjectTokens: Record<string, number> = {};
+
   const serverNames = Object.keys(config.servers).sort((left, right) => left.localeCompare(right));
   const servers = serverNames.map((name) => {
     const spec = config.servers[name];
-    return {
+    const tokenCount = tokenCounts[name];
+    const serverEntry = {
       name,
       enabled: isServerEnabled(spec),
       transport: spec.transport,
       target: describeServerTarget(spec),
       authBindings: buildAuthBindings(spec),
-      clients: buildClientMappings(config, managedIndex, name)
+      clients: buildClientMappings(config, managedIndex, name),
+      tokenCount
     };
+
+    if (serverEntry.enabled && tokenCount) {
+      const matchingProject = projectEntries.find((p) => name.startsWith(`${p.name}.`));
+      if (matchingProject) {
+        totalProjectTokens[matchingProject.path] = (totalProjectTokens[matchingProject.path] ?? 0) + tokenCount.total;
+      } else {
+        totalGlobalTokens += tokenCount.total;
+      }
+    }
+
+    return serverEntry;
   });
 
   return {
-    gatewayUrl: getGatewayUrl(config),
+    gatewayUrl,
     daemon,
     upstreamCount: servers.length,
     servers,
-    clients: config.clients
+    clients: config.clients,
+    projects: config.projects,
+    totalGlobalTokens,
+    totalProjectTokens
   };
 }

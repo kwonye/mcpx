@@ -1,5 +1,5 @@
 // Config
-export { loadConfig, saveConfig, defaultConfig } from "./config.js";
+export { loadConfig, saveConfig, defaultConfig, loadMergedConfig, loadProjectConfig, saveProjectConfig } from "./config.js";
 
 // Daemon
 export {
@@ -17,7 +17,7 @@ export { syncAllClients, getGatewayUrl } from "./sync.js";
 export type { SyncSummary } from "./sync.js";
 
 // Registry (server add/remove)
-export { addServer, removeServer, updateServer, setServerEnabled } from "./registry.js";
+export { addServer, removeServer, updateServer, setServerEnabled, registerProject, unregisterProject } from "./registry.js";
 
 // Skills
 export { listSkills, getSkill, saveSkill, deleteSkill } from "./skills.js";

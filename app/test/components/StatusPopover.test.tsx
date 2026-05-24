@@ -15,7 +15,8 @@ const mockMcpx = {
   daemonStart: vi.fn().mockResolvedValue(undefined),
   daemonStop: vi.fn().mockResolvedValue(undefined),
   openDashboard: vi.fn(),
-  setServerEnabled: vi.fn().mockResolvedValue(undefined)
+  setServerEnabled: vi.fn().mockResolvedValue(undefined),
+  invoke: vi.fn()
 };
 
 beforeAll(() => {
@@ -101,5 +102,14 @@ describe("StatusPopover", () => {
     fireEvent.click(await screen.findByLabelText(/Disable vercel/i));
 
     expect(mockMcpx.setServerEnabled).toHaveBeenCalledWith("vercel", false);
+  });
+
+  it("renders the CliCommandInput (Add Server) panel inside the popover", async () => {
+    render(<StatusPopover />);
+
+    const addServerElements = await screen.findAllByText("Add Server");
+    expect(addServerElements.length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByLabelText("Paste your mcpx add command")).toBeDefined();
+    expect(screen.getByPlaceholderText("Paste your mcpx add command here...")).toBeDefined();
   });
 });

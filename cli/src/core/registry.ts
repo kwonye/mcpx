@@ -1,3 +1,4 @@
+import path from "node:path";
 import { normalizeServerSpecEnabled, type McpxConfig, type UpstreamServerSpec } from "../types.js";
 import { SecretsManager } from "./secrets.js";
 
@@ -64,4 +65,22 @@ export function ensureGatewayToken(config: McpxConfig, secrets: SecretsManager):
   }
 
   return secrets.rotateLocalToken(secretName);
+}
+
+export function registerProject(globalConfig: McpxConfig, projectPath: string, name?: string): void {
+  if (!globalConfig.projects) {
+    globalConfig.projects = {};
+  }
+  
+  const projectName = name?.trim() || path.basename(projectPath);
+  globalConfig.projects[projectPath] = {
+    name: projectName,
+    path: projectPath
+  };
+}
+
+export function unregisterProject(globalConfig: McpxConfig, projectPath: string): void {
+  if (globalConfig.projects) {
+    delete globalConfig.projects[projectPath];
+  }
 }

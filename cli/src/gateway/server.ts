@@ -7,7 +7,7 @@ import {
   getDefaultEnvironment,
   type StdioServerParameters
 } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { loadConfig } from "../core/config.js";
+import { loadMergedConfig } from "../core/config.js";
 import { SecretsManager } from "../core/secrets.js";
 import { APP_VERSION } from "../version.js";
 import type {
@@ -17,7 +17,8 @@ import type {
   McpxConfig,
   StdioServerSpec,
   UpstreamServerRuntime,
-  UpstreamServerSpec
+  UpstreamServerSpec,
+  UpstreamTokenCount
 } from "../types.js";
 import { isServerEnabled } from "../types.js";
 
@@ -50,6 +51,7 @@ interface StdioConnectionEntry {
 
 interface GatewayRuntimeState {
   stdioConnections: Map<string, StdioConnectionEntry>;
+  tokenCache?: Map<string, UpstreamTokenCount>;
 }
 
 class UpstreamHttpError extends Error {
@@ -278,6 +280,83 @@ async function callUpstream(
     secrets,
     passthroughAuthorizationHeader
   );
+}
+
+export async function getUpstreamTokenCounts(
+  config: McpxConfig,
+  secrets: SecretsManager,
+  runtime: GatewayRuntimeState
+): Promise<Record<string, UpstreamTokenCount>> {
+  if (!runtime.tokenCache) {
+    runtime.tokenCache = new Map<string, UpstreamTokenCount>();
+  }
+
+  const results: Record<string, UpstreamTokenCount> = {};
+  const upstreams = listUpstreams(config);
+
+  for (const upstream of upstreams) {
+    if (runtime.tokenCache.has(upstream.name)) {
+      results[upstream.name] = runtime.tokenCache.get(upstream.name)!;
+      continue;
+    }
+
+    try {
+      const prevTimeout = process.env.MCPX_UPSTREAM_TIMEOUT_MS;
+      process.env.MCPX_UPSTREAM_TIMEOUT_MS = "3000";
+
+      let toolsCount = 0;
+      let resourcesCount = 0;
+      let promptsCount = 0;
+
+      try {
+        const toolsResult = await callUpstream(upstream, "tools/list", {}, "token-tools", secrets, runtime) as { tools?: Array<unknown> };
+        if (toolsResult && toolsResult.tools) {
+          toolsCount = Math.ceil(JSON.stringify(toolsResult.tools).length / 4);
+        }
+      } catch (err) {
+        // Ignore
+      }
+
+      try {
+        const resourcesResult = await callUpstream(upstream, "resources/list", {}, "token-resources", secrets, runtime) as { resources?: Array<unknown> };
+        if (resourcesResult && resourcesResult.resources) {
+          resourcesCount = Math.ceil(JSON.stringify(resourcesResult.resources).length / 4);
+        }
+      } catch (err) {
+        // Ignore
+      }
+
+      try {
+        const promptsResult = await callUpstream(upstream, "prompts/list", {}, "token-prompts", secrets, runtime) as { prompts?: Array<unknown> };
+        if (promptsResult && promptsResult.prompts) {
+          promptsCount = Math.ceil(JSON.stringify(promptsResult.prompts).length / 4);
+        }
+      } catch (err) {
+        // Ignore
+      }
+
+      if (prevTimeout !== undefined) {
+        process.env.MCPX_UPSTREAM_TIMEOUT_MS = prevTimeout;
+      } else {
+        delete process.env.MCPX_UPSTREAM_TIMEOUT_MS;
+      }
+
+      const total = toolsCount + resourcesCount + promptsCount;
+      const countObj: UpstreamTokenCount = {
+        tools: toolsCount,
+        resources: resourcesCount,
+        prompts: promptsCount,
+        total
+      };
+
+      runtime.tokenCache.set(upstream.name, countObj);
+      results[upstream.name] = countObj;
+    } catch (error) {
+      results[upstream.name] = { tools: 0, resources: 0, prompts: 0, total: 0 };
+    }
+  }
+
+  return results;
 }
 
 function getConfiguredTimeoutMs(): number {
@@ -708,6 +787,14 @@ async function handleListTools(
         runtime,
         clientAuthorizationHeader
       )) as { tools?: Array<Record<string, unknown>> };
+      if (!runtime.tokenCache) {
+        runtime.tokenCache = new Map();
+      }
+      const existing = runtime.tokenCache.get(upstream.name) ?? { tools: 0, resources: 0, prompts: 0, total: 0 };
+      existing.tools = Math.ceil(JSON.stringify(result.tools ?? []).length / 4);
+      existing.total = existing.tools + existing.resources + existing.prompts;
+      runtime.tokenCache.set(upstream.name, existing);
+
       for (const tool of result.tools ?? []) {
         const name = typeof tool.name === "string" ? tool.name : "tool";
         tools.push({
@@ -752,6 +839,13 @@ async function handleListResources(
       )) as {
         resources?: Array<Record<string, unknown>>;
       };
+      if (!runtime.tokenCache) {
+        runtime.tokenCache = new Map();
+      }
+      const existing = runtime.tokenCache.get(upstream.name) ?? { tools: 0, resources: 0, prompts: 0, total: 0 };
+      existing.resources = Math.ceil(JSON.stringify(result.resources ?? []).length / 4);
+      existing.total = existing.tools + existing.resources + existing.prompts;
+      runtime.tokenCache.set(upstream.name, existing);
 
       for (const resource of result.resources ?? []) {
         const originalUri = typeof resource.uri === "string" ? resource.uri : "";
@@ -799,6 +893,13 @@ async function handleListPrompts(
       )) as {
         prompts?: Array<Record<string, unknown>>;
       };
+      if (!runtime.tokenCache) {
+        runtime.tokenCache = new Map();
+      }
+      const existing = runtime.tokenCache.get(upstream.name) ?? { tools: 0, resources: 0, prompts: 0, total: 0 };
+      existing.prompts = Math.ceil(JSON.stringify(result.prompts ?? []).length / 4);
+      existing.total = existing.tools + existing.resources + existing.prompts;
+      runtime.tokenCache.set(upstream.name, existing);
 
       for (const prompt of result.prompts ?? []) {
         const name = typeof prompt.name === "string" ? prompt.name : "prompt";
@@ -982,11 +1083,16 @@ async function handleRequestObject(
     return makeResult(id, { ok: true });
   }
 
-  const config = loadConfig();
+  const config = loadMergedConfig();
   if (upstreamFilter && listUpstreams(config, upstreamFilter).length === 0) {
     return makeError(id, -32602, `Unknown upstream: ${upstreamFilter}`);
   }
   await reconcileStdioConnections(config, runtime);
+
+  if (request.method === "custom/tokenCounts") {
+    const result = await getUpstreamTokenCounts(config, secrets, runtime);
+    return makeResult(id, result);
+  }
 
   if (request.method === "tools/list") {
     const result = await handleListTools(config, secrets, runtime, upstreamFilter, clientAuthorizationHeader);
@@ -1038,7 +1144,7 @@ async function maybeHandleWellKnownOAuthRequest(
     return true;
   }
 
-  const config = loadConfig();
+  const config = loadMergedConfig();
   const requestedUpstream = getRequestedUpstream(requestUrl);
   const upstream = getScopedHttpUpstream(config, requestedUpstream);
   if (!upstream) {

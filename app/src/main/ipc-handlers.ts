@@ -1,9 +1,14 @@
-import { app, ipcMain } from "electron";
+import { app, ipcMain, dialog } from "electron";
 import fs from "node:fs";
 import path from "node:path";
 import {
   loadConfig,
   saveConfig,
+  loadMergedConfig,
+  loadProjectConfig,
+  saveProjectConfig,
+  registerProject,
+  unregisterProject,
   getDaemonStatus,
   startDaemon,
   stopDaemon,
@@ -304,14 +309,14 @@ export function registerIpcHandlers(): void {
     openDashboard();
   });
 
-  ipcMain.handle(IPC.GET_STATUS, () => {
-    const config = loadConfig();
+  ipcMain.handle(IPC.GET_STATUS, async () => {
+    const config = loadMergedConfig();
     const managedIndex = loadManagedIndex();
-    return buildStatusReport(config, managedIndex);
+    return await buildStatusReport(config, managedIndex);
   });
 
   ipcMain.handle(IPC.GET_SERVERS, () => {
-    const config = loadConfig();
+    const config = loadMergedConfig();
     return Object.entries(config.servers).map(([name, spec]) => ({ name, ...spec }));
   });
 
@@ -340,6 +345,31 @@ export function registerIpcHandlers(): void {
   });
 
   ipcMain.handle(IPC.REMOVE_SERVER, (_event, name: string) => {
+    if (name.includes(".")) {
+      const parts = name.split(".");
+      const projectName = parts[0];
+      const baseServerName = parts.slice(1).join(".");
+      
+      const globalConfigForProjects = loadConfig();
+      if (globalConfigForProjects.projects) {
+        const projectEntry = Object.values(globalConfigForProjects.projects).find(p => p.name === projectName);
+        if (projectEntry) {
+          const localPath = path.join(projectEntry.path, ".mcpx.json");
+          if (fs.existsSync(localPath)) {
+            const projectConfig = loadProjectConfig(localPath);
+            if (projectConfig.servers[baseServerName]) {
+              removeServer(projectConfig as any, baseServerName, false);
+              saveProjectConfig(projectConfig, localPath);
+              const merged = loadMergedConfig();
+              const secrets = new SecretsManager();
+              const summary = syncAllClients(merged, secrets);
+              return { removed: name, sync: summary };
+            }
+          }
+        }
+      }
+    }
+
     const config = loadConfig();
     removeServer(config, name, false);
     saveConfig(config);
@@ -349,6 +379,31 @@ export function registerIpcHandlers(): void {
   });
 
   ipcMain.handle(IPC.SET_SERVER_ENABLED, (_event, name: string, enabled: boolean) => {
+    if (name.includes(".")) {
+      const parts = name.split(".");
+      const projectName = parts[0];
+      const baseServerName = parts.slice(1).join(".");
+      
+      const globalConfigForProjects = loadConfig();
+      if (globalConfigForProjects.projects) {
+        const projectEntry = Object.values(globalConfigForProjects.projects).find(p => p.name === projectName);
+        if (projectEntry) {
+          const localPath = path.join(projectEntry.path, ".mcpx.json");
+          if (fs.existsSync(localPath)) {
+            const projectConfig = loadProjectConfig(localPath);
+            if (projectConfig.servers[baseServerName]) {
+              setServerEnabled(projectConfig as any, baseServerName, enabled);
+              saveProjectConfig(projectConfig, localPath);
+              const merged = loadMergedConfig();
+              const secrets = new SecretsManager();
+              const summary = syncAllClients(merged, secrets);
+              return { updated: name, enabled, sync: summary };
+            }
+          }
+        }
+      }
+    }
+
     const config = loadConfig();
     setServerEnabled(config, name, enabled);
     saveConfig(config);
@@ -358,7 +413,6 @@ export function registerIpcHandlers(): void {
   });
 
   ipcMain.handle(IPC.UPDATE_SERVER, (_event, name: string, spec: UpstreamServerSpec, resolvedSecrets?: Record<string, string>) => {
-    const config = loadConfig();
     const secrets = new SecretsManager();
     
     // Store any new secret values before updating the server
@@ -370,6 +424,31 @@ export function registerIpcHandlers(): void {
       }
     }
     
+    if (name.includes(".")) {
+      const parts = name.split(".");
+      const projectName = parts[0];
+      const baseServerName = parts.slice(1).join(".");
+      
+      const globalConfigForProjects = loadConfig();
+      if (globalConfigForProjects.projects) {
+        const projectEntry = Object.values(globalConfigForProjects.projects).find(p => p.name === projectName);
+        if (projectEntry) {
+          const localPath = path.join(projectEntry.path, ".mcpx.json");
+          if (fs.existsSync(localPath)) {
+            const projectConfig = loadProjectConfig(localPath);
+            if (projectConfig.servers[baseServerName]) {
+              updateServer(projectConfig as any, baseServerName, spec);
+              saveProjectConfig(projectConfig, localPath);
+              const merged = loadMergedConfig();
+              const summary = syncAllClients(merged, secrets);
+              return { updated: name, sync: summary };
+            }
+          }
+        }
+      }
+    }
+
+    const config = loadConfig();
     updateServer(config, name, spec);
     saveConfig(config);
     const summary = syncAllClients(config, secrets);
@@ -377,9 +456,46 @@ export function registerIpcHandlers(): void {
   });
 
   ipcMain.handle(IPC.SYNC_ALL, () => {
-    const config = loadConfig();
+    const config = loadMergedConfig();
     const secrets = new SecretsManager();
     return syncAllClients(config, secrets);
+  });
+
+  ipcMain.handle(IPC.PROJECT_INIT, (_event, projectPath: string, name: string) => {
+    const localConfig = { name, servers: {} };
+    const targetPath = path.join(projectPath, ".mcpx.json");
+    saveProjectConfig(localConfig, targetPath);
+    
+    const globalConfig = loadConfig();
+    registerProject(globalConfig, projectPath, name);
+    saveConfig(globalConfig);
+    
+    const mergedConfig = loadMergedConfig();
+    const secrets = new SecretsManager();
+    const summary = syncAllClients(mergedConfig, secrets);
+    return { success: true, sync: summary };
+  });
+
+  ipcMain.handle(IPC.PROJECT_REMOVE, (_event, projectPath: string) => {
+    const globalConfig = loadConfig();
+    unregisterProject(globalConfig, projectPath);
+    saveConfig(globalConfig);
+    
+    const mergedConfig = loadMergedConfig();
+    const secrets = new SecretsManager();
+    const summary = syncAllClients(mergedConfig, secrets);
+    return { success: true, sync: summary };
+  });
+
+  ipcMain.handle(IPC.SELECT_DIRECTORY, async () => {
+    const result = await dialog.showOpenDialog({
+      properties: ["openDirectory"],
+      title: "Select Project Directory"
+    });
+    if (result.canceled || result.filePaths.length === 0) {
+      return null;
+    }
+    return result.filePaths[0];
   });
 
   ipcMain.handle(IPC.DAEMON_START, async () => {

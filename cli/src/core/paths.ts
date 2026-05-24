@@ -78,3 +78,24 @@ export function ensureDir(dirPath: string): void {
 export function ensureParentDir(filePath: string): void {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
 }
+
+export function findProjectConfigPath(startDir = process.cwd()): string | null {
+  let dir = startDir;
+  while (true) {
+    const candidate = path.join(dir, ".mcpx.json");
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) {
+      break;
+    }
+    dir = parent;
+  }
+  return null;
+}
+
+export function findProjectRoot(startDir = process.cwd()): string | null {
+  const configPath = findProjectConfigPath(startDir);
+  return configPath ? path.dirname(configPath) : null;
+}

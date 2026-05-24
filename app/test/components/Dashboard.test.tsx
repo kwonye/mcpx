@@ -80,7 +80,7 @@ describe("Dashboard", () => {
 
   it("shows daemon controls", async () => {
     render(<Dashboard />);
-    expect(await screen.findByText(/Local Gateway Running/i)).toBeDefined();
+    expect(await screen.findByText(/Gateway\s+Running/i)).toBeDefined();
   });
 
   it("loads settings panel when settings tab is selected", async () => {
@@ -96,8 +96,8 @@ describe("Dashboard", () => {
     render(<Dashboard />);
     fireEvent.click(await screen.findByText("Settings"));
 
-    expect(await screen.findByText("Configure your mcpx installation.")).toBeDefined();
-    expect(screen.getByText("mcpx Manager")).toBeDefined();
+    expect(await screen.findByText(/General Settings/i)).toBeDefined();
+    expect(screen.getByText(/Launch in the tray when you log in/i)).toBeDefined();
   });
 
   it("opens the edit flow from server detail", async () => {

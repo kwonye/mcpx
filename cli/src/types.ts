@@ -33,11 +33,18 @@ export interface ClientSyncState {
   configPath?: string;
 }
 
+export interface ProjectConfig {
+  name: string;
+  path: string;
+}
+
 export interface McpxConfig {
   schemaVersion: 1;
+  name?: string;
   gateway: GatewayConfig;
   servers: Record<string, UpstreamServerSpec>;
   clients: Partial<Record<ClientId, ClientSyncState>>;
+  projects?: Record<string, ProjectConfig>;
 }
 
 export interface ManagedEntry {
@@ -182,3 +189,11 @@ export function normalizeServerSpecEnabled<T extends UpstreamServerSpec>(spec: T
     enabled: isServerEnabled(spec)
   };
 }
+
+export interface UpstreamTokenCount {
+  tools: number;
+  resources: number;
+  prompts: number;
+  total: number;
+}
+

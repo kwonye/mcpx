@@ -23,5 +23,10 @@ export const IPC = {
   LIST_SKILLS: "mcpx:list-skills",
   GET_SKILL: "mcpx:get-skill",
   SAVE_SKILL: "mcpx:save-skill",
-  DELETE_SKILL: "mcpx:delete-skill"
+  DELETE_SKILL: "mcpx:delete-skill",
+
+  // Projects
+  PROJECT_INIT: "mcpx:project-init",
+  PROJECT_REMOVE: "mcpx:project-remove",
+  SELECT_DIRECTORY: "mcpx:select-directory"
 } as const;

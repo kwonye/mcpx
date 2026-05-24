@@ -14,7 +14,7 @@ function mockDaemonStatus(): DaemonStatus {
 }
 
 describe("status report", () => {
-  it("maps per-server synced client configs from managed index", () => {
+  it("maps per-server synced client configs from managed index", async () => {
     const config = defaultConfig();
     config.servers.vercel = {
       transport: "http",
@@ -75,7 +75,7 @@ describe("status report", () => {
       }
     };
 
-    const report = buildStatusReport(config, managedIndex, mockDaemonStatus());
+    const report = await buildStatusReport(config, managedIndex, mockDaemonStatus());
     const vercel = report.servers.find((server) => server.name === "vercel");
 
     expect(vercel).toBeDefined();
@@ -99,7 +99,7 @@ describe("status report", () => {
     });
   });
 
-  it("marks managed entries as synced even when client state was never recorded", () => {
+  it("marks managed entries as synced even when client state was never recorded", async () => {
     const config = defaultConfig();
     config.servers.circleback = {
       transport: "http",
@@ -121,7 +121,7 @@ describe("status report", () => {
       }
     };
 
-    const report = buildStatusReport(config, managedIndex, mockDaemonStatus());
+    const report = await buildStatusReport(config, managedIndex, mockDaemonStatus());
     const circleback = report.servers.find((server) => server.name === "circleback");
     const kiro = circleback?.clients.find((client) => client.clientId === "kiro");
 
@@ -133,7 +133,7 @@ describe("status report", () => {
     });
   });
 
-  it("surfaces disabled servers in status output", () => {
+  it("surfaces disabled servers in status output", async () => {
     const config = defaultConfig();
     config.servers.circleback = {
       transport: "http",
@@ -141,7 +141,7 @@ describe("status report", () => {
       enabled: false
     };
 
-    const report = buildStatusReport(config, {
+    const report = await buildStatusReport(config, {
       schemaVersion: 1,
       managed: {}
     }, mockDaemonStatus());

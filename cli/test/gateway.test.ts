@@ -770,4 +770,63 @@ describe("gateway passthrough", () => {
       `resource_metadata="http://127.0.0.1:${gatewayAddress.port}/.well-known/oauth-protected-resource"`
     );
   });
+
+  it("calculates, caches, and returns custom/tokenCounts correctly", async () => {
+    const env = setupTempEnv("mcpx-gateway-tokens-");
+    cleanups.push(env.restore);
+
+    const upstream = await startServer(async (req, res) => {
+      const chunks: Buffer[] = [];
+      for await (const chunk of req) {
+        chunks.push(Buffer.from(chunk));
+      }
+
+      const payload = JSON.parse(Buffer.concat(chunks).toString("utf8")) as { method: string; id: string | number | null };
+      if (payload.method === "tools/list") {
+        res.setHeader("content-type", "application/json");
+        res.end(JSON.stringify({ jsonrpc: "2.0", id: payload.id, result: { tools: [{ name: "echo", description: "Echo" }] } }));
+        return;
+      }
+
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ jsonrpc: "2.0", id: payload.id, result: {} }));
+    });
+    cleanups.push(() => closeServer(upstream.server));
+
+    const config = defaultConfig();
+    config.servers.vercel = {
+      transport: "http",
+      url: `http://127.0.0.1:${upstream.port}/mcp`
+    };
+    saveConfig(config);
+
+    const gateway = createGatewayServer({
+      port: 0,
+      expectedToken: "test-local-token",
+      secrets: new SecretsManager()
+    });
+    await waitForListening(gateway);
+    cleanups.push(() => closeServer(gateway));
+
+    const address = gateway.address();
+    if (!address || typeof address === "string") {
+      throw new Error("Failed to resolve gateway address.");
+    }
+
+    const response = await fetch(`http://127.0.0.1:${address.port}/mcp`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        Authorization: "Bearer test-local-token"
+      },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "custom/tokenCounts", params: {} })
+    });
+
+    expect(response.status).toBe(200);
+    const payload = (await response.json()) as { result: Record<string, { tools: number; resources: number; prompts: number; total: number }> };
+    expect(payload.result.vercel).toBeDefined();
+    expect(payload.result.vercel.tools).toBeGreaterThan(0);
+    expect(payload.result.vercel.total).toBe(payload.result.vercel.tools);
+  });
 });
+

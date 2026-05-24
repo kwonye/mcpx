@@ -10,8 +10,12 @@ import { SettingsPanel } from "./SettingsPanel";
 import { CliCommandInput } from "./CliCommandInput";
 import type { BrowseState } from "../../shared/desktop-settings";
 import { DESKTOP_MANAGER_NAME, DESKTOP_PRODUCT_NAME } from "../../shared/build-constants";
+import { ProjectsTab } from "./ProjectsTab";
+import { formatTokenApprox } from "../utils/tokenHelper";
+import { ContextBudgetCard } from "./ContextBudgetCard";
 
-type Tab = "servers" | "browse" | "skills" | "settings";
+
+type Tab = "servers" | "browse" | "skills" | "settings" | "projects";
 
 export function Dashboard() {
   const { status, loading, refresh } = useStatus();
@@ -79,6 +83,7 @@ export function Dashboard() {
       authBindings: Array<{ kind: string; key: string; value: string }>;
       clients: Array<{ clientId: string; status: string; managed: boolean }>;
     }>;
+    projects?: Record<string, { name: string; path: string }>;
   };
 
   const activeServer = selectedServer ? report.servers.find((s) => s.name === selectedServer) : null;
@@ -99,6 +104,14 @@ export function Dashboard() {
           >
             <span className="material-symbols-outlined">grid_view</span>
             <span className="nav-button__label">My Servers</span>
+          </button>
+          <button
+            className="nav-button"
+            data-active={tab === "projects"}
+            onClick={() => handleTabChange("projects")}
+          >
+            <span className="material-symbols-outlined">folder</span>
+            <span className="nav-button__label">Projects</span>
           </button>
           <button
             className="nav-button"
@@ -140,9 +153,18 @@ export function Dashboard() {
             <>
               {tab === "servers" && (
                 <>
-                  <div className="page-header">
+                  <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
                     <h1 className="page-title">My Servers</h1>
+                    {report.daemon?.running && typeof (report as any).totalGlobalTokens === "number" && (
+                      <div className="token-badge-total" title="Context window tokens consumed by globally enabled MCP servers">
+                        <span className="material-symbols-outlined font-icon-sm" style={{ fontSize: '18px' }}>analytics</span>
+                        <span>{formatTokenApprox((report as any).totalGlobalTokens)} Global Tokens Active</span>
+                      </div>
+                    )}
                   </div>
+                  {report.daemon?.running && typeof (report as any).totalGlobalTokens === "number" && (
+                    <ContextBudgetCard totalTokens={(report as any).totalGlobalTokens} />
+                  )}
                   <div className="servers-controls-container">
                     <CliCommandInput onServerAdded={refresh} />
                   </div>
@@ -157,6 +179,7 @@ export function Dashboard() {
                         authConfigured={server.authBindings.length > 0}
                         syncedCount={server.clients.filter((c) => c.managed && c.status === "SYNCED").length}
                         errorCount={server.clients.filter((c) => c.managed && c.status === "ERROR").length}
+                        tokenCount={(server as any).tokenCount}
                         onRefresh={refresh}
                         onClick={() => setSelectedServer(server.name)}
                       />
@@ -179,15 +202,23 @@ export function Dashboard() {
                     }}
                     onStateChange={handleBrowseStateChange}
                   />
-                />
-                )}
+                </>
+              )}
 
-                {tab === "skills" && (
+              {tab === "projects" && (
+                <>
+                  <div className="page-header">
+                    <h1 className="page-title">Projects</h1>
+                  </div>
+                  <ProjectsTab status={report} onRefresh={refresh} />
+                </>
+              )}
+
+              {tab === "skills" && (
                 <SkillsTab />
-                )}
+              )}
 
-                {tab === "settings" && (
-
+              {tab === "settings" && (
                 <>
                   <div className="page-header">
                     <h1 className="page-title">Settings</h1>

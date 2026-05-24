@@ -16,7 +16,7 @@ import { runDaemonChildIfRequested } from "./daemon-child";
 import { loadDesktopSettings } from "./settings-store";
 import { applyStartOnLoginSetting, wasOpenedAtLogin } from "./login-item";
 import { setAutoUpdateEnabled } from "./update-manager";
-import { getDesktopProductName } from "./app-flavor";
+import { getDesktopProductName, isDevDesktopApp } from "./app-flavor";
 
 // Export mutable state for testing lifecycle handlers
 export const lifecycleState = { allowQuit: false };
@@ -138,8 +138,13 @@ export async function startMainProcess(): Promise<void> {
   setAutoUpdateEnabled(settings.autoUpdateEnabled);
 
   // Create tray (starts with daemon stopped)
-  createTray();
+  const tray = createTray();
   updateTrayForDaemonStatus(false);
+
+  if (isDevDesktopApp()) {
+    const { showPopover } = await import("./popover");
+    showPopover(tray);
+  }
 
   // Register IPC handlers
   registerIpcHandlers();

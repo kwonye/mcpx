@@ -27,6 +27,9 @@ const api = {
     save: (id: string, content: string) => ipcRenderer.invoke(IPC.SAVE_SKILL, id, content),
     delete: (id: string) => ipcRenderer.invoke(IPC.DELETE_SKILL, id)
   },
+  projectInit: (projectPath: string, name: string) => ipcRenderer.invoke(IPC.PROJECT_INIT, projectPath, name),
+  projectRemove: (projectPath: string) => ipcRenderer.invoke(IPC.PROJECT_REMOVE, projectPath),
+  selectDirectory: () => ipcRenderer.invoke(IPC.SELECT_DIRECTORY) as Promise<string | null>,
   invoke: (channel: string, ...args: unknown[]) => ipcRenderer.invoke(channel, ...args)
 };
 

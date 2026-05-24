@@ -1,5 +1,6 @@
 import { Toggle } from "./ui";
 import { useServerEnabled } from "../hooks/useServerEnabled";
+import { formatTokenApprox } from "../utils/tokenHelper";
 
 interface ServerCardProps {
   name: string;
@@ -9,6 +10,7 @@ interface ServerCardProps {
   authConfigured: boolean;
   syncedCount: number;
   errorCount: number;
+  tokenCount?: { tools: number; resources: number; prompts: number; total: number };
   onRefresh: () => void;
   onClick: () => void;
 }
@@ -29,11 +31,16 @@ export function ServerCard(props: ServerCardProps) {
           </div>
           <div className="server-card__body">
             <h3 className="server-card__title">{props.name}</h3>
-            <div className="server-card__status">
+            <div className="server-card__status" style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
               <div className={`status-dot ${isWarning ? 'status-error' : isHealthy ? 'status-online' : 'status-offline'}`}></div>
               <span>
                 {isWarning ? `${props.errorCount} Errors` : props.enabled ? isHealthy ? 'Online' : 'Offline' : 'Disabled'}
               </span>
+              {props.enabled && props.tokenCount && props.tokenCount.total > 0 && (
+                <span className="token-badge" title={`${props.tokenCount.tools} tools, ${props.tokenCount.resources} resources, ${props.tokenCount.prompts} prompts`}>
+                  {formatTokenApprox(props.tokenCount.total)} tokens
+                </span>
+              )}
             </div>
           </div>
         </div>

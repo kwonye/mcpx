@@ -4,12 +4,13 @@
  */
 import { Command } from "commander";
 import fs from "node:fs";
+import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { emitKeypressEvents } from "node:readline";
 import { createInterface, type Interface as ReadlineInterface } from "node:readline/promises";
-import { loadConfig, saveConfig } from "./core/config.js";
-import { addServer, removeServer, setServerEnabled } from "./core/registry.js";
+import { loadConfig, saveConfig, loadMergedConfig, resolveActiveConfig, loadProjectConfig, saveProjectConfig } from "./core/config.js";
+import { addServer, removeServer, setServerEnabled, registerProject, unregisterProject } from "./core/registry.js";
 import { listSkills, getSkill, saveSkill, deleteSkill } from "./core/skills.js";
 import { SecretsManager, readSecretValueFromStdin } from "./core/secrets.js";
 import { probeHttpAuthRequirement } from "./core/auth-probe.js";
@@ -35,7 +36,7 @@ import {
   startDaemon,
   stopDaemon
 } from "./core/daemon.js";
-import { getConfigPath, getManagedIndexPath } from "./core/paths.js";
+import { getConfigPath, getManagedIndexPath, findProjectConfigPath } from "./core/paths.js";
 import { loadManagedIndex } from "./core/managed-index.js";
 import { STATUS_CLIENTS, buildStatusReport, type StatusAuthBinding, type StatusReport, type StatusServerEntry } from "./core/status.js";
 import { APP_VERSION } from "./version.js";
@@ -51,6 +52,8 @@ interface AddCommandOptions {
   env: string[];
   cwd?: string;
   force?: boolean;
+  global?: boolean;
+  local?: boolean;
 }
 
 interface AuthSetOptions {
@@ -266,7 +269,8 @@ async function ensureDaemonIfEnabled(cliPath: string, secrets: SecretsManager): 
 async function autoSyncManagedEntries(config: McpxConfig, cliPath: string): Promise<void> {
   const secrets = new SecretsManager();
   await ensureDaemonIfEnabled(cliPath, secrets);
-  const summary = syncAllClients(config, secrets);
+  const mergedConfig = loadMergedConfig();
+  const summary = syncAllClients(mergedConfig, secrets);
   printSyncSummary(summary, false);
   ensureExitCodeForSyncFailures(summary.hasErrors);
 }
@@ -358,9 +362,9 @@ async function maybeAutoConfigureAuthForAddedServer(
   }
 }
 
-function loadStatusReport(): StatusReport {
-  const config = loadConfig();
-  return buildStatusReport(config, loadManagedIndex(), getDaemonStatus(config));
+async function loadStatusReport(): Promise<StatusReport> {
+  const config = loadMergedConfig();
+  return await buildStatusReport(config, loadManagedIndex(), getDaemonStatus(config));
 }
 
 interface MenuOption {
@@ -449,16 +453,30 @@ function printSyncedConfigBullets(server: StatusServerEntry, indent: string): vo
   }
 }
 
+function formatTokenApprox(tokens: number): string {
+  if (tokens === 0) return "0";
+  if (tokens > 0 && tokens < 500) return "<1k";
+  const thousands = Math.round(tokens / 1000);
+  if (thousands === 0) return "<1k";
+  return `~${thousands}k`;
+}
+
 function printStatusReportText(report: StatusReport): void {
   process.stdout.write(`Gateway URL: ${report.gatewayUrl}\n`);
   process.stdout.write(`Daemon: ${daemonEmoji(report.daemon.running)} ${formatDaemonState(report.daemon)}\n`);
   process.stdout.write(`Upstream servers: ${report.upstreamCount}\n`);
+  if (report.daemon.running) {
+    process.stdout.write(`Global active tokens: ${formatTokenApprox(report.totalGlobalTokens ?? 0)}\n`);
+  }
 
   if (report.servers.length === 0) {
     process.stdout.write("⚠️ No upstream servers configured.\n");
   } else {
     for (const server of report.servers) {
-      process.stdout.write(`- ${serverHealthEmoji(server)} ${server.name} (${server.transport})\n`);
+      const tokenSuffix = (server.enabled && server.tokenCount)
+        ? ` [tokens: ${formatTokenApprox(server.tokenCount.total)} (tools: ${server.tokenCount.tools}, resources: ${server.tokenCount.resources}, prompts: ${server.tokenCount.prompts})]`
+        : "";
+      process.stdout.write(`- ${serverHealthEmoji(server)} ${server.name} (${server.transport})${tokenSuffix}\n`);
       process.stdout.write(`  state: ${server.enabled ? "enabled" : "disabled"}\n`);
       process.stdout.write(`  target: ${server.target}\n`);
       if (server.authBindings.length > 0) {
@@ -466,6 +484,14 @@ function printStatusReportText(report: StatusReport): void {
       }
       process.stdout.write("  synced configs:\n");
       printSyncedConfigBullets(server, "  ");
+    }
+  }
+
+  if (report.projects && Object.keys(report.projects).length > 0 && report.daemon.running) {
+    process.stdout.write("Project active tokens:\n");
+    for (const project of Object.values(report.projects)) {
+      const projectTokens = report.totalProjectTokens?.[project.path] ?? 0;
+      process.stdout.write(`- ${project.name}: ${formatTokenApprox(projectTokens)} tokens (${project.path})\n`);
     }
   }
 
@@ -801,12 +827,37 @@ async function setServerEnabledInteractively(
     return false;
   }
 
+  if (serverName.includes(".")) {
+    const parts = serverName.split(".");
+    const projectName = parts[0];
+    const baseServerName = parts.slice(1).join(".");
+    
+    const globalConfigForProjects = loadConfig();
+    if (globalConfigForProjects.projects) {
+      const projectEntry = Object.values(globalConfigForProjects.projects).find(p => p.name === projectName);
+      if (projectEntry) {
+        const localPath = path.join(projectEntry.path, ".mcpx.json");
+        if (fs.existsSync(localPath)) {
+          const projectConfig = loadProjectConfig(localPath);
+          if (projectConfig.servers[baseServerName]) {
+            setServerEnabled(projectConfig as any, baseServerName, enabled);
+            saveProjectConfig(projectConfig, localPath);
+            process.stdout.write(`${enabled ? "Enabled" : "Disabled"} server: ${serverName}\n`);
+            process.stdout.write("Auto-syncing managed gateway entries across all supported clients...\n");
+            await autoSyncManagedEntries(loadMergedConfig(), cliPath);
+            return true;
+          }
+        }
+      }
+    }
+  }
+
   const config = loadConfig();
   setServerEnabled(config, serverName, enabled);
   saveConfig(config);
   process.stdout.write(`${enabled ? "Enabled" : "Disabled"} server: ${serverName}\n`);
   process.stdout.write("Auto-syncing managed gateway entries across all supported clients...\n");
-  await autoSyncManagedEntries(config, cliPath);
+  await autoSyncManagedEntries(loadMergedConfig(), cliPath);
   return true;
 }
 
@@ -853,7 +904,7 @@ function buildServerMenuDetail(server: StatusServerEntry): string {
 
 async function runServerActionsMenu(rl: ReadlineInterface, serverName: string, cliPath: string): Promise<void> {
   while (true) {
-    const report = loadStatusReport();
+    const report = await loadStatusReport();
     const server = report.servers.find((entry) => entry.name === serverName);
     if (!server) {
       process.stdout.write(`Server "${serverName}" no longer exists.\n`);
@@ -909,7 +960,7 @@ async function runInteractiveStatusMenu(cliPath: string): Promise<void> {
 
   try {
     while (true) {
-      const report = loadStatusReport();
+      const report = await loadStatusReport();
       if (report.servers.length === 0) {
         clearTerminalScreen();
         process.stdout.write("mcpx status\n");
@@ -954,15 +1005,24 @@ async function runInteractiveStatusMenu(cliPath: string): Promise<void> {
 function registerEnabledCommand(parent: Command, enabled: boolean, cliPath: string): void {
   parent
     .command(enabled ? "enable <name>" : "disable <name>")
+    .option("-g, --global", "Force target the global configuration")
+    .option("-l, --local", "Force target (or initialize) a local `.mcpx.json` configuration")
     .description(`${enabled ? "Enable" : "Disable"} an upstream MCP server`)
-    .action(async (name: string) => {
-      const config = loadConfig();
-      setServerEnabled(config, name, enabled);
-      saveConfig(config);
+    .action(async (name: string, options: { global?: boolean; local?: boolean }) => {
+      const context = resolveActiveConfig({ global: options.global, local: options.local });
+      setServerEnabled(context.config, name, enabled);
+      context.save();
 
-      process.stdout.write(`${enabled ? "Enabled" : "Disabled"} server: ${name}\n`);
+      if (context.type === "project" && context.projectPath) {
+        const globalConfig = loadConfig();
+        registerProject(globalConfig, context.projectPath);
+        saveConfig(globalConfig);
+      }
+
+      process.stdout.write(`${enabled ? "Enabled" : "Disabled"} server: ${name} (${context.type} config)\n`);
       process.stdout.write("Auto-syncing managed gateway entries across all supported clients...\n");
-      await autoSyncManagedEntries(config, cliPath);
+      const mergedConfig = loadMergedConfig();
+      await autoSyncManagedEntries(mergedConfig, cliPath);
     });
 }
 
@@ -975,18 +1035,31 @@ function registerAddCommand(parent: Command, cliPath: string): void {
     .option("--env <env>", "Env entry in KEY=VALUE form for stdio upstreams", (value, previous: string[] = []) => [...previous, value], [])
     .option("--cwd <cwd>", "Working directory for stdio upstream")
     .option("--force", "Overwrite existing server with same name")
+    .option("-g, --global", "Force saving to global configuration")
+    .option("-l, --local", "Force saving to local project configuration")
     .description("Add an upstream MCP server")
     .action(async (values: string[], options: AddCommandOptions) => {
-      const config = loadConfig();
+      const context = resolveActiveConfig({ global: options.global, local: options.local });
       const parsed = parseAddServerSpec(values ?? [], options);
 
-      addServer(config, parsed.name, parsed.spec, options.force ?? false);
-      await maybeAutoConfigureAuthForAddedServer(parsed.name, parsed.spec, new SecretsManager());
-      saveConfig(config);
+      let resolvedServerName = parsed.name;
+      if (context.type === "project") {
+        const globalConfig = loadConfig();
+        registerProject(globalConfig, context.projectPath!, context.config.name);
+        saveConfig(globalConfig);
 
-      process.stdout.write(`Added server: ${parsed.name} (${parsed.spec.transport})\n`);
+        const projectName = context.config.name || path.basename(context.projectPath!);
+        resolvedServerName = `${projectName}.${parsed.name}`;
+      }
+
+      addServer(context.config, parsed.name, parsed.spec, options.force ?? false);
+      await maybeAutoConfigureAuthForAddedServer(resolvedServerName, parsed.spec, new SecretsManager());
+      context.save();
+
+      process.stdout.write(`Added server: ${parsed.name} (${parsed.spec.transport}) ${context.type === "project" ? `to project: ${context.projectPath}` : "globally"}\n`);
       process.stdout.write("Auto-syncing managed gateway entries across all supported clients...\n");
-      await autoSyncManagedEntries(config, cliPath);
+      const mergedConfig = loadMergedConfig();
+      await autoSyncManagedEntries(mergedConfig, cliPath);
     });
 }
 
@@ -994,15 +1067,18 @@ function registerRemoveCommand(parent: Command, cliPath: string): void {
   parent
     .command("remove <name>")
     .option("--force", "Do not error if server does not exist")
+    .option("-g, --global", "Force target global configuration")
+    .option("-l, --local", "Force target local project configuration")
     .description("Remove an upstream MCP server")
-    .action(async (name: string, options: { force?: boolean }) => {
-      const config = loadConfig();
-      removeServer(config, name, options.force ?? false);
-      saveConfig(config);
+    .action(async (name: string, options: { force?: boolean; global?: boolean; local?: boolean }) => {
+      const context = resolveActiveConfig({ global: options.global, local: options.local });
+      removeServer(context.config, name, options.force ?? false);
+      context.save();
 
-      process.stdout.write(`Removed server: ${name}\n`);
+      process.stdout.write(`Removed server: ${name} ${context.type === "project" ? `from project: ${context.projectPath}` : "globally"}\n`);
       process.stdout.write("Auto-syncing managed gateway entries across all supported clients...\n");
-      await autoSyncManagedEntries(config, cliPath);
+      const mergedConfig = loadMergedConfig();
+      await autoSyncManagedEntries(mergedConfig, cliPath);
     });
 }
 
@@ -1010,10 +1086,57 @@ function registerListCommand(parent: Command): void {
   parent
     .command("list")
     .option("--json", "Output JSON")
+    .option("-g, --global", "Force target global configuration")
+    .option("-l, --local", "Force target local project configuration")
     .description("List configured upstream MCP servers")
-    .action((options: { json?: boolean }) => {
-      const config = loadConfig();
-      const servers = Object.entries(config.servers).map(([name, spec]) => ({ name, ...spec }));
+    .action((options: { json?: boolean; global?: boolean; local?: boolean }) => {
+      let servers: Array<UpstreamServerSpec & { name: string; projectName?: string }> = [];
+
+      if (options.global || options.local) {
+        const context = resolveActiveConfig({ global: options.global, local: options.local });
+        servers = Object.entries(context.config.servers).map(([name, spec]) => ({
+          name,
+          ...spec,
+          projectName: context.type === "project" ? (context.config.name || path.basename(context.projectPath!)) : undefined
+        }));
+      } else {
+        const mergedConfig = loadMergedConfig();
+        const globalConfig = loadConfig();
+        const projectNamesMap = new Map<string, string>();
+        if (globalConfig.projects) {
+          for (const [projectPath, entry] of Object.entries(globalConfig.projects)) {
+            const localPath = path.join(projectPath, ".mcpx.json");
+            if (fs.existsSync(localPath)) {
+              try {
+                const localConfig = loadProjectConfig(localPath);
+                const pName = localConfig.name || entry.name || path.basename(projectPath);
+                projectNamesMap.set(pName, projectPath);
+              } catch {
+                // Ignore
+              }
+            }
+          }
+        }
+
+        servers = Object.entries(mergedConfig.servers).map(([name, spec]) => {
+          let projectName: string | undefined;
+          let baseName = name;
+          
+          for (const pName of projectNamesMap.keys()) {
+            if (name.startsWith(`${pName}.`)) {
+              projectName = pName;
+              baseName = name.slice(pName.length + 1);
+              break;
+            }
+          }
+
+          return {
+            name: baseName,
+            ...spec,
+            projectName
+          };
+        });
+      }
 
       if (options.json) {
         process.stdout.write(`${JSON.stringify({ servers }, null, 2)}\n`);
@@ -1027,11 +1150,12 @@ function registerListCommand(parent: Command): void {
 
       for (const server of servers) {
         const state = isServerEnabled(server) ? "enabled" : "disabled";
+        const scope = server.projectName ? `project: ${server.projectName}` : "global";
         if (server.transport === "http") {
-          process.stdout.write(`- ${server.name} (${state}, http) ${server.url}\n`);
+          process.stdout.write(`- ${server.name} (${state}, http, ${scope}) ${server.url}\n`);
         } else {
           const args = (server.args ?? []).join(" ");
-          process.stdout.write(`- ${server.name} (${state}, stdio) ${server.command}${args ? ` ${args}` : ""}\n`);
+          process.stdout.write(`- ${server.name} (${state}, stdio, ${scope}) ${server.command}${args ? ` ${args}` : ""}\n`);
         }
       }
     });
@@ -1044,7 +1168,7 @@ function registerSyncCommand(program: Command, cliPath: string): void {
     .option("--json", "Output JSON")
     .description("Sync gateway configuration to supported clients (e.g. `mcpx sync claude`)")
     .action(async (clients: string[], options: { client: string[]; json?: boolean }) => {
-      const config = loadConfig();
+      const config = loadMergedConfig();
       const targetClients = parseClientList([...(clients ?? []), ...(options.client ?? [])]);
       const secrets = new SecretsManager();
       await ensureDaemonIfEnabled(cliPath, secrets);
@@ -1061,7 +1185,7 @@ function registerStatusCommand(program: Command, cliPath: string): void {
     .option("--json", "Output JSON")
     .description("Show gateway, daemon, MCP inventory, and client sync status")
     .action(async (options: { json?: boolean; interactive?: boolean }) => {
-      const report = loadStatusReport();
+      const report = await loadStatusReport();
 
       if (options.json) {
         process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
@@ -1503,6 +1627,80 @@ function registerUpdateCommand(program: Command): void {
     });
 }
 
+function registerProjectCommands(program: Command, cliPath: string): void {
+  const projectCmd = program
+    .command("project")
+    .description("Manage project-based MCP configurations");
+
+  projectCmd
+    .command("init [name]")
+    .description("Initialize a local .mcpx.json configuration in the current directory")
+    .action(async (name?: string) => {
+      const targetPath = path.join(process.cwd(), ".mcpx.json");
+      if (fs.existsSync(targetPath)) {
+        process.stderr.write(`Local project configuration already exists at: ${targetPath}\n`);
+        process.exit(1);
+      }
+
+      const projectName = name?.trim() || path.basename(process.cwd());
+      const localConfig = {
+        name: projectName,
+        servers: {}
+      };
+
+      const { saveProjectConfig } = await import("./core/config.js");
+      saveProjectConfig(localConfig, targetPath);
+      process.stdout.write(`Initialized project configuration at: ${targetPath}\n`);
+
+      const { registerProject } = await import("./core/registry.js");
+      const globalConfig = loadConfig();
+      registerProject(globalConfig, process.cwd(), projectName);
+      saveConfig(globalConfig);
+      process.stdout.write(`Registered project "${projectName}" globally.\n`);
+    });
+
+  projectCmd
+    .command("list")
+    .description("List all globally registered project paths")
+    .action(() => {
+      const globalConfig = loadConfig();
+      const projects = Object.entries(globalConfig.projects ?? {});
+
+      if (projects.length === 0) {
+        process.stdout.write("No projects currently registered.\n");
+        return;
+      }
+
+      process.stdout.write("Registered Projects:\n");
+      for (const [projectPath, entry] of projects) {
+        process.stdout.write(`- ${entry.name}: ${projectPath}\n`);
+      }
+    });
+
+  projectCmd
+    .command("remove <path>")
+    .description("Unregister a project path from the global configuration")
+    .action(async (projectPath: string) => {
+      const resolvedPath = path.resolve(projectPath);
+      const globalConfig = loadConfig();
+      if (!globalConfig.projects || !globalConfig.projects[resolvedPath]) {
+        process.stderr.write(`No registered project found at path: ${resolvedPath}\n`);
+        process.exit(1);
+      }
+
+      const entry = globalConfig.projects[resolvedPath];
+      const { unregisterProject } = await import("./core/registry.js");
+      unregisterProject(globalConfig, resolvedPath);
+      saveConfig(globalConfig);
+      process.stdout.write(`Unregistered project "${entry.name}" (${resolvedPath}) from the global configuration.\n`);
+      
+      process.stdout.write("Auto-syncing managed gateway entries across all supported clients...\n");
+      const mergedConfig = loadMergedConfig();
+      await autoSyncManagedEntries(mergedConfig, cliPath);
+    });
+}
+
+
 function registerProxyCommand(program: Command): void {
   program
     .command("proxy <name>")
@@ -1585,6 +1783,7 @@ export async function runCli(argv = process.argv): Promise<void> {
   registerProxyCommand(program);
   registerMcpCompat(program, cliPath);
   registerUpdateCommand(program);
+  registerProjectCommands(program, cliPath);
 
   await program.parseAsync(argv);
 }
