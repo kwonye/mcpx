@@ -70,6 +70,17 @@ function buildContextMenu(daemonRunning: boolean): Menu {
 }
 
 function loadStatusIcons(): { normal: StatusIcons; dev: StatusIcons } {
+  if (process.platform === "linux") {
+    // Linux: use a single icon (no template image support)
+    const icon = nativeImage.createFromPath(
+      join(__dirname, "../../resources/linux/tray-icon.png")
+    );
+    return {
+      normal: { green: icon, red: icon },
+      dev: { green: icon, red: icon }
+    };
+  }
+
   return {
     normal: {
       green: nativeImage.createFromPath(join(__dirname, "../../resources/trayIconTemplate-green.png")),

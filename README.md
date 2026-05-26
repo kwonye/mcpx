@@ -5,16 +5,20 @@
 </p>
 
 <p align="center">
-  <b>mcpx</b> is a local MCP gateway for macOS. Install upstream MCP servers once, authorize them once, and expose them to multiple AI clients — all managed from a native desktop app.
+  <b>mcpx</b> is a local MCP gateway. Install upstream MCP servers once, authorize them once, and expose them to multiple AI clients — all managed from a native desktop app (macOS + Linux) or CLI.
 </p>
 
 ![Dashboard](docs/images/mcpx-dashboard.png)
 
-## Desktop App (macOS)
+## Platforms
 
-The mcpx desktop app is the easiest way to manage your MCP servers. It runs in your menubar with a full dashboard for server discovery, configuration, and monitoring.
+- **macOS** — Desktop app (menubar tray) + CLI
+- **Linux** — Desktop app (system tray) + CLI
+- **CLI only**: Any platform with Node.js/Bun
 
-### Features
+## Desktop App
+
+The mcpx desktop app is the easiest way to manage your MCP servers. It runs in your system tray with a full dashboard for server discovery, configuration, and monitoring.
 
 - **Menubar tray** — Gateway status, quick server list, and one-click dashboard access from the menu bar
 - **Dashboard** — Start/stop the gateway daemon, view connected servers, and add new ones with a paste-and-go command input
@@ -29,8 +33,9 @@ Download the latest release from [GitHub Releases](https://github.com/kwonye/mcp
 
 ### Install from source
 
-Prerequisites: [Bun](https://bun.sh) >= 1.2, macOS
+Prerequisites: [Bun](https://bun.sh) >= 1.2
 
+**macOS:**
 ```bash
 git clone https://github.com/kwonye/mcpx.git
 cd mcpx/app
@@ -41,12 +46,24 @@ bun run desktop-install
 This builds and installs the app to `/Applications/mcpx.app`.
 
 For development with DevTools:
-
 ```bash
 bun run desktop-install:dev
 ```
 
-This installs a side-by-side `/Applications/mcpx-dev.app` bundle with DevTools auto-opened.
+**Linux:**
+```bash
+git clone https://github.com/kwonye/mcpx.git
+cd mcpx/app
+
+# Install libsecret for keyring support
+sudo apt-get install -y libsecret-1-dev
+
+bun install
+bun run build
+bunx electron-builder build --linux
+```
+
+This produces an AppImage and `.deb` in `app/dist/`.
 
 ### Quick Tour
 
@@ -256,11 +273,13 @@ bun run e2e       # Run Playwright E2E tests
 This is a monorepo containing:
 
 - **`cli/`** — The `mcpx` CLI and core library (`@kwonye/mcpx`)
-- **`app/`** — The macOS desktop app (Electron + React)
+- **`app/`** — The desktop app (Electron + React) for macOS and Linux
 
 The desktop app imports the CLI's core logic directly via a `@mcpx/core` TypeScript alias, so both packages share identical configuration parsing, sync logic, and secret management.
 
 ## Notes
 
 - Client connectivity is HTTP-first; upstreams can be HTTP or stdio
-- macOS Keychain is the secure secret backend (with `MCPX_SECRET_<name>` env var fallbacks for CI/headless)
+- Secrets use OS-native keychains via [keytar](https://github.com/atom/node-keytar): macOS Keychain, Linux Secret Service (libsecret)
+- `MCPX_SECRET_<name>` env var overrides work on all platforms for CI/headless
+- Linux desktop app requires `libsecret-1-dev` for keyring support

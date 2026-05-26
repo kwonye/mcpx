@@ -1,8 +1,27 @@
-import { execFileSync } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import { getSecretNamesPath } from "./paths.js";
 import { readJsonFile, writeJsonAtomic } from "../util/fs.js";
+
+// keytar is optional — gracefully degrade if native addon fails to load.
+// keytar's JS implementation is synchronous; the types declare Promises.
+// We access the underlying sync functions directly.
+let keytarSync: {
+  getPassword: (service: string, account: string) => string;
+  setPassword: (service: string, account: string, password: string) => void;
+  deletePassword: (service: string, account: string) => boolean;
+} | null = null;
+try {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
+  const keytar = require("../node_modules/keytar/lib/keytar.js") as {
+    getPassword: (service: string, account: string) => string;
+    setPassword: (service: string, account: string, password: string) => void;
+    deletePassword: (service: string, account: string) => boolean;
+  };
+  keytarSync = keytar;
+} catch {
+  keytarSync = null;
+}
 
 interface SecretNameIndex {
   names: string[];
@@ -53,25 +72,24 @@ export class SecretsManager {
   }
 
   setSecret(name: string, value: string): void {
-    if (process.platform !== "darwin") {
-      throw new Error("OS keychain integration is currently implemented for macOS only.");
+    if (keytarSync) {
+      keytarSync.setPassword(this.service, name, value);
+    } else {
+      throw new Error(
+        "Secret storage is unavailable: keytar native addon failed to load. " +
+          "Install libsecret (Linux) or ensure Xcode CLI tools (macOS), then reinstall dependencies."
+      );
     }
-
-    execFileSync("security", ["add-generic-password", "-U", "-a", name, "-s", this.service, "-w", value], {
-      stdio: "ignore"
-    });
 
     this.trackSecretName(name);
   }
 
   removeSecret(name: string): void {
-    if (process.platform === "darwin") {
+    if (keytarSync) {
       try {
-        execFileSync("security", ["delete-generic-password", "-a", name, "-s", this.service], {
-          stdio: "ignore"
-        });
+        keytarSync.deletePassword(this.service, name);
       } catch {
-        // Ignore missing keychain entry.
+        // Ignore missing entry.
       }
     }
 
@@ -84,14 +102,16 @@ export class SecretsManager {
       return envOverride;
     }
 
-    if (process.platform !== "darwin") {
+    if (!keytarSync) {
       return null;
     }
 
     try {
-      return execFileSync("security", ["find-generic-password", "-w", "-a", name, "-s", this.service], {
-        encoding: "utf8"
-      }).trim();
+      const value = keytarSync.getPassword(this.service, name);
+      if (typeof value === "string" && value.length > 0) {
+        return value;
+      }
+      return null;
     } catch {
       return null;
     }

@@ -36,6 +36,9 @@ export class VsCodeAdapter implements ClientAdapter {
   readonly id = "vscode" as const;
 
   detectConfigPath(): string | null {
+    if (process.platform === "linux") {
+      return path.join(homeDir(), ".config", "Code", "User", "mcp.json");
+    }
     return path.join(homeDir(), "Library", "Application Support", "Code", "User", "mcp.json");
   }
 

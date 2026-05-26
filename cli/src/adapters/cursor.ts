@@ -36,6 +36,9 @@ export class CursorAdapter implements ClientAdapter {
   readonly id = "cursor" as const;
 
   detectConfigPath(): string | null {
+    if (process.platform === "linux") {
+      return path.join(homeDir(), ".config", "Cursor", "User", "mcp.json");
+    }
     return path.join(homeDir(), "Library", "Application Support", "Cursor", "User", "mcp.json");
   }
 

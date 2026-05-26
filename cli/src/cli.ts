@@ -1357,15 +1357,25 @@ function registerDoctorCommand(program: Command): void {
         details: getManagedIndexPath()
       });
 
-      if (process.platform === "darwin") {
+      // Check keyring backend availability
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
+        const keytar = require(path.join(__dirname, "..", "node_modules", "keytar", "lib", "keytar.js"));
+        // Try a no-op lookup to verify the native addon works
         try {
-          execFileSync("security", ["help"], { stdio: "ignore" });
-          checks.push({ check: "macos_keychain", status: "ok", details: "security CLI available" });
+          keytar.getPassword("mcpx-doctor-check", "__probe__");
         } catch {
-          checks.push({ check: "macos_keychain", status: "fail", details: "security CLI unavailable" });
+          // Expected to fail with "not found", but if it throws a native addon error, we'll catch it below
         }
-      } else {
-        checks.push({ check: "macos_keychain", status: "warn", details: "Non-macOS platform; keychain integration unavailable" });
+        checks.push({ check: "keyring", status: "ok", details: "keytar native addon loaded" });
+      } catch {
+        if (process.platform === "linux") {
+          checks.push({ check: "keyring", status: "warn", details: "keytar native addon unavailable; install libsecret-1-dev and reinstall dependencies" });
+        } else if (process.platform === "darwin") {
+          checks.push({ check: "keyring", status: "warn", details: "keytar native addon unavailable; reinstall dependencies or check Xcode CLI tools" });
+        } else {
+          checks.push({ check: "keyring", status: "warn", details: "keytar native addon unavailable" });
+        }
       }
 
       const daemon = getDaemonStatus(config);

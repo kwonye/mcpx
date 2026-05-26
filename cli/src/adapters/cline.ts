@@ -34,11 +34,17 @@ const clineEntrySchema = z.object({
 }).passthrough();
 
 function getCandidatePaths(): string[] {
-  return [
-    path.join(homeDir(), "Library", "Application Support", "Code", "User", "globalStorage", "saoudrizwan.claude-dev", "settings", "cline_mcp_settings.json"),
-    path.join(homeDir(), "Library", "Application Support", "Cursor", "User", "globalStorage", "saoudrizwan.claude-dev", "settings", "cline_mcp_settings.json")
-  ];
-}
+    if (process.platform === "linux") {
+      return [
+        path.join(homeDir(), ".config", "Code", "User", "globalStorage", "saoudrizwan.claude-dev", "settings", "cline_mcp_settings.json"),
+        path.join(homeDir(), ".config", "Cursor", "User", "globalStorage", "saoudrizwan.claude-dev", "settings", "cline_mcp_settings.json")
+      ];
+    }
+    return [
+      path.join(homeDir(), "Library", "Application Support", "Code", "User", "globalStorage", "saoudrizwan.claude-dev", "settings", "cline_mcp_settings.json"),
+      path.join(homeDir(), "Library", "Application Support", "Cursor", "User", "globalStorage", "saoudrizwan.claude-dev", "settings", "cline_mcp_settings.json")
+    ];
+  }
 
 export class ClineAdapter implements ClientAdapter {
   readonly id = "cline" as const;

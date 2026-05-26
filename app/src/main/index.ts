@@ -24,7 +24,7 @@ export const lifecycleState = { allowQuit: false };
 let daemonRunning = false;
 
 /**
- * Register macOS lifecycle event handlers.
+ * Register macOS/Linux lifecycle event handlers.
  * Extracted into a separate function for testability.
  */
 export function registerLifecycleHandlers(deps: {
@@ -38,18 +38,21 @@ export function registerLifecycleHandlers(deps: {
     if (!lifecycleState.allowQuit) {
       e.preventDefault();
       deps.closeDashboard();
-      deps.app.hide();
+      if (process.platform === "darwin") {
+        deps.app.hide();
+      }
       return;
     }
     // Allow quit to proceed
   });
 
-  // When all windows are closed, app stays running on macOS (menu bar app pattern)
-  // Only quits on non-macOS platforms where menu bar is not available
+  // When all windows are closed, app stays running (menu bar app pattern)
+  // On Linux without a tray, we quit; with tray, we stay alive
   deps.app.on("window-all-closed", () => {
-    if (process.platform !== "darwin") {
+    if (process.platform === "linux" && !process.env.MCPX_ENABLE_TRAY) {
       deps.app.quit();
     }
+    // On macOS and Linux with tray enabled, keep running
   });
 }
 
@@ -121,17 +124,19 @@ export async function startMainProcess(): Promise<void> {
     return;
   }
 
-  // Only open the dashboard for genuine second-instance launches (not daemon child spawns).
-  // The daemon child is spawned with argv [..., "daemon", "run", "--port", ...].
-  // A second instance launching (e.g. double-clicking the app) just quits — the
-  // tray icon is already visible. We intentionally do NOT open the dashboard here
-  // because the daemon is spawned as a child Electron process and would also
-  // trigger this event, opening the dashboard every time the gateway starts.
-  app.on("second-instance", () => {});
+  // Second-instance: on Linux, open the dashboard; on macOS, do nothing (tray already visible)
+  app.on("second-instance", () => {
+    if (process.platform === "linux") {
+      openDashboard();
+    }
+  });
 
   await app.whenReady();
 
-  Menu.setApplicationMenu(buildApplicationMenu());
+  // On Linux, don't use the macOS-style application menu — rely on tray context menu
+  if (process.platform !== "linux") {
+    Menu.setApplicationMenu(buildApplicationMenu());
+  }
 
   const settings = loadDesktopSettings();
   applyStartOnLoginSetting(settings.startOnLoginEnabled);
@@ -165,9 +170,8 @@ export async function startMainProcess(): Promise<void> {
   });
 
   // ============================================================================
-  // macOS Lifecycle Handlers
+  // Lifecycle Handlers
   // ============================================================================
-  // Register lifecycle handlers using the extracted function for testability
   registerLifecycleHandlers({ app, openDashboard, closeDashboard });
   // ============================================================================
 

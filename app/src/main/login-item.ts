@@ -1,24 +1,66 @@
 import { app } from "electron";
+import fs from "node:fs";
+import path from "node:path";
+import { app as electronApp } from "electron";
 
-function isSupportedPlatform(): boolean {
+function isMac(): boolean {
   return process.platform === "darwin";
 }
 
+function isLinux(): boolean {
+  return process.platform === "linux";
+}
+
 export function applyStartOnLoginSetting(enabled: boolean): void {
-  if (!isSupportedPlatform()) {
+  if (isMac()) {
+    app.setLoginItemSettings({
+      openAtLogin: enabled,
+      openAsHidden: enabled
+    });
     return;
   }
 
-  app.setLoginItemSettings({
-    openAtLogin: enabled,
-    openAsHidden: enabled
-  });
+  if (isLinux()) {
+    const autostartDir = path.join(
+      process.env.HOME ?? "",
+      ".config",
+      "autostart"
+    );
+    const desktopFile = path.join(autostartDir, "mcpx.desktop");
+
+    if (enabled) {
+      fs.mkdirSync(autostartDir, { recursive: true });
+      const execPath = process.execPath;
+      const iconPath = path.join(__dirname, "../../resources/linux/tray-icon.png");
+      const desktopEntry = `[Desktop Entry]
+Type=Application
+Name=mcpx
+Comment=Local MCP gateway
+Exec=${execPath}
+Icon=${iconPath}
+Terminal=false
+X-GNOME-Autostart-enabled=true
+`;
+      fs.writeFileSync(desktopFile, desktopEntry);
+    } else {
+      try {
+        fs.unlinkSync(desktopFile);
+      } catch {
+        // Ignore if file doesn't exist
+      }
+    }
+  }
 }
 
 export function wasOpenedAtLogin(): boolean {
-  if (!isSupportedPlatform()) {
-    return false;
+  if (isMac()) {
+    return Boolean(app.getLoginItemSettings().wasOpenedAtLogin);
   }
 
-  return Boolean(app.getLoginItemSettings().wasOpenedAtLogin);
+  // Linux: check for --hidden or --autostart flag in argv
+  if (isLinux()) {
+    return process.argv.includes("--autostart") || process.argv.includes("--hidden");
+  }
+
+  return false;
 }

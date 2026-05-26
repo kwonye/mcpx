@@ -33,7 +33,7 @@ export function openDashboard(): BrowserWindow {
   dashboard = new BrowserWindow({
     width: 1100,
     height: 700,
-    titleBarStyle: "hiddenInset",
+    titleBarStyle: process.platform === "linux" ? "default" : "hiddenInset",
     trafficLightPosition: { x: 16, y: 16 },
     show: false,
     webPreferences: {

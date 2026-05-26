@@ -157,7 +157,7 @@ jobs:
           name: cli-dist
           path: cli/dist/
 
-  build-desktop:
+  build-desktop-macos:
     needs: orchestrate
     if: needs.orchestrate.outputs.include_desktop == 'true'
     runs-on: macos-14
@@ -229,19 +229,76 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
 
-      - name: Upload desktop artifacts
+      - name: Upload macOS desktop artifacts
         uses: actions/upload-artifact@v6
         with:
-          name: desktop-dist
+          name: desktop-dist-macos
           path: |
             app/dist/**/*.dmg
             app/dist/**/*.zip
             app/dist/**/*.blockmap
             app/dist/**/latest*.yml
 
+  build-desktop-linux:
+    needs: orchestrate
+    if: needs.orchestrate.outputs.include_desktop == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install system dependencies for keytar
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsecret-1-dev
+
+      - name: Install CLI dependencies
+        run: bun install --frozen-lockfile
+        working-directory: cli
+
+      - name: Install desktop dependencies
+        run: bun install --frozen-lockfile
+        working-directory: app
+
+      - name: Set desktop version for build
+        run: bun -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync('package.json','utf8'));p.version='${{ needs.orchestrate.outputs.version }}';fs.writeFileSync('package.json',JSON.stringify(p,null,2)+'\n')"
+        working-directory: app
+
+      - name: Build desktop bundle
+        run: bun run build
+        working-directory: app
+
+      - name: Rebuild keytar native addon for Linux
+        run: |
+          cd app/node_modules/keytar
+          npx node-gyp rebuild
+        env:
+          npm_config_arch: x64
+
+      - name: Package Linux app
+        run: bunx electron-builder build --linux --publish never
+        working-directory: app
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload Linux desktop artifacts
+        uses: actions/upload-artifact@v6
+        with:
+          name: desktop-dist-linux
+          path: |
+            app/dist/**/*.AppImage
+            app/dist/**/*.deb
+
   publish-release:
-    needs: [orchestrate, build-cli, build-desktop]
-    if: always() && needs.orchestrate.result == 'success' && (needs.build-cli.result == 'success' || needs.build-cli.result == 'skipped') && (needs.build-desktop.result == 'success' || needs.build-desktop.result == 'skipped')
+    needs: [orchestrate, build-cli, build-desktop-macos, build-desktop-linux]
+    if: always() && needs.orchestrate.result == 'success' && (needs.build-cli.result == 'success' || needs.build-cli.result == 'skipped') && (needs.build-desktop-macos.result == 'success' || needs.build-desktop-macos.result == 'skipped') && (needs.build-desktop-linux.result == 'success' || needs.build-desktop-linux.result == 'skipped')
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -254,12 +311,19 @@ jobs:
           name: cli-dist
           path: cli-dist/
 
-      - name: Download desktop artifacts
+      - name: Download macOS desktop artifacts
         if: needs.orchestrate.outputs.include_desktop == 'true'
         uses: actions/download-artifact@v6
         with:
-          name: desktop-dist
-          path: desktop-dist/
+          name: desktop-dist-macos
+          path: desktop-dist-macos/
+
+      - name: Download Linux desktop artifacts
+        if: needs.orchestrate.outputs.include_desktop == 'true'
+        uses: actions/download-artifact@v6
+        with:
+          name: desktop-dist-linux
+          path: desktop-dist-linux/
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -269,8 +333,10 @@ jobs:
           draft: false
           overwrite_files: true
           files: |
-            desktop-dist/*.dmg
-            desktop-dist/*.zip
-            desktop-dist/*.blockmap
-            desktop-dist/*latest*.yml
+            desktop-dist-macos/*.dmg
+            desktop-dist-macos/*.zip
+            desktop-dist-macos/*.blockmap
+            desktop-dist-macos/*latest*.yml
+            desktop-dist-linux/*.AppImage
+            desktop-dist-linux/*.deb
           fail_on_unmatched_files: false
