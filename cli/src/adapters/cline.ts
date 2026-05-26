@@ -40,6 +40,12 @@ function getCandidatePaths(): string[] {
         path.join(homeDir(), ".config", "Cursor", "User", "globalStorage", "saoudrizwan.claude-dev", "settings", "cline_mcp_settings.json")
       ];
     }
+    if (process.platform === "win32") {
+      return [
+        path.join(process.env.APPDATA ?? "", "Code", "User", "globalStorage", "saoudrizwan.claude-dev", "settings", "cline_mcp_settings.json"),
+        path.join(process.env.APPDATA ?? "", "Cursor", "User", "globalStorage", "saoudrizwan.claude-dev", "settings", "cline_mcp_settings.json")
+      ];
+    }
     return [
       path.join(homeDir(), "Library", "Application Support", "Code", "User", "globalStorage", "saoudrizwan.claude-dev", "settings", "cline_mcp_settings.json"),
       path.join(homeDir(), "Library", "Application Support", "Cursor", "User", "globalStorage", "saoudrizwan.claude-dev", "settings", "cline_mcp_settings.json")

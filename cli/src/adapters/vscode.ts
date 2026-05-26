@@ -39,6 +39,9 @@ export class VsCodeAdapter implements ClientAdapter {
     if (process.platform === "linux") {
       return path.join(homeDir(), ".config", "Code", "User", "mcp.json");
     }
+    if (process.platform === "win32") {
+      return path.join(process.env.APPDATA ?? "", "Code", "User", "mcp.json");
+    }
     return path.join(homeDir(), "Library", "Application Support", "Code", "User", "mcp.json");
   }
 

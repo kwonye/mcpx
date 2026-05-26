@@ -46,13 +46,17 @@ export function registerLifecycleHandlers(deps: {
     // Allow quit to proceed
   });
 
-  // When all windows are closed, app stays running (menu bar app pattern)
-  // On Linux without a tray, we quit; with tray, we stay alive
+  // When all windows are closed:
+  // - Windows: quit (standard Electron behavior)
+  // - macOS: stay running (menu bar app)
+  // - Linux: quit only if tray is disabled
   deps.app.on("window-all-closed", () => {
-    if (process.platform === "linux" && !process.env.MCPX_ENABLE_TRAY) {
+    if (process.platform === "win32") {
+      deps.app.quit();
+    } else if (process.platform === "linux" && !process.env.MCPX_ENABLE_TRAY) {
       deps.app.quit();
     }
-    // On macOS and Linux with tray enabled, keep running
+    // On macOS (and Linux with tray enabled), keep running
   });
 }
 
@@ -124,9 +128,9 @@ export async function startMainProcess(): Promise<void> {
     return;
   }
 
-  // Second-instance: on Linux, open the dashboard; on macOS, do nothing (tray already visible)
+  // Second-instance: on Linux/Windows, open the dashboard; on macOS, do nothing (tray already visible)
   app.on("second-instance", () => {
-    if (process.platform === "linux") {
+    if (process.platform !== "darwin") {
       openDashboard();
     }
   });

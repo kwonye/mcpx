@@ -45,6 +45,9 @@ export class ClaudeDesktopAdapter implements ClientAdapter {
     if (process.platform === "linux") {
       return path.join(homeDir(), ".config", "Claude", "claude_desktop_config.json");
     }
+    if (process.platform === "win32") {
+      return path.join(process.env.APPDATA ?? "", "Claude", "claude_desktop_config.json");
+    }
     return path.join(homeDir(), "Library", "Application Support", "Claude", "claude_desktop_config.json");
   }
 

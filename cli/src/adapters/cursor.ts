@@ -39,6 +39,9 @@ export class CursorAdapter implements ClientAdapter {
     if (process.platform === "linux") {
       return path.join(homeDir(), ".config", "Cursor", "User", "mcp.json");
     }
+    if (process.platform === "win32") {
+      return path.join(process.env.APPDATA ?? "", "Cursor", "User", "mcp.json");
+    }
     return path.join(homeDir(), "Library", "Application Support", "Cursor", "User", "mcp.json");
   }
 

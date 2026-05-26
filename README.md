@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <b>mcpx</b> is a local MCP gateway. Install upstream MCP servers once, authorize them once, and expose them to multiple AI clients — all managed from a native desktop app (macOS + Linux) or CLI.
+  <b>mcpx</b> is a local MCP gateway. Install upstream MCP servers once, authorize them once, and expose them to multiple AI clients — all managed from a native desktop app (macOS + Linux + Windows) or CLI.
 </p>
 
 ![Dashboard](docs/images/mcpx-dashboard.png)
@@ -14,6 +14,7 @@
 
 - **macOS** — Desktop app (menubar tray) + CLI
 - **Linux** — Desktop app (system tray) + CLI
+- **Windows** — Desktop app (system tray) + CLI
 - **CLI only**: Any platform with Node.js/Bun
 
 ## Desktop App
@@ -64,6 +65,17 @@ bunx electron-builder build --linux
 ```
 
 This produces an AppImage and `.deb` in `app/dist/`.
+
+**Windows:**
+```bash
+git clone https://github.com/kwonye/mcpx.git
+cd mcpx/app
+bun install
+bun run build
+bunx electron-builder build --win
+```
+
+This produces an NSIS installer and portable `.exe` in `app/dist/`.
 
 ### Quick Tour
 
@@ -273,13 +285,13 @@ bun run e2e       # Run Playwright E2E tests
 This is a monorepo containing:
 
 - **`cli/`** — The `mcpx` CLI and core library (`@kwonye/mcpx`)
-- **`app/`** — The desktop app (Electron + React) for macOS and Linux
+- **`app/`** — The desktop app (Electron + React) for macOS, Linux, and Windows
 
 The desktop app imports the CLI's core logic directly via a `@mcpx/core` TypeScript alias, so both packages share identical configuration parsing, sync logic, and secret management.
 
 ## Notes
 
 - Client connectivity is HTTP-first; upstreams can be HTTP or stdio
-- Secrets use OS-native keychains via [keytar](https://github.com/atom/node-keytar): macOS Keychain, Linux Secret Service (libsecret)
+- Secrets use OS-native keychains via [keytar](https://github.com/atom/node-keytar): macOS Keychain, Linux Secret Service (libsecret), Windows Credential Vault
 - `MCPX_SECRET_<name>` env var overrides work on all platforms for CI/headless
 - Linux desktop app requires `libsecret-1-dev` for keyring support

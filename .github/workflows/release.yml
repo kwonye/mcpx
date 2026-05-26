@@ -296,9 +296,66 @@ jobs:
             app/dist/**/*.AppImage
             app/dist/**/*.deb
 
+  build-desktop-windows:
+    needs: orchestrate
+    if: needs.orchestrate.outputs.include_desktop == 'true'
+    runs-on: windows-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install windows-build-tools for keytar
+        run: npm install --global windows-build-tools
+        continue-on-error: true
+
+      - name: Install CLI dependencies
+        run: bun install --frozen-lockfile
+        working-directory: cli
+
+      - name: Install desktop dependencies
+        run: bun install --frozen-lockfile
+        working-directory: app
+
+      - name: Set desktop version for build
+        run: bun -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync('package.json','utf8'));p.version='${{ needs.orchestrate.outputs.version }}';fs.writeFileSync('package.json',JSON.stringify(p,null,2)+'\n')"
+        working-directory: app
+
+      - name: Build desktop bundle
+        run: bun run build
+        working-directory: app
+
+      - name: Rebuild keytar native addon for Windows
+        run: |
+          cd app/node_modules/keytar
+          npx node-gyp rebuild
+        env:
+          npm_config_arch: x64
+
+      - name: Package Windows app
+        run: bunx electron-builder build --win --publish never
+        working-directory: app
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload Windows desktop artifacts
+        uses: actions/upload-artifact@v6
+        with:
+          name: desktop-dist-windows
+          path: |
+            app/dist/**/*.exe
+            app/dist/**/*.blockmap
+            app/dist/**/latest*.yml
+
   publish-release:
-    needs: [orchestrate, build-cli, build-desktop-macos, build-desktop-linux]
-    if: always() && needs.orchestrate.result == 'success' && (needs.build-cli.result == 'success' || needs.build-cli.result == 'skipped') && (needs.build-desktop-macos.result == 'success' || needs.build-desktop-macos.result == 'skipped') && (needs.build-desktop-linux.result == 'success' || needs.build-desktop-linux.result == 'skipped')
+    needs: [orchestrate, build-cli, build-desktop-macos, build-desktop-linux, build-desktop-windows]
+    if: always() && needs.orchestrate.result == 'success' && (needs.build-cli.result == 'success' || needs.build-cli.result == 'skipped') && (needs.build-desktop-macos.result == 'success' || needs.build-desktop-macos.result == 'skipped') && (needs.build-desktop-linux.result == 'success' || needs.build-desktop-linux.result == 'skipped') && (needs.build-desktop-windows.result == 'success' || needs.build-desktop-windows.result == 'skipped')
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -325,6 +382,13 @@ jobs:
           name: desktop-dist-linux
           path: desktop-dist-linux/
 
+      - name: Download Windows desktop artifacts
+        if: needs.orchestrate.outputs.include_desktop == 'true'
+        uses: actions/download-artifact@v6
+        with:
+          name: desktop-dist-windows
+          path: desktop-dist-windows/
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -339,4 +403,7 @@ jobs:
             desktop-dist-macos/*latest*.yml
             desktop-dist-linux/*.AppImage
             desktop-dist-linux/*.deb
+            desktop-dist-windows/*.exe
+            desktop-dist-windows/*.blockmap
+            desktop-dist-windows/*latest*.yml
           fail_on_unmatched_files: false

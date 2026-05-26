@@ -49,6 +49,16 @@ X-GNOME-Autostart-enabled=true
         // Ignore if file doesn't exist
       }
     }
+    return;
+  }
+
+  // Windows: use Electron's built-in login item settings (writes to registry)
+  if (process.platform === "win32") {
+    app.setLoginItemSettings({
+      openAtLogin: enabled,
+      openAsHidden: enabled,
+      path: process.execPath
+    });
   }
 }
 
@@ -60,6 +70,11 @@ export function wasOpenedAtLogin(): boolean {
   // Linux: check for --hidden or --autostart flag in argv
   if (isLinux()) {
     return process.argv.includes("--autostart") || process.argv.includes("--hidden");
+  }
+
+  // Windows: Electron's getLoginItemSettings detects startup launches
+  if (process.platform === "win32") {
+    return Boolean(app.getLoginItemSettings().wasOpenedAtLogin);
   }
 
   return false;

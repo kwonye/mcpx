@@ -42,6 +42,13 @@
         "StartupWMClass": "mcpx"
       }
     },
+    "win": {
+      "icon": "build/icons/mcpx.ico",
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
     "asar": true,
     "files": [
       "out/**",

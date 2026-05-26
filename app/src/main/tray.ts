@@ -70,8 +70,8 @@ function buildContextMenu(daemonRunning: boolean): Menu {
 }
 
 function loadStatusIcons(): { normal: StatusIcons; dev: StatusIcons } {
-  if (process.platform === "linux") {
-    // Linux: use a single icon (no template image support)
+  if (process.platform !== "darwin") {
+    // Linux and Windows: use PNG icons (no template image support)
     const icon = nativeImage.createFromPath(
       join(__dirname, "../../resources/linux/tray-icon.png")
     );

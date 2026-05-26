@@ -1371,6 +1371,8 @@ function registerDoctorCommand(program: Command): void {
       } catch {
         if (process.platform === "linux") {
           checks.push({ check: "keyring", status: "warn", details: "keytar native addon unavailable; install libsecret-1-dev and reinstall dependencies" });
+        } else if (process.platform === "win32") {
+          checks.push({ check: "keyring", status: "warn", details: "keytar native addon unavailable; rebuild keytar with 'npx node-gyp rebuild' in app/node_modules/keytar" });
         } else if (process.platform === "darwin") {
           checks.push({ check: "keyring", status: "warn", details: "keytar native addon unavailable; reinstall dependencies or check Xcode CLI tools" });
         } else {
