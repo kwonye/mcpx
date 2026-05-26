@@ -1,34 +1,98 @@
 # mcpx
 
-`mcpx` is a local MCP gateway that lets you install upstream MCP servers once, authorize them once, and expose them to multiple AI clients through managed gateway entries.
+<p align="center">
+  <img src="design/icon-preview-512.png" width="128" height="128" alt="mcpx logo">
+</p>
 
-This is a monorepo containing:
+<p align="center">
+  <b>mcpx</b> is a local MCP gateway for macOS. Install upstream MCP servers once, authorize them once, and expose them to multiple AI clients — all managed from a native desktop app.
+</p>
 
-- **`cli/`** — The `mcpx` CLI and core library
-- **`app/`** — The macOS desktop app (Electron + React)
+![Dashboard](docs/images/mcpx-dashboard.png)
 
-## What it does
+## Desktop App (macOS)
 
-- Stores upstream servers in a central config (`~/.config/mcpx/config.json`)
-- Stores upstream auth in one consolidated secure store so each MCP auth flow is done once and reused across all synced clients
-- Runs a local MCP gateway daemon (`http://127.0.0.1:<port>/mcp`)
-- Syncs managed gateway entries into supported clients (one per upstream):
-  - Claude
-  - Codex
-  - Cursor
-  - Cline
-  - OpenCode
-  - Kiro
-  - VS Code
-- Gives each upstream a top-level client entry (`/vercel`, `/next-devtools`, etc.) while routing through one local daemon.
-- Uses local gateway-token auth for client -> gateway (`x-mcpx-local-token`)
-- Supports keychain-backed secret references for upstream headers
-- Passes upstream OAuth challenges (`401/403` + `WWW-Authenticate`) through to compatible clients
-- Proxies OAuth well-known metadata endpoints in single-upstream mode (`/.well-known/oauth-protected-resource` and `/.well-known/oauth-authorization-server`)
+The mcpx desktop app is the easiest way to manage your MCP servers. It runs in your menubar with a full dashboard for server discovery, configuration, and monitoring.
 
-## Install
+### Features
 
-Prerequisite: Bun >= 1.2 (https://bun.sh) or Node.js `>=20`
+- **Menubar tray** — Gateway status, quick server list, and one-click dashboard access from the menu bar
+- **Dashboard** — Start/stop the gateway daemon, view connected servers, and add new ones with a paste-and-go command input
+- **Browse Registry** — Discover and one-click install servers from the official MCP Registry
+- **Projects** — Organize servers into project-specific groups
+- **Skills** — Create and manage shared MCP skill definitions
+- **Settings** — Configure auto-start, launch-at-login, and auto-updates
+
+### Download
+
+Download the latest release from [GitHub Releases](https://github.com/kwonye/mcpx/releases).
+
+### Install from source
+
+Prerequisites: [Bun](https://bun.sh) >= 1.2, macOS
+
+```bash
+git clone https://github.com/kwonye/mcpx.git
+cd mcpx/app
+bun install
+bun run desktop-install
+```
+
+This builds and installs the app to `/Applications/mcpx.app`.
+
+For development with DevTools:
+
+```bash
+bun run desktop-install:dev
+```
+
+This installs a side-by-side `/Applications/mcpx-dev.app` bundle with DevTools auto-opened.
+
+### Quick Tour
+
+**Menubar tray & popover** — The tray icon shows gateway status (green = running, red = stopped). Click it to open a quick-status popover:
+
+![Popover](docs/images/mcpx-popover.png)
+
+- **Start / Stop** the gateway daemon
+- See active server count at a glance
+- **Add Your First Server** — Paste any `mcpx add` command directly into the popover
+- **Open Dashboard** — Jump to the full management window
+
+**My Servers tab** — The main view for managing your MCP servers:
+
+![Servers](docs/images/mcpx-servers.png)
+
+- See all configured upstream servers and their connection status
+- Start/stop the gateway daemon
+- Add servers by pasting an `mcpx add` command (e.g. `mcpx add vercel https://mcp.vercel.com/mcp`)
+
+**Browse Registry tab** — Discover and install MCP servers from the official registry:
+
+![Browse](docs/images/mcpx-browse.png)
+
+- Browse curated MCP servers
+- One-click install
+
+**Projects tab** — Organize servers into project groups:
+
+![Projects](docs/images/mcpx-projects.png)
+
+**Skills tab** — Manage shared skill definitions:
+
+![Skills](docs/images/mcpx-skills.png)
+
+**Settings tab** — App configuration:
+
+![Settings](docs/images/mcpx-settings.png)
+
+---
+
+## CLI
+
+The `mcpx` CLI is also available as a standalone npm package for terminal workflows and CI.
+
+### Install
 
 ```bash
 npm install -g @kwonye/mcpx@latest
@@ -36,42 +100,31 @@ npm install -g @kwonye/mcpx@latest
 bun add -g @kwonye/mcpx@latest
 ```
 
-## Quick Start
+### Quick Start
 
-### Path A: Add servers with CLI (recommended)
+#### Add servers with CLI (recommended)
 
 ```bash
-mcpx add vercel https://example.com/mcp
-
+mcpx add vercel https://mcp.vercel.com/mcp
 mcpx add next-devtools npx next-devtools-mcp@latest
 ```
 
 `mcpx add` and `mcpx remove` auto-sync by default. Run `mcpx sync` when you want a manual re-sync or to target specific clients.
 
-### Path C: Client-native compatibility shims
-
-For convenience, `mcpx` also accepts client-native install commands and translates them to the canonical `mcpx add` flow:
+#### Client-native compatibility shims
 
 ```bash
 # Claude Code
-mcpx claude mcp add vercel https://example.com/mcp
-mcpx claude mcp add next-devtools --env FOO=bar -- npx next-devtools-mcp@latest
+mcpx claude mcp add vercel https://mcp.vercel.com/mcp
 
 # Codex
 mcpx codex mcp add next-devtools --env FOO=bar -- npx next-devtools-mcp@latest
 
 # VS Code
-mcpx code --add-mcp '{"name":"vercel","url":"https://example.com/mcp"}'
-mcpx code --add-mcp '{"name":"next-devtools","command":"npx","args":["next-devtools-mcp@latest"]}'
-
-# Qwen CLI
-mcpx qwen mcp add vercel https://example.com/mcp
-mcpx qwen mcp add next-devtools --env FOO=bar -- python -m my_mcp_server
+mcpx code --add-mcp '{"name":"vercel","url":"https://mcp.vercel.com/mcp"}'
 ```
 
-Unsupported client-native commands (e.g., `cursor-agent`, `cline`, `kiro`, `opencode`) will fail with guidance to use `mcpx add` directly.
-
-### Path B: Add servers manually in JSON config
+#### Add servers manually in JSON config
 
 Edit `~/.config/mcpx/config.json` and add entries under `servers`:
 
@@ -80,7 +133,7 @@ Edit `~/.config/mcpx/config.json` and add entries under `servers`:
   "servers": {
     "vercel": {
       "transport": "http",
-      "url": "https://example.com/mcp",
+      "url": "https://mcp.vercel.com/mcp",
       "headers": {
         "Authorization": "secret://vercel_auth_header"
       }
@@ -89,61 +142,40 @@ Edit `~/.config/mcpx/config.json` and add entries under `servers`:
       "transport": "stdio",
       "command": "npx",
       "args": ["next-devtools-mcp@latest"],
-      "env": {
-        "FOO": "bar"
-      },
+      "env": { "FOO": "bar" },
       "cwd": "/path/to/project"
     }
   }
 }
 ```
 
-After manual edits, you must run:
+After manual edits, run `mcpx sync` to propagate changes.
 
-```bash
-mcpx sync
-```
+---
 
-Manual config changes do not update client configs until `mcpx sync` runs.
+## What it does
 
-## Desktop App
+- Stores upstream servers in a central config (`~/.config/mcpx/config.json`)
+- Stores upstream auth in one consolidated secure store (macOS Keychain) so each MCP auth flow is done once and reused across all synced clients
+- Runs a local MCP gateway daemon (`http://127.0.0.1:<port>/mcp`)
+- Syncs managed gateway entries into supported clients:
+  - Claude / Claude Code
+  - Codex
+  - Cursor
+  - Cline
+  - OpenCode
+  - Kiro
+  - VS Code / VS Code Insiders
+  - Qwen CLI
+- Gives each upstream a top-level client entry (`/vercel`, `/next-devtools`, etc.) while routing through one local daemon
+- Uses local gateway-token auth for client → gateway (`x-mcpx-local-token`)
+- Supports keychain-backed secret references for upstream headers
+- Passes upstream OAuth challenges through to compatible clients
+- Proxies OAuth well-known metadata endpoints in single-upstream mode
 
-The desktop app provides a visual interface for managing MCP servers:
+---
 
-- Menubar tray icon with quick-status popover
-- Dashboard with server list, detail view, and daemon controls
-- Browse tab to discover and one-click install servers from the official MCP Registry
-- Tab navigation: Servers, Browse, Settings
-
-### Development
-
-```bash
-cd app
-bun install
-bun run dev      # Start Electron dev server
-bun run test     # Run unit tests
-bun run e2e      # Run Playwright E2E tests
-```
-
-## Supported Clients
-
-- Claude
-- Codex
-- Cursor
-- Cline
-- VS Code
-
-## Claude Convention
-
-`mcpx` follows Claude-style MCP server conventions by syncing per-upstream entries keyed by server name under `mcpServers` in Claude config. Each entry is an HTTP endpoint to the local gateway (`/mcp?upstream=<name>`) and includes the required local auth header.
-
-## How it works
-
-1. Define upstream servers in central `mcpx` config.
-2. `mcpx` ensures local gateway auth and daemon state.
-3. `mcpx sync` writes managed client entries that point to the local gateway.
-
-## Advanced Usage
+## Advanced CLI Usage
 
 ### Auth and secrets
 
@@ -182,7 +214,7 @@ mcpx sync --client claude --client codex
 - `MCPX_DATA_HOME`
 - `MCPX_STATE_HOME`
 
-## Troubleshooting
+### Troubleshooting
 
 ```bash
 mcpx doctor
@@ -191,47 +223,44 @@ mcpx daemon logs
 mcpx sync --json
 ```
 
-`mcpx status` now opens an interactive MCP inventory menu in TTY sessions:
-- Shows each configured upstream MCP
-- Shows which client config files currently have that MCP synced
-- Lets you open a specific MCP and run actions (configure auth, re-authenticate, clear auth, reconnect, disable)
+`mcpx status` opens an interactive MCP inventory menu in TTY sessions showing each configured upstream, which clients have it synced, and actions (configure auth, re-authenticate, clear auth, reconnect, disable).
+
+---
 
 ## Build and test from source
 
+### CLI
+
 ```bash
-# CLI
 cd cli
 bun install
 bun run build
 bun test
-
-# Desktop app
-cd app
-bun install
-bun run build
-bun run test
 ```
 
-## CI/CD Workflows
+### Desktop app
 
-The project uses a unified release workflow:
+```bash
+cd app
+bun install
+bun run dev      # Start Electron dev server
+bun run build     # Build for production
+bun run test      # Run unit tests
+bun run e2e       # Run Playwright E2E tests
+```
 
-- **Release Orchestration** (`.github/workflows/release.yml`)
-  - **Triggers**: Push to `main` with changes in `cli/**` or `app/**`, or manual `workflow_dispatch`.
-  - **Process**:
-    - **Orchestrate**: Detects changes, computes versioning, and determines inclusion rules.
-    - **Build CLI**: (Conditional) Tests, builds, and publishes to npm.
-    - **Build Desktop**: (Conditional) Builds, signs, and notarizes the macOS universal app.
-    - **Publish Release**: Downloads all artifacts and creates a single, unified GitHub Release.
+---
 
-### Versioning Strategy
+## Architecture
 
-- **Single Monotonic Stream**: Every qualifying `main` push increments one shared patch version across all components.
-- **Unified Tags**: Releases are tracked via shared git tags (`v*`).
+This is a monorepo containing:
+
+- **`cli/`** — The `mcpx` CLI and core library (`@kwonye/mcpx`)
+- **`app/`** — The macOS desktop app (Electron + React)
+
+The desktop app imports the CLI's core logic directly via a `@mcpx/core` TypeScript alias, so both packages share identical configuration parsing, sync logic, and secret management.
 
 ## Notes
 
-- Client connectivity is HTTP-first.
-- Upstreams can be HTTP or stdio.
-- macOS keychain is the secure secret backend.
-- In CI/headless environments, `MCPX_SECRET_<name>` env vars can override keychain lookups.
+- Client connectivity is HTTP-first; upstreams can be HTTP or stdio
+- macOS Keychain is the secure secret backend (with `MCPX_SECRET_<name>` env var fallbacks for CI/headless)
