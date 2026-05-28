@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { defaultConfig } from "../src/core/config.js";
 import { buildStatusReport } from "../src/core/status.js";
 import type { DaemonStatus } from "../src/core/daemon.js";
@@ -14,6 +14,21 @@ function mockDaemonStatus(): DaemonStatus {
 }
 
 describe("status report", () => {
+  let originalPlatform: PropertyDescriptor | undefined;
+
+  beforeEach(() => {
+    originalPlatform = Object.getOwnPropertyDescriptor(process, "platform");
+    Object.defineProperty(process, "platform", { value: "darwin" });
+    process.env.MCPX_SECRET_local_gateway_token = "test-token";
+  });
+
+  afterEach(() => {
+    if (originalPlatform) {
+      Object.defineProperty(process, "platform", originalPlatform);
+    }
+    delete process.env.MCPX_SECRET_local_gateway_token;
+  });
+
   it("maps per-server synced client configs from managed index", async () => {
     const config = defaultConfig();
     config.servers.vercel = {

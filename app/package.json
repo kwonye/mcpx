@@ -37,9 +37,11 @@
       ],
       "maintainer": "kwonye",
       "desktop": {
-        "Name": "mcpx",
-        "Comment": "Local MCP gateway",
-        "StartupWMClass": "mcpx"
+        "entry": {
+          "Name": "mcpx",
+          "Comment": "Local MCP gateway",
+          "StartupWMClass": "mcpx"
+        }
       }
     },
     "win": {

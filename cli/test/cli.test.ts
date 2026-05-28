@@ -1,14 +1,23 @@
 import fs from "node:fs";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { loadConfig, defaultConfig, saveConfig } from "../src/core/config.js";
 import { runCli } from "../src/cli.js";
 import { setupTempEnv } from "./helpers.js";
 
 describe("cli enable/disable commands", () => {
   const cleanups: Array<() => void> = [];
+  let originalPlatform: PropertyDescriptor | undefined;
+
+  beforeEach(() => {
+    originalPlatform = Object.getOwnPropertyDescriptor(process, "platform");
+    Object.defineProperty(process, "platform", { value: "darwin" });
+  });
 
   afterEach(() => {
+    if (originalPlatform) {
+      Object.defineProperty(process, "platform", originalPlatform);
+    }
     while (cleanups.length > 0) {
       cleanups.pop()?.();
     }

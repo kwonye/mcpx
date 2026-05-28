@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { parse, stringify } from "@iarna/toml";
-import { afterEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { defaultConfig, saveConfig } from "../src/core/config.js";
 import { syncAllClients } from "../src/core/sync.js";
 import { SecretsManager } from "../src/core/secrets.js";
@@ -11,8 +11,17 @@ import { setupTempEnv } from "./helpers.js";
 
 describe("sync engine", () => {
   const cleanups: Array<() => void> = [];
+  let originalPlatform: PropertyDescriptor | undefined;
+
+  beforeEach(() => {
+    originalPlatform = Object.getOwnPropertyDescriptor(process, "platform");
+    Object.defineProperty(process, "platform", { value: "darwin" });
+  });
 
   afterEach(() => {
+    if (originalPlatform) {
+      Object.defineProperty(process, "platform", originalPlatform);
+    }
     while (cleanups.length > 0) {
       const fn = cleanups.pop();
       if (fn) {
