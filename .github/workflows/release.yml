@@ -4,14 +4,19 @@ on:
   push:
     branches:
       - main
-    paths:
-      - 'cli/**'
-      - 'app/**'
+    paths-ignore:
+      - '**.md'
+      - '**.png'
+      - '**.jpg'
+      - '**.gif'
+      - '**.svg'
+      - 'docs/**'
+      - '.gitignore'
   workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 permissions:
   contents: write
@@ -54,21 +59,27 @@ jobs:
       - name: Compute release metadata
         id: meta
         run: |
-          CLI_CHANGED=${{ steps.filter.outputs.cli || 'true' }}
-          APP_CHANGED=${{ steps.filter.outputs.app || 'true' }}
-          
+          CLI_CHANGED=${{ steps.filter.outputs.cli || 'false' }}
+          APP_CHANGED=${{ steps.filter.outputs.app || 'false' }}
+
           # Force true if manual dispatch
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             CLI_CHANGED=true
             APP_CHANGED=true
           fi
 
-          if [ "$CLI_CHANGED" = "true" ]; then
+          if [ "$CLI_CHANGED" = "true" ] && [ "$APP_CHANGED" = "true" ]; then
             INCLUDE_CLI=true
+            INCLUDE_DESKTOP=true
+          elif [ "$CLI_CHANGED" = "true" ]; then
+            INCLUDE_CLI=true
+            INCLUDE_DESKTOP=false
+          elif [ "$APP_CHANGED" = "true" ]; then
+            INCLUDE_CLI=false
             INCLUDE_DESKTOP=true
           else
             INCLUDE_CLI=false
-            INCLUDE_DESKTOP=true
+            INCLUDE_DESKTOP=false
           fi
 
           VERSION=$(bun .github/scripts/release-coordinator.mjs next-version --include-cli "$INCLUDE_CLI" --include-desktop "$INCLUDE_DESKTOP")
@@ -93,7 +104,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v6
         with:
-          fetch-depth: 0
+          fetch-depth: 1
 
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
@@ -160,12 +171,12 @@ jobs:
   build-desktop-macos:
     needs: orchestrate
     if: needs.orchestrate.outputs.include_desktop == 'true'
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
         with:
-          fetch-depth: 0
+          fetch-depth: 1
 
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
@@ -247,7 +258,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v6
         with:
-          fetch-depth: 0
+          fetch-depth: 1
 
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
@@ -304,16 +315,12 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v6
         with:
-          fetch-depth: 0
+          fetch-depth: 1
 
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
-
-      - name: Install windows-build-tools for keytar
-        run: npm install --global windows-build-tools
-        continue-on-error: true
 
       - name: Install CLI dependencies
         run: bun install --frozen-lockfile
@@ -358,9 +365,6 @@ jobs:
     if: always() && needs.orchestrate.result == 'success' && (needs.build-cli.result == 'success' || needs.build-cli.result == 'skipped') && (needs.build-desktop-macos.result == 'success' || needs.build-desktop-macos.result == 'skipped') && (needs.build-desktop-linux.result == 'success' || needs.build-desktop-linux.result == 'skipped') && (needs.build-desktop-windows.result == 'success' || needs.build-desktop-windows.result == 'skipped')
     runs-on: ubuntu-latest
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v6
-
       - name: Download CLI artifacts
         if: needs.orchestrate.outputs.include_cli == 'true'
         uses: actions/download-artifact@v6
