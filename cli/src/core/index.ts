@@ -1,5 +1,8 @@
 // Config
 export { loadConfig, saveConfig, defaultConfig, loadMergedConfig, loadProjectConfig, saveProjectConfig } from "./config.js";
+export { parseCliAddCommand, tokenizeCommandLine } from "./add-command.js";
+export { buildEnrichedPath } from "./spawn-env.js";
+export { runOAuthLogin, getOAuthAccessToken, isOAuthReference, oauthReferenceServerName } from "./oauth.js";
 
 // Daemon
 export {

@@ -11,6 +11,22 @@ interface StartedServer {
   port: number;
 }
 
+class MemorySecrets extends SecretsManager {
+  readonly values = new Map<string, string>();
+
+  setSecret(name: string, value: string): void {
+    this.values.set(name, value);
+  }
+
+  getSecret(name: string): string | null {
+    return this.values.get(name) ?? null;
+  }
+
+  removeSecret(name: string): void {
+    this.values.delete(name);
+  }
+}
+
 async function startServer(handler: http.RequestListener): Promise<StartedServer> {
   return new Promise((resolve, reject) => {
     const server = http.createServer(handler);
@@ -828,5 +844,108 @@ describe("gateway passthrough", () => {
     expect(payload.result.vercel.tools).toBeGreaterThan(0);
     expect(payload.result.vercel.total).toBe(payload.result.vercel.tools);
   });
-});
 
+  it("resolves oauth references and refreshes once after an upstream 401", async () => {
+    const env = setupTempEnv("mcpx-gateway-oauth-refresh-");
+    cleanups.push(env.restore);
+
+    let tokenRequests = 0;
+    const upstream = await startServer(async (req, res) => {
+      if (req.url === "/token") {
+        tokenRequests += 1;
+        const chunks: Buffer[] = [];
+        for await (const chunk of req) {
+          chunks.push(Buffer.from(chunk));
+        }
+        const body = new URLSearchParams(Buffer.concat(chunks).toString("utf8"));
+        expect(body.get("grant_type")).toBe("refresh_token");
+        expect(body.get("refresh_token")).toBe("refresh-token");
+        res.setHeader("content-type", "application/json");
+        res.end(JSON.stringify({
+          access_token: "new-token",
+          token_type: "Bearer",
+          expires_in: 3600,
+          refresh_token: "refresh-token"
+        }));
+        return;
+      }
+
+      const chunks: Buffer[] = [];
+      for await (const chunk of req) {
+        chunks.push(Buffer.from(chunk));
+      }
+      const payload = JSON.parse(Buffer.concat(chunks).toString("utf8")) as { method: string; id: string | number | null };
+      if (req.headers.authorization !== "Bearer new-token") {
+        res.statusCode = 401;
+        res.setHeader("content-type", "application/json");
+        res.end(JSON.stringify({ error: "expired" }));
+        return;
+      }
+
+      expect(payload.method).toBe("tools/list");
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ jsonrpc: "2.0", id: payload.id, result: { tools: [{ name: "echo" }] } }));
+    });
+    cleanups.push(() => closeServer(upstream.server));
+
+    const config = defaultConfig();
+    config.servers.vercel = {
+      transport: "http",
+      url: `http://127.0.0.1:${upstream.port}/mcp`,
+      headers: {
+        Authorization: "oauth://vercel"
+      }
+    };
+    saveConfig(config);
+
+    const secrets = new MemorySecrets();
+    secrets.setSecret("oauth_vercel_client", JSON.stringify({ client_id: "client-id", token_endpoint_auth_method: "none" }));
+    secrets.setSecret("oauth_vercel_tokens", JSON.stringify({
+      tokens: {
+        access_token: "old-token",
+        token_type: "Bearer",
+        expires_in: 3600,
+        refresh_token: "refresh-token"
+      },
+      obtainedAt: Date.now()
+    }));
+    secrets.setSecret("oauth_vercel_discovery", JSON.stringify({
+      authorizationServerUrl: `http://127.0.0.1:${upstream.port}`,
+      authorizationServerMetadata: {
+        issuer: `http://127.0.0.1:${upstream.port}`,
+        authorization_endpoint: `http://127.0.0.1:${upstream.port}/authorize`,
+        token_endpoint: `http://127.0.0.1:${upstream.port}/token`,
+        response_types_supported: ["code"],
+        token_endpoint_auth_methods_supported: ["none"]
+      }
+    }));
+
+    const gateway = createGatewayServer({
+      port: 0,
+      expectedToken: "test-local-token",
+      secrets
+    });
+    await waitForListening(gateway);
+    cleanups.push(() => closeServer(gateway));
+
+    const address = gateway.address();
+    if (!address || typeof address === "string") {
+      throw new Error("Failed to resolve gateway address.");
+    }
+
+    const response = await fetch(`http://127.0.0.1:${address.port}/mcp?upstream=vercel`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        Authorization: "Bearer test-local-token"
+      },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} })
+    });
+
+    expect(response.status).toBe(200);
+    const payload = (await response.json()) as { result: { tools: Array<{ name: string }> } };
+    expect(payload.result.tools).toEqual([{ name: "echo" }]);
+    expect(tokenRequests).toBe(1);
+    expect(JSON.parse(secrets.getSecret("oauth_vercel_tokens") ?? "{}").tokens.access_token).toBe("new-token");
+  });
+});

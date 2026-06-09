@@ -195,5 +195,5 @@ export interface UpstreamTokenCount {
   resources: number;
   prompts: number;
   total: number;
+  error?: string;
 }
-

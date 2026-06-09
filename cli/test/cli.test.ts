@@ -26,6 +26,11 @@ describe("cli enable/disable commands", () => {
   it("disables and re-enables servers while syncing the managed client entries", async () => {
     const env = setupTempEnv("mcpx-cli-toggle-");
     cleanups.push(env.restore);
+    const originalSkipAutostart = process.env.MCPX_SKIP_DAEMON_AUTOSTART;
+    process.env.MCPX_SKIP_DAEMON_AUTOSTART = "1";
+    cleanups.push(() => {
+      process.env.MCPX_SKIP_DAEMON_AUTOSTART = originalSkipAutostart;
+    });
 
     const config = defaultConfig();
     config.servers.vercel = {
@@ -69,6 +74,11 @@ describe("cli project-based configurations", () => {
   it("initializes project, adds, lists and removes servers scoped to project", async () => {
     const env = setupTempEnv("mcpx-cli-project-");
     cleanups.push(env.restore);
+    const originalSkipAutostart = process.env.MCPX_SKIP_DAEMON_AUTOSTART;
+    process.env.MCPX_SKIP_DAEMON_AUTOSTART = "1";
+    cleanups.push(() => {
+      process.env.MCPX_SKIP_DAEMON_AUTOSTART = originalSkipAutostart;
+    });
 
     // Create a dummy project directory
     const projectPath = path.join(env.root, "demo-project");

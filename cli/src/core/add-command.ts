@@ -1,6 +1,64 @@
-import type { UpstreamServerSpec } from "@mcpx/core";
+import type { UpstreamServerSpec } from "../types.js";
 
-export function isHttpUrl(value: string): boolean {
+export function tokenizeCommandLine(command: string): string[] {
+  const tokens: string[] = [];
+  let current = "";
+  let quote: "'" | "\"" | null = null;
+  let escaping = false;
+
+  for (const char of command.trim()) {
+    if (escaping) {
+      current += char;
+      escaping = false;
+      continue;
+    }
+
+    if (char === "\\") {
+      escaping = true;
+      continue;
+    }
+
+    if (quote) {
+      if (char === quote) {
+        quote = null;
+      } else {
+        current += char;
+      }
+      continue;
+    }
+
+    if (char === "'" || char === "\"") {
+      quote = char;
+      continue;
+    }
+
+    if (/\s/.test(char)) {
+      if (current.length > 0) {
+        tokens.push(current);
+        current = "";
+      }
+      continue;
+    }
+
+    current += char;
+  }
+
+  if (escaping) {
+    current += "\\";
+  }
+
+  if (quote) {
+    throw new Error("Unterminated quoted string.");
+  }
+
+  if (current.length > 0) {
+    tokens.push(current);
+  }
+
+  return tokens;
+}
+
+function isHttpUrl(value: string): boolean {
   try {
     const parsed = new URL(value);
     return parsed.protocol === "http:" || parsed.protocol === "https:";
@@ -9,7 +67,7 @@ export function isHttpUrl(value: string): boolean {
   }
 }
 
-export function parseKeyValueFlag(value: string, label: string): [string, string] {
+function parseKeyValueFlag(value: string, label: string): [string, string] {
   const split = value.indexOf("=");
   if (split <= 0 || split >= value.length - 1) {
     throw new Error(`Invalid ${label} format: ${value}. Use KEY=VALUE.`);
@@ -18,46 +76,37 @@ export function parseKeyValueFlag(value: string, label: string): [string, string
 }
 
 export function parseCliAddCommand(command: string): { name: string; spec: UpstreamServerSpec } {
-  // Remove leading "mcpx" and trim
   let trimmed = command.trim();
   if (trimmed.startsWith("mcpx ")) {
     trimmed = trimmed.slice(5).trim();
   }
 
-  // Handle client-native commands (claude mcp add, codex mcp add, qwen mcp add, code --add-mcp)
-  const parts = trimmed.split(/\s+/);
+  const parts = tokenizeCommandLine(trimmed);
 
-  // Check for client-native patterns
   if (parts[0] === "claude" && parts[1] === "mcp" && parts[2] === "add") {
-    // Claude: claude mcp add <name> <url|command> [options]
     return parseClaudeAdd(parts.slice(3));
   }
 
   if (parts[0] === "codex" && parts[1] === "mcp" && parts[2] === "add") {
-    // Codex: codex mcp add <name> [--env KEY=VALUE] -- <command> [args...]
     return parseCodexAdd(parts.slice(3));
   }
 
   if (parts[0] === "qwen" && parts[1] === "mcp" && parts[2] === "add") {
-    // Qwen: qwen mcp add <name> <url|command> [options]
     return parseQwenAdd(parts.slice(3));
   }
 
   if (parts[0] === "code" && parts[1] === "--add-mcp") {
-    // VS Code: code --add-mcp '<json>'
     return parseVSCodeAdd(parts[2]);
   }
 
-  // Standard mcpx add command
   if (parts[0] === "add") {
     return parseStandardAdd(parts.slice(1));
   }
 
-  // Assume it's a standard add command without "add" prefix
   return parseStandardAdd(parts);
 }
 
-export function parseStandardAdd(args: string[]): { name: string; spec: UpstreamServerSpec } {
+function parseStandardAdd(args: string[]): { name: string; spec: UpstreamServerSpec } {
   const header: string[] = [];
   const env: string[] = [];
   let cwd: string | undefined;
@@ -66,7 +115,7 @@ export function parseStandardAdd(args: string[]): { name: string; spec: Upstream
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     if (arg === "--transport") {
-      i++; // Skip next value
+      i++;
     } else if (arg === "--header") {
       header.push(args[++i]);
     } else if (arg === "--env") {
@@ -74,7 +123,7 @@ export function parseStandardAdd(args: string[]): { name: string; spec: Upstream
     } else if (arg === "--cwd") {
       cwd = args[++i];
     } else if (arg === "--force") {
-      // Skip
+      // Skip.
     } else {
       values.push(arg);
     }
@@ -83,7 +132,7 @@ export function parseStandardAdd(args: string[]): { name: string; spec: Upstream
   return buildServerSpec(values, { header, env, cwd });
 }
 
-export function parseClaudeAdd(args: string[]): { name: string; spec: UpstreamServerSpec } {
+function parseClaudeAdd(args: string[]): { name: string; spec: UpstreamServerSpec } {
   const header: string[] = [];
   const env: string[] = [];
   let cwd: string | undefined;
@@ -98,7 +147,7 @@ export function parseClaudeAdd(args: string[]): { name: string; spec: UpstreamSe
     } else if (arg === "--cwd") {
       cwd = args[++i];
     } else if (arg === "--transport" || arg === "--scope") {
-      i++; // Skip
+      i++;
     } else {
       values.push(arg);
     }
@@ -107,10 +156,8 @@ export function parseClaudeAdd(args: string[]): { name: string; spec: UpstreamSe
   return buildServerSpec(values, { header, env, cwd });
 }
 
-export function parseCodexAdd(args: string[]): { name: string; spec: UpstreamServerSpec } {
-  const header: string[] = [];
+function parseCodexAdd(args: string[]): { name: string; spec: UpstreamServerSpec } {
   const env: string[] = [];
-  let cwd: string | undefined;
   const values: string[] = [];
 
   for (let i = 0; i < args.length; i++) {
@@ -118,7 +165,6 @@ export function parseCodexAdd(args: string[]): { name: string; spec: UpstreamSer
     if (arg === "--env") {
       env.push(args[++i]);
     } else if (arg === "--") {
-      // Rest is command
       values.push(...args.slice(i + 1));
       break;
     } else {
@@ -126,10 +172,10 @@ export function parseCodexAdd(args: string[]): { name: string; spec: UpstreamSer
     }
   }
 
-  return buildServerSpec(values, { header, env, cwd });
+  return buildServerSpec(values, { header: [], env });
 }
 
-export function parseQwenAdd(args: string[]): { name: string; spec: UpstreamServerSpec } {
+function parseQwenAdd(args: string[]): { name: string; spec: UpstreamServerSpec } {
   const header: string[] = [];
   const env: string[] = [];
   let cwd: string | undefined;
@@ -144,7 +190,7 @@ export function parseQwenAdd(args: string[]): { name: string; spec: UpstreamServ
     } else if (arg === "--cwd") {
       cwd = args[++i];
     } else if (arg === "--transport" || arg === "--scope" || arg === "--trust" || arg === "--include-tools" || arg === "--exclude-tools" || arg === "--timeout") {
-      i++; // Skip
+      i++;
     } else {
       values.push(arg);
     }
@@ -153,7 +199,7 @@ export function parseQwenAdd(args: string[]): { name: string; spec: UpstreamServ
   return buildServerSpec(values, { header, env, cwd });
 }
 
-export function parseVSCodeAdd(jsonPayload: string): { name: string; spec: UpstreamServerSpec } {
+function parseVSCodeAdd(jsonPayload: string | undefined): { name: string; spec: UpstreamServerSpec } {
   if (!jsonPayload) {
     throw new Error("Missing JSON payload for --add-mcp");
   }
@@ -192,7 +238,7 @@ export function parseVSCodeAdd(jsonPayload: string): { name: string; spec: Upstr
   throw new Error("JSON payload must include 'url' or 'command'");
 }
 
-export function buildServerSpec(
+function buildServerSpec(
   values: string[],
   options: { header: string[]; env: string[]; cwd?: string }
 ): { name: string; spec: UpstreamServerSpec } {
@@ -222,13 +268,14 @@ export function buildServerSpec(
       headers[key] = value;
     }
 
-    const spec: UpstreamServerSpec = {
-      transport: "http",
-      url: target,
-      headers: Object.keys(headers).length > 0 ? headers : undefined
+    return {
+      name,
+      spec: {
+        transport: "http",
+        url: target,
+        headers: Object.keys(headers).length > 0 ? headers : undefined
+      }
     };
-
-    return { name, spec };
   }
 
   if (options.header.length > 0) {
@@ -241,13 +288,14 @@ export function buildServerSpec(
     env[key] = value;
   }
 
-  const spec: UpstreamServerSpec = {
-    transport: "stdio",
-    command: target,
-    args: trailing.length > 0 ? trailing : undefined,
-    env: Object.keys(env).length > 0 ? env : undefined,
-    cwd: options.cwd
+  return {
+    name,
+    spec: {
+      transport: "stdio",
+      command: target,
+      args: trailing.length > 0 ? trailing : undefined,
+      env: Object.keys(env).length > 0 ? env : undefined,
+      cwd: options.cwd
+    }
   };
-
-  return { name, spec };
 }

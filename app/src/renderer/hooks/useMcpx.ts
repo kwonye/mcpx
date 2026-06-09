@@ -3,6 +3,13 @@ import { debounce } from "../utils/debounce";
 
 const SEARCH_DEBOUNCE_MS = 300;
 
+function registryList(cursor: string | undefined, query: string | undefined, limit: number, updatedSince?: string) {
+  if (updatedSince) {
+    return window.mcpx.registryList(cursor, query, limit, updatedSince);
+  }
+  return window.mcpx.registryList(cursor, query, limit);
+}
+
 export function useStatus() {
   const [status, setStatus] = useState<unknown>(null);
   const [loading, setLoading] = useState(true);
@@ -43,7 +50,7 @@ export function useRegistryList() {
     setLoading(true);
     try {
       const limit = normalizedQuery ? 200 : 100;
-      const result = await window.mcpx.registryList(undefined, normalizedQuery || undefined, limit, updatedSince);
+      const result = await registryList(undefined, normalizedQuery || undefined, limit, updatedSince);
       if (requestId !== requestIdRef.current) return;
 
       setServers(result.servers ?? []);
@@ -64,7 +71,7 @@ export function useRegistryList() {
     setLoading(true);
     try {
       const limit = normalizedQuery ? 200 : 100;
-      const result = await window.mcpx.registryList(cursor, normalizedQuery || undefined, limit, currentUpdatedSinceRef.current);
+      const result = await registryList(cursor, normalizedQuery || undefined, limit, currentUpdatedSinceRef.current);
       if (requestId !== requestIdRef.current) return;
 
       setServers((prev) => [...prev, ...(result.servers ?? [])]);

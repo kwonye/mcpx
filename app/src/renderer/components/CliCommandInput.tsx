@@ -11,7 +11,7 @@ export function CliCommandInput({ onServerAdded }: CliCommandInputProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
-  const [authServer, setAuthServer] = useState<string | null>(null);
+  const [authServer, setAuthServer] = useState<{ serverName: string; oauthLikely?: boolean } | null>(null);
   const supportedCommands = [
     "claude mcp add",
     "codex mcp add",
@@ -27,12 +27,12 @@ export function CliCommandInput({ onServerAdded }: CliCommandInputProps) {
     setSuccess(null);
 
     try {
-      const result: { added: string; authRequired?: boolean; authStatus?: number } = await window.mcpx.invoke(IPC.EXECUTE_CLI_COMMAND, command);
+      const result: { added: string; authRequired?: boolean; authStatus?: number; oauthLikely?: boolean } = await window.mcpx.invoke(IPC.EXECUTE_CLI_COMMAND, command);
       setCommand("");
       setSuccess(`Successfully added "${result.added}"`);
       onServerAdded();
       if (result.authRequired) {
-        setAuthServer(result.added);
+        setAuthServer({ serverName: result.added, oauthLikely: result.oauthLikely });
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to execute command");
@@ -92,7 +92,8 @@ export function CliCommandInput({ onServerAdded }: CliCommandInputProps) {
       </form>
       {authServer && (
         <AuthModal
-          serverName={authServer}
+          serverName={authServer.serverName}
+          oauthLikely={authServer.oauthLikely}
           onClose={() => setAuthServer(null)}
           onConfigured={() => { setAuthServer(null); onServerAdded(); }}
         />

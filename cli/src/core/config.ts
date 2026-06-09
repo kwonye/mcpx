@@ -4,6 +4,7 @@ import fs from "node:fs";
 import { normalizeServerSpecEnabled, type ClientId, type McpxConfig, type UpstreamServerSpec } from "../types.js";
 import { getConfigPath, findProjectConfigPath } from "./paths.js";
 import { readJsonFile, writeJsonAtomic } from "../util/fs.js";
+import { repairConfig } from "./config-repair.js";
 
 const clientStateSchema = z.object({
   status: z.enum(["SYNCED", "UNSUPPORTED_HTTP", "ERROR", "SKIPPED"]),
@@ -93,13 +94,13 @@ export function loadConfig(configPath = getConfigPath()): McpxConfig {
     Object.entries(parsed.data.servers).map(([name, spec]) => [name, normalizeServerSpecEnabled(spec)])
   );
 
-  return {
+  return repairConfig({
     schemaVersion: 1,
     gateway: parsed.data.gateway,
     servers,
     clients: clientEntries,
     projects: parsed.data.projects
-  };
+  });
 }
 
 export function saveConfig(config: McpxConfig, configPath = getConfigPath()): void {

@@ -122,17 +122,19 @@ export class ClaudeAdapter implements ClientAdapter {
     try {
       const raw = readJsonFile<JsonObject>(configPath, {});
       const managedNames = options.managedEntries.map((entry) => entry.name);
+      const enabledEntries = options.managedEntries.filter((entry) => entry.enabled);
       const serverEntries = Object.fromEntries(
-        options.managedEntries.map((entry) => [entry.name, {
+        enabledEntries.map((entry) => [entry.name, {
           type: "http",
           url: entry.url,
           headers: entry.headers
         }])
       ) as Record<string, unknown>;
+      const enabledManagedNames = enabledEntries.map((entry) => entry.name);
 
       const topLevelServers = ((raw.mcpServers as JsonObject | undefined) ?? {}) as JsonObject;
       removeSourceEntries(topLevelServers, options.sourceEntriesToRemove);
-      for (const name of managedNames) {
+      for (const name of enabledManagedNames) {
         const topLevelConflict = ensureManagedEntryWritable(
           options.managedIndex,
           this.id,
@@ -144,7 +146,7 @@ export class ClaudeAdapter implements ClientAdapter {
         }
       }
 
-      pruneStaleManagedEntries(options.managedIndex, this.id, topLevelServers, managedNames);
+      pruneStaleManagedEntries(options.managedIndex, this.id, topLevelServers, enabledManagedNames);
       for (const [name, entry] of Object.entries(serverEntries)) {
         topLevelServers[name] = entry;
       }

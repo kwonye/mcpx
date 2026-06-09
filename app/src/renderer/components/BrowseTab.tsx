@@ -93,7 +93,7 @@ export function BrowseTab({ onServerAdded, status, initialState, onStateChange }
     requiredInputs: RequiredInput[];
   } | null>(null);
   const [addStatus, setAddStatus] = useState<string | null>(null);
-  const [authServer, setAuthServer] = useState<string | null>(null);
+  const [authServer, setAuthServer] = useState<{ serverName: string; oauthLikely?: boolean } | null>(null);
   const [isError, setIsError] = useState(false);
   const [sortBy, setSortBy] = useState<"default" | "name" | "name-desc" | "updated">("default");
   const initialSearchTriggered = useRef(false);
@@ -152,11 +152,11 @@ export function BrowseTab({ onServerAdded, status, initialState, onStateChange }
       const result = await window.mcpx.registryPrepareAdd(registryName);
       if (result.requiredInputs.length === 0) {
         // No inputs needed — add directly
-        const addResult: { added: string; authRequired?: boolean; authStatus?: number } = await window.mcpx.registryConfirmAdd({});
+        const addResult: { added: string; authRequired?: boolean; authStatus?: number; oauthLikely?: boolean } = await window.mcpx.registryConfirmAdd({});
         setAddStatus(`Added "${addResult.added}" successfully!`);
         onServerAdded();
         if (addResult.authRequired) {
-          setAuthServer(addResult.added);
+          setAuthServer({ serverName: addResult.added, oauthLikely: addResult.oauthLikely });
         }
       } else {
         setAdding({
@@ -189,18 +189,34 @@ export function BrowseTab({ onServerAdded, status, initialState, onStateChange }
     try {
       setIsError(false);
       setAddStatus("Adding...");
-      const result: { added: string; authRequired?: boolean; authStatus?: number } = await window.mcpx.registryConfirmAdd(values);
+      const result: { added: string; authRequired?: boolean; authStatus?: number; oauthLikely?: boolean } = await window.mcpx.registryConfirmAdd(values);
       setAddStatus(`Added "${result.added}" successfully!`);
       setAdding(null);
       onServerAdded();
       if (result.authRequired) {
-        setAuthServer(result.added);
+        setAuthServer({ serverName: result.added, oauthLikely: result.oauthLikely });
       }
     } catch (err) {
       setIsError(true);
       setAddStatus(`Error: ${err instanceof Error ? err.message : String(err)}`);
     }
   };
+
+  const serverEntries = useMemo(() => {
+    const entries = servers as Array<any>;
+    if (sortBy === "default") return entries;
+
+    return [...entries].sort((a, b) => {
+      const nameA = (a.server.title ?? a.server.name).toLowerCase();
+      const nameB = (b.server.title ?? b.server.name).toLowerCase();
+      if (sortBy === "name") return nameA.localeCompare(nameB);
+      if (sortBy === "name-desc") return nameB.localeCompare(nameA);
+
+      const updatedA = a._meta?.["io.modelcontextprotocol.registry/official"]?.updatedAt ?? "";
+      const updatedB = b._meta?.["io.modelcontextprotocol.registry/official"]?.updatedAt ?? "";
+      return updatedB.localeCompare(updatedA);
+    });
+  }, [servers, sortBy]);
 
   if (adding) {
     return (
@@ -218,22 +234,6 @@ export function BrowseTab({ onServerAdded, status, initialState, onStateChange }
       </div>
     );
   }
-
-  const serverEntries = useMemo(() => {
-    const entries = servers as Array<any>;
-    if (sortBy === "default") return entries;
-
-    return [...entries].sort((a, b) => {
-      const nameA = (a.server.title ?? a.server.name).toLowerCase();
-      const nameB = (b.server.title ?? b.server.name).toLowerCase();
-      if (sortBy === "name") return nameA.localeCompare(nameB);
-      if (sortBy === "name-desc") return nameB.localeCompare(nameA);
-
-      const updatedA = a._meta?.["io.modelcontextprotocol.registry/official"]?.updatedAt ?? "";
-      const updatedB = b._meta?.["io.modelcontextprotocol.registry/official"]?.updatedAt ?? "";
-      return updatedB.localeCompare(updatedA);
-    });
-  }, [servers, sortBy]);
 
   return (
     <div className="browse-tab">
@@ -373,7 +373,8 @@ export function BrowseTab({ onServerAdded, status, initialState, onStateChange }
 
       {authServer && (
         <AuthModal
-          serverName={authServer}
+          serverName={authServer.serverName}
+          oauthLikely={authServer.oauthLikely}
           onClose={() => setAuthServer(null)}
           onConfigured={() => { setAuthServer(null); onServerAdded(); }}
         />

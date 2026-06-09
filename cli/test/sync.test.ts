@@ -760,7 +760,7 @@ describe("sync engine", () => {
     expect(thirdFingerprint).not.toBe(secondFingerprint);
   });
 
-  it("syncs Claude disabled servers to disabledMcpServers array instead of disabled property", () => {
+  it("removes disabled servers from Claude mcpServers and keeps disabledMcpServers for UI state", () => {
     const env = setupTempEnv("mcpx-sync-claude-disabled-array-");
     cleanups.push(env.restore);
 
@@ -791,8 +791,7 @@ describe("sync engine", () => {
       disabledMcpServers?: string[];
     };
 
-    expect(syncedClaude.mcpServers["vercel (mcpx)"]?.type).toBe("http");
-    expect(syncedClaude.mcpServers["vercel (mcpx)"]?.disabled).toBeUndefined();
+    expect(syncedClaude.mcpServers["vercel (mcpx)"]).toBeUndefined();
     expect(syncedClaude.mcpServers["context7 (mcpx)"]?.type).toBe("http");
     expect(syncedClaude.mcpServers["context7 (mcpx)"]?.disabled).toBeUndefined();
 

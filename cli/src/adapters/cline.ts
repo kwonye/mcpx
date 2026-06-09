@@ -139,6 +139,9 @@ export class ClineAdapter implements ClientAdapter {
     if (!configPath) {
       return errorResult(this.id, undefined, "Unable to resolve Cline MCP config path.");
     }
+    if (!fs.existsSync(configPath)) {
+      return okResult(this.id, configPath, "Cline config not found; skipping sync.");
+    }
 
     try {
       const raw = readJsonFile<ClineConfig>(configPath, {});

@@ -88,6 +88,33 @@ export async function resolveGatewayPort(config: McpxConfig): Promise<number> {
   throw new Error(`No available local port found near ${config.gateway.port}.`);
 }
 
+async function waitForGatewayReady(port: number, token: string, timeoutMs = 5000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  let lastError: unknown;
+
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/mcp`, {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${token}`
+        },
+        signal: AbortSignal.timeout(500)
+      });
+      if (response.ok) {
+        return;
+      }
+      lastError = new Error(`Gateway returned HTTP ${response.status}.`);
+    } catch (error) {
+      lastError = error;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+
+  throw new Error(`Gateway did not become ready within ${timeoutMs}ms: ${lastError instanceof Error ? lastError.message : String(lastError)}`);
+}
+
 export function getDaemonStatus(config: McpxConfig): DaemonStatus {
   const pidPath = getPidPath();
   const pid = readPidFromFile(pidPath);
@@ -126,7 +153,7 @@ export async function startDaemon(config: McpxConfig, cliPath: string, secrets: 
   }
 
   const port = await resolveGatewayPort(config);
-  ensureGatewayToken(config, secrets);
+  const token = ensureGatewayToken(config, secrets);
 
   const pidPath = getPidPath();
   const logPath = getLogPath();
@@ -148,6 +175,7 @@ export async function startDaemon(config: McpxConfig, cliPath: string, secrets: 
   fs.writeFileSync(pidPath, `${child.pid}\n`, { mode: 0o600 });
 
   startBackgroundUpdateCheck();
+  await waitForGatewayReady(port, token);
 
   return {
     started: true,

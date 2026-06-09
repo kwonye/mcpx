@@ -25,6 +25,7 @@ const AUTH_KEYWORDS = [
 
 export interface HttpAuthProbeResult {
   authRequired: boolean;
+  oauthLikely?: boolean;
   status?: number;
   wwwAuthenticate?: string;
   error?: string;
@@ -46,6 +47,15 @@ function resolveHeaders(spec: HttpServerSpec, secrets: SecretsManager): Record<s
   }
 
   return headers;
+}
+
+function isOAuthLikelyChallenge(wwwAuthenticate: string | null): boolean {
+  if (!wwwAuthenticate) {
+    return false;
+  }
+
+  const lower = wwwAuthenticate.toLowerCase();
+  return lower.includes("bearer") || lower.includes("authorization_uri") || lower.includes("resource_metadata");
 }
 
 export async function probeHttpAuthRequirement(
@@ -71,10 +81,12 @@ export async function probeHttpAuthRequirement(
     });
 
     if (response.status === 401 || response.status === 403) {
+      const wwwAuthenticate = response.headers.get("www-authenticate");
       return {
         authRequired: true,
+        oauthLikely: isOAuthLikelyChallenge(wwwAuthenticate),
         status: response.status,
-        wwwAuthenticate: response.headers.get("www-authenticate") ?? undefined
+        wwwAuthenticate: wwwAuthenticate ?? undefined
       };
     }
 

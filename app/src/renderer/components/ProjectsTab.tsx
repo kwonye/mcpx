@@ -9,7 +9,7 @@ interface ServerEntry {
   transport: string;
   target: string;
   clients: Array<{ clientId: string; status: string; managed: boolean }>;
-  tokenCount?: { tools: number; resources: number; prompts: number; total: number };
+  tokenCount?: { tools: number; resources: number; prompts: number; total: number; error?: string };
 }
 
 interface ProjectEntry {
@@ -288,6 +288,11 @@ export function ProjectsTab({ status, onRefresh }: ProjectsTabProps) {
                                   {formatTokenApprox(server.tokenCount.total)} tokens
                                 </span>
                               )}
+                              {server.enabled && server.tokenCount?.error && (
+                                <span className="token-badge token-badge--error" title={server.tokenCount.error}>
+                                  token error
+                                </span>
+                              )}
                             </div>
                             <span className="mcp-target-command mono-text" title={server.target}>
                               {server.target}
@@ -325,4 +330,3 @@ export function ProjectsTab({ status, onRefresh }: ProjectsTabProps) {
     </div>
   );
 }
-

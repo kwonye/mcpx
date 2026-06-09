@@ -8,6 +8,8 @@ import {
   type StdioServerParameters
 } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { loadMergedConfig } from "../core/config.js";
+import { buildEnrichedPath } from "../core/spawn-env.js";
+import { getOAuthAccessToken, isOAuthReference, oauthReferenceServerName } from "../core/oauth.js";
 import { SecretsManager } from "../core/secrets.js";
 import { APP_VERSION } from "../version.js";
 import type {
@@ -51,7 +53,8 @@ interface StdioConnectionEntry {
 
 interface GatewayRuntimeState {
   stdioConnections: Map<string, StdioConnectionEntry>;
-  tokenCache?: Map<string, UpstreamTokenCount>;
+  tokenCache?: Map<string, { fingerprint: string; count: UpstreamTokenCount }>;
+  upstreamErrors?: Map<string, string>;
 }
 
 class UpstreamHttpError extends Error {
@@ -288,72 +291,65 @@ export async function getUpstreamTokenCounts(
   runtime: GatewayRuntimeState
 ): Promise<Record<string, UpstreamTokenCount>> {
   if (!runtime.tokenCache) {
-    runtime.tokenCache = new Map<string, UpstreamTokenCount>();
+    runtime.tokenCache = new Map<string, { fingerprint: string; count: UpstreamTokenCount }>();
   }
 
   const results: Record<string, UpstreamTokenCount> = {};
   const upstreams = listUpstreams(config);
 
   for (const upstream of upstreams) {
-    if (runtime.tokenCache.has(upstream.name)) {
-      results[upstream.name] = runtime.tokenCache.get(upstream.name)!;
+    const fingerprint = specFingerprint(upstream.spec);
+    const cached = runtime.tokenCache.get(upstream.name);
+    if (cached?.fingerprint === fingerprint) {
+      results[upstream.name] = cached.count;
       continue;
     }
 
+    let toolsCount = 0;
+    let resourcesCount = 0;
+    let promptsCount = 0;
+    const errors: string[] = [];
+
     try {
-      const prevTimeout = process.env.MCPX_UPSTREAM_TIMEOUT_MS;
-      process.env.MCPX_UPSTREAM_TIMEOUT_MS = "3000";
-
-      let toolsCount = 0;
-      let resourcesCount = 0;
-      let promptsCount = 0;
-
-      try {
-        const toolsResult = await callUpstream(upstream, "tools/list", {}, "token-tools", secrets, runtime) as { tools?: Array<unknown> };
-        if (toolsResult && toolsResult.tools) {
-          toolsCount = Math.ceil(JSON.stringify(toolsResult.tools).length / 4);
-        }
-      } catch (err) {
-        // Ignore
+      const toolsResult = await callUpstream(upstream, "tools/list", {}, "token-tools", secrets, runtime) as { tools?: Array<unknown> };
+      if (toolsResult && toolsResult.tools) {
+        toolsCount = Math.ceil(JSON.stringify(toolsResult.tools).length / 4);
       }
-
-      try {
-        const resourcesResult = await callUpstream(upstream, "resources/list", {}, "token-resources", secrets, runtime) as { resources?: Array<unknown> };
-        if (resourcesResult && resourcesResult.resources) {
-          resourcesCount = Math.ceil(JSON.stringify(resourcesResult.resources).length / 4);
-        }
-      } catch (err) {
-        // Ignore
-      }
-
-      try {
-        const promptsResult = await callUpstream(upstream, "prompts/list", {}, "token-prompts", secrets, runtime) as { prompts?: Array<unknown> };
-        if (promptsResult && promptsResult.prompts) {
-          promptsCount = Math.ceil(JSON.stringify(promptsResult.prompts).length / 4);
-        }
-      } catch (err) {
-        // Ignore
-      }
-
-      if (prevTimeout !== undefined) {
-        process.env.MCPX_UPSTREAM_TIMEOUT_MS = prevTimeout;
-      } else {
-        delete process.env.MCPX_UPSTREAM_TIMEOUT_MS;
-      }
-
-      const total = toolsCount + resourcesCount + promptsCount;
-      const countObj: UpstreamTokenCount = {
-        tools: toolsCount,
-        resources: resourcesCount,
-        prompts: promptsCount,
-        total
-      };
-
-      runtime.tokenCache.set(upstream.name, countObj);
-      results[upstream.name] = countObj;
     } catch (error) {
-      results[upstream.name] = { tools: 0, resources: 0, prompts: 0, total: 0 };
+      errors.push(`tools/list: ${error instanceof Error ? error.message : String(error)}`);
     }
+
+    try {
+      const resourcesResult = await callUpstream(upstream, "resources/list", {}, "token-resources", secrets, runtime) as { resources?: Array<unknown> };
+      if (resourcesResult && resourcesResult.resources) {
+        resourcesCount = Math.ceil(JSON.stringify(resourcesResult.resources).length / 4);
+      }
+    } catch (error) {
+      errors.push(`resources/list: ${error instanceof Error ? error.message : String(error)}`);
+    }
+
+    try {
+      const promptsResult = await callUpstream(upstream, "prompts/list", {}, "token-prompts", secrets, runtime) as { prompts?: Array<unknown> };
+      if (promptsResult && promptsResult.prompts) {
+        promptsCount = Math.ceil(JSON.stringify(promptsResult.prompts).length / 4);
+      }
+    } catch (error) {
+      errors.push(`prompts/list: ${error instanceof Error ? error.message : String(error)}`);
+    }
+
+    const total = toolsCount + resourcesCount + promptsCount;
+    const countObj: UpstreamTokenCount = {
+      tools: toolsCount,
+      resources: resourcesCount,
+      prompts: promptsCount,
+      total,
+      error: errors.length > 0 ? errors.join("; ") : undefined
+    };
+
+    if (errors.length === 0) {
+      runtime.tokenCache.set(upstream.name, { fingerprint, count: countObj });
+    }
+    results[upstream.name] = countObj;
   }
 
   return results;
@@ -387,13 +383,11 @@ function specFingerprint(spec: UpstreamServerSpec): string {
   return JSON.stringify(spec);
 }
 
-function resolveStdioEnv(spec: StdioServerSpec, secrets: SecretsManager): Record<string, string> | undefined {
-  if (!spec.env || Object.keys(spec.env).length === 0) {
-    return undefined;
-  }
-
+function resolveStdioEnv(spec: StdioServerSpec, secrets: SecretsManager): Record<string, string> {
   const env = getDefaultEnvironment();
-  for (const [key, value] of Object.entries(spec.env)) {
+  env.PATH = buildEnrichedPath(env.PATH);
+
+  for (const [key, value] of Object.entries(spec.env ?? {})) {
     env[key] = secrets.resolveMaybeSecret(value);
   }
 
@@ -555,13 +549,31 @@ async function callHttpUpstream(
   secrets: SecretsManager,
   passthroughAuthorizationHeader?: string
 ): Promise<unknown> {
+  return callHttpUpstreamOnce(upstream, method, params, id, secrets, passthroughAuthorizationHeader, false);
+}
+
+async function callHttpUpstreamOnce(
+  upstream: UpstreamServerRuntime & { spec: HttpServerSpec },
+  method: string,
+  params: unknown,
+  id: string | number | null,
+  secrets: SecretsManager,
+  passthroughAuthorizationHeader: string | undefined,
+  forceOAuthRefresh: boolean
+): Promise<unknown> {
   const headers: Record<string, string> = {
     "content-type": "application/json",
     accept: "application/json, text/event-stream"
   };
 
   for (const [key, value] of Object.entries(upstream.spec.headers ?? {})) {
-    headers[key] = secrets.resolveMaybeSecret(value);
+    if (key.toLowerCase() === "authorization" && isOAuthReference(value)) {
+      const oauthServerName = oauthReferenceServerName(value);
+      const accessToken = await getOAuthAccessToken(oauthServerName, upstream.spec, secrets, { forceRefresh: forceOAuthRefresh });
+      headers[key] = `Bearer ${accessToken}`;
+    } else {
+      headers[key] = secrets.resolveMaybeSecret(value);
+    }
   }
 
   if (passthroughAuthorizationHeader) {
@@ -597,6 +609,14 @@ async function callHttpUpstream(
 
   if (!response.ok) {
     const responseText = await response.text();
+    if (
+      !forceOAuthRefresh
+      && (response.status === 401 || response.status === 403)
+      && Object.values(upstream.spec.headers ?? {}).some((value) => isOAuthReference(value))
+    ) {
+      return callHttpUpstreamOnce(upstream, method, params, id, secrets, passthroughAuthorizationHeader, true);
+    }
+
     throw new UpstreamHttpError(
       upstream.name,
       response.status,
@@ -790,10 +810,12 @@ async function handleListTools(
       if (!runtime.tokenCache) {
         runtime.tokenCache = new Map();
       }
-      const existing = runtime.tokenCache.get(upstream.name) ?? { tools: 0, resources: 0, prompts: 0, total: 0 };
+      const cached = runtime.tokenCache.get(upstream.name);
+      const existing = cached?.fingerprint === specFingerprint(upstream.spec) ? cached.count : { tools: 0, resources: 0, prompts: 0, total: 0 };
       existing.tools = Math.ceil(JSON.stringify(result.tools ?? []).length / 4);
       existing.total = existing.tools + existing.resources + existing.prompts;
-      runtime.tokenCache.set(upstream.name, existing);
+      delete existing.error;
+      runtime.tokenCache.set(upstream.name, { fingerprint: specFingerprint(upstream.spec), count: existing });
 
       for (const tool of result.tools ?? []) {
         const name = typeof tool.name === "string" ? tool.name : "tool";
@@ -803,11 +825,11 @@ async function handleListTools(
         });
       }
     } catch (error) {
-      if (upstreams.length === 1 && isAuthChallenge(error)) {
+      if (upstreams.length === 1) {
         throw error;
       }
 
-      // Upstream errors are isolated so one failed server does not break catalog.
+      runtime.upstreamErrors?.set(upstream.name, error instanceof Error ? error.message : String(error));
     }
   }
 
@@ -842,10 +864,12 @@ async function handleListResources(
       if (!runtime.tokenCache) {
         runtime.tokenCache = new Map();
       }
-      const existing = runtime.tokenCache.get(upstream.name) ?? { tools: 0, resources: 0, prompts: 0, total: 0 };
+      const cached = runtime.tokenCache.get(upstream.name);
+      const existing = cached?.fingerprint === specFingerprint(upstream.spec) ? cached.count : { tools: 0, resources: 0, prompts: 0, total: 0 };
       existing.resources = Math.ceil(JSON.stringify(result.resources ?? []).length / 4);
       existing.total = existing.tools + existing.resources + existing.prompts;
-      runtime.tokenCache.set(upstream.name, existing);
+      delete existing.error;
+      runtime.tokenCache.set(upstream.name, { fingerprint: specFingerprint(upstream.spec), count: existing });
 
       for (const resource of result.resources ?? []) {
         const originalUri = typeof resource.uri === "string" ? resource.uri : "";
@@ -857,11 +881,11 @@ async function handleListResources(
         });
       }
     } catch (error) {
-      if (upstreams.length === 1 && isAuthChallenge(error)) {
+      if (upstreams.length === 1) {
         throw error;
       }
 
-      // Upstream errors are isolated so one failed server does not break catalog.
+      runtime.upstreamErrors?.set(upstream.name, error instanceof Error ? error.message : String(error));
     }
   }
 
@@ -896,10 +920,12 @@ async function handleListPrompts(
       if (!runtime.tokenCache) {
         runtime.tokenCache = new Map();
       }
-      const existing = runtime.tokenCache.get(upstream.name) ?? { tools: 0, resources: 0, prompts: 0, total: 0 };
+      const cached = runtime.tokenCache.get(upstream.name);
+      const existing = cached?.fingerprint === specFingerprint(upstream.spec) ? cached.count : { tools: 0, resources: 0, prompts: 0, total: 0 };
       existing.prompts = Math.ceil(JSON.stringify(result.prompts ?? []).length / 4);
       existing.total = existing.tools + existing.resources + existing.prompts;
-      runtime.tokenCache.set(upstream.name, existing);
+      delete existing.error;
+      runtime.tokenCache.set(upstream.name, { fingerprint: specFingerprint(upstream.spec), count: existing });
 
       for (const prompt of result.prompts ?? []) {
         const name = typeof prompt.name === "string" ? prompt.name : "prompt";
@@ -909,11 +935,11 @@ async function handleListPrompts(
         });
       }
     } catch (error) {
-      if (upstreams.length === 1 && isAuthChallenge(error)) {
+      if (upstreams.length === 1) {
         throw error;
       }
 
-      // Upstream errors are isolated so one failed server does not break catalog.
+      runtime.upstreamErrors?.set(upstream.name, error instanceof Error ? error.message : String(error));
     }
   }
 
@@ -1094,6 +1120,12 @@ async function handleRequestObject(
     return makeResult(id, result);
   }
 
+  if (request.method === "custom/refreshTokenCounts") {
+    runtime.tokenCache?.clear();
+    const result = await getUpstreamTokenCounts(config, secrets, runtime);
+    return makeResult(id, result);
+  }
+
   if (request.method === "tools/list") {
     const result = await handleListTools(config, secrets, runtime, upstreamFilter, clientAuthorizationHeader);
     return makeResult(id, result);
@@ -1221,7 +1253,8 @@ async function maybeHandleWellKnownOAuthRequest(
 export function createGatewayServer(options: GatewayServerOptions): http.Server {
   const debug = process.env.MCPX_GATEWAY_DEBUG === "1";
   const runtime: GatewayRuntimeState = {
-    stdioConnections: new Map()
+    stdioConnections: new Map(),
+    upstreamErrors: new Map()
   };
 
   const server = http.createServer(async (request, response) => {
@@ -1382,7 +1415,11 @@ export function createGatewayServer(options: GatewayServerOptions): http.Server 
           );
           response.setHeader("www-authenticate", rewriteWwwAuthenticateResourceMetadata(error.wwwAuthenticate, localResourceMetadataUrl));
         }
-        response.end(error.bodyText.length > 0 ? error.bodyText : JSON.stringify({ error: "upstream_auth_required" }));
+        response.end(JSON.stringify(makeError(null, -32001, "Upstream authentication required.", {
+          status: error.status,
+          body: error.bodyText,
+          wwwAuthenticate: error.wwwAuthenticate
+        })));
         if (debug) {
           console.error(`[mcpx gateway] -> ${error.status} upstream auth challenge`);
         }

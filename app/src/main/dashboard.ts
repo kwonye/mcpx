@@ -10,6 +10,7 @@ function rendererEntryPath(): string {
 
 function revealDashboard(window: BrowserWindow): void {
   if (process.platform === "darwin") {
+    app.dock?.show();
     app.focus({ steal: true });
   }
 

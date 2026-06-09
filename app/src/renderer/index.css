@@ -2352,6 +2352,12 @@ select {
     color: var(--text-subtle, #9ca3af);
 }
 
+.token-badge--error {
+    background: rgba(220, 38, 38, 0.08);
+    border-color: rgba(220, 38, 38, 0.18);
+    color: var(--danger, #dc2626);
+}
+
 .dashboard-token-summary {
     display: flex;
     justify-content: space-between;
@@ -2544,7 +2550,6 @@ select {
     background: var(--warning);
     box-shadow: 0 0 6px var(--warning);
 }
-
 
 
 

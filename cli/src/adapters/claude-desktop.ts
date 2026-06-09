@@ -159,9 +159,9 @@ export class ClaudeDesktopAdapter implements ClientAdapter {
         this.id,
         configPath,
         Object.fromEntries(
-          options.managedEntries.map((entry) => {
+          enabledEntries.map((entry) => {
             const { command, args } = buildProxyEntry(entry);
-            return [entry.name, JSON.stringify({ command, args, enabled: entry.enabled })];
+            return [entry.name, JSON.stringify({ command, args })];
           })
         )
       );

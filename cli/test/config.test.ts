@@ -45,6 +45,79 @@ describe("config loading", () => {
       enabled: true
     });
   });
+
+  it("repairs quoted URL stdio servers into HTTP servers", () => {
+    const env = setupTempEnv("mcpx-config-repair-url-");
+    cleanups.push(env.restore);
+
+    const configPath = getConfigPath();
+    fs.mkdirSync(path.dirname(configPath), { recursive: true });
+    fs.writeFileSync(configPath, JSON.stringify({
+      schemaVersion: 1,
+      gateway: { port: 37373, tokenRef: "secret://local_gateway_token", autoStart: true },
+      servers: {
+        supabase: {
+          transport: "stdio",
+          command: "'https://mcp.supabase.com/mcp'"
+        }
+      },
+      clients: {}
+    }, null, 2));
+
+    expect(loadConfig().servers.supabase).toEqual({
+      transport: "http",
+      url: "https://mcp.supabase.com/mcp",
+      enabled: true
+    });
+  });
+
+  it("repairs command strings with spaces into command and args", () => {
+    const env = setupTempEnv("mcpx-config-repair-command-");
+    cleanups.push(env.restore);
+
+    const configPath = getConfigPath();
+    fs.mkdirSync(path.dirname(configPath), { recursive: true });
+    fs.writeFileSync(configPath, JSON.stringify({
+      schemaVersion: 1,
+      gateway: { port: 37373, tokenRef: "secret://local_gateway_token", autoStart: true },
+      servers: {
+        Railway: {
+          transport: "stdio",
+          command: "npx @railway/mcp-server",
+          args: ["--verbose"]
+        }
+      },
+      clients: {}
+    }, null, 2));
+
+    expect(loadConfig().servers.Railway).toEqual({
+      transport: "stdio",
+      command: "npx",
+      args: ["@railway/mcp-server", "--verbose"],
+      enabled: true
+    });
+  });
+
+  it("drops client-internal app bundle stdio servers on load", () => {
+    const env = setupTempEnv("mcpx-config-repair-internal-");
+    cleanups.push(env.restore);
+
+    const configPath = getConfigPath();
+    fs.mkdirSync(path.dirname(configPath), { recursive: true });
+    fs.writeFileSync(configPath, JSON.stringify({
+      schemaVersion: 1,
+      gateway: { port: 37373, tokenRef: "secret://local_gateway_token", autoStart: true },
+      servers: {
+        node_repl: {
+          transport: "stdio",
+          command: "/Applications/Codex.app/Contents/Resources/node"
+        }
+      },
+      clients: {}
+    }, null, 2));
+
+    expect(loadConfig().servers.node_repl).toBeUndefined();
+  });
 });
 
 describe("project config and merging", () => {

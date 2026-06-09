@@ -17,6 +17,7 @@ import { loadDesktopSettings } from "./settings-store";
 import { applyStartOnLoginSetting, wasOpenedAtLogin } from "./login-item";
 import { setAutoUpdateEnabled } from "./update-manager";
 import { getDesktopProductName, isDevDesktopApp } from "./app-flavor";
+import { resolveLoginShellPath } from "./shell-env";
 
 // Export mutable state for testing lifecycle handlers
 export const lifecycleState = { allowQuit: false };
@@ -57,6 +58,10 @@ export function registerLifecycleHandlers(deps: {
       deps.app.quit();
     }
     // On macOS (and Linux with tray enabled), keep running
+  });
+
+  deps.app.on("activate", () => {
+    deps.openDashboard();
   });
 }
 
@@ -105,7 +110,17 @@ async function handleStopDaemon(): Promise<void> {
   }
 }
 
-export async function startMainProcess(): Promise<void> {
+function handleStartupError(error: unknown): void {
+  const productName = getDesktopProductName();
+  console.error("[main] startup failed:", error);
+  dialog.showErrorBox(
+    "Startup Error",
+    `${productName} failed to start: ${error instanceof Error ? error.message : String(error)}`
+  );
+  app.exit(1);
+}
+
+async function startMainProcessImpl(): Promise<void> {
   const productName = getDesktopProductName();
 
   // Initialize crash reporter BEFORE any Electron API calls
@@ -114,12 +129,18 @@ export async function startMainProcess(): Promise<void> {
     uploadToServer: false,
   });
 
-  if (process.platform === "darwin") {
-    app.setActivationPolicy("accessory");
-  }
-
   if (await runDaemonChildIfRequested()) {
     return;
+  }
+
+  if (process.platform === "darwin") {
+    app.setActivationPolicy("regular");
+    app.dock?.hide();
+  }
+
+  const loginShellPath = await resolveLoginShellPath();
+  if (loginShellPath) {
+    process.env.PATH = loginShellPath;
   }
 
   const gotTheLock = app.requestSingleInstanceLock();
@@ -181,12 +202,17 @@ export async function startMainProcess(): Promise<void> {
 
   // Check daemon status on startup and auto-start if needed
   try {
-    const status = getDaemonStatus(loadConfig());
+    const config = loadConfig();
+    const status = getDaemonStatus(config);
     daemonRunning = status.running;
     updateTrayForDaemonStatus(daemonRunning);
     
-    // Auto-start daemon if it was running before or if login launch
-    if (daemonRunning || wasOpenedAtLogin()) {
+    if (!daemonRunning && config.gateway.autoStart) {
+      const secrets = new SecretsManager();
+      await startDaemon(config, getCliDaemonPath(), secrets);
+      daemonRunning = true;
+      updateTrayForDaemonStatus(true);
+    } else if (wasOpenedAtLogin()) {
       await maybeStartDaemonForLoginLaunch();
     }
   } catch (error) {
@@ -194,18 +220,17 @@ export async function startMainProcess(): Promise<void> {
   }
 }
 
+export async function startMainProcess(): Promise<void> {
+  try {
+    await startMainProcessImpl();
+  } catch (error) {
+    handleStartupError(error);
+    throw error;
+  }
+}
+
 if (process.env.VITEST !== "true") {
-  (async () => {
-    try {
-      await startMainProcess();
-    } catch (error) {
-      const productName = getDesktopProductName();
-      console.error("[main] startup failed:", error);
-      dialog.showErrorBox(
-        "Startup Error",
-        `${productName} failed to start: ${error instanceof Error ? error.message : String(error)}`
-      );
-      app.exit(1);
-    }
-  })();
+  void startMainProcess().catch(() => {
+    // startMainProcess already reports startup failures.
+  });
 }

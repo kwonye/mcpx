@@ -10,7 +10,7 @@ interface ServerCardProps {
   authConfigured: boolean;
   syncedCount: number;
   errorCount: number;
-  tokenCount?: { tools: number; resources: number; prompts: number; total: number };
+  tokenCount?: { tools: number; resources: number; prompts: number; total: number; error?: string };
   onRefresh: () => void;
   onClick: () => void;
 }
@@ -39,6 +39,11 @@ export function ServerCard(props: ServerCardProps) {
               {props.enabled && props.tokenCount && props.tokenCount.total > 0 && (
                 <span className="token-badge" title={`${props.tokenCount.tools} tools, ${props.tokenCount.resources} resources, ${props.tokenCount.prompts} prompts`}>
                   {formatTokenApprox(props.tokenCount.total)} tokens
+                </span>
+              )}
+              {props.enabled && props.tokenCount?.error && (
+                <span className="token-badge token-badge--error" title={props.tokenCount.error}>
+                  token error
                 </span>
               )}
             </div>

@@ -102,7 +102,8 @@ async function fetchTokenCounts(gatewayUrl: string, token: string): Promise<Reco
         id: "status-tokens",
         method: "custom/tokenCounts",
         params: {}
-      })
+      }),
+      signal: AbortSignal.timeout(4000)
     });
     if (!res.ok) {
       return {};

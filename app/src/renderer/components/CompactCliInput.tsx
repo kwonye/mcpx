@@ -36,6 +36,7 @@ export function CompactCliInput({ onServerAdded }: CompactCliInputProps) {
 
   return (
     <div className="compact-cli-input">
+      <div className="compact-cli-input__title">Add Server</div>
       <form onSubmit={handleSubmit}>
         <div className="compact-cli-input__row">
           <input
@@ -43,7 +44,8 @@ export function CompactCliInput({ onServerAdded }: CompactCliInputProps) {
             type="text"
             value={command}
             onChange={(e) => setCommand(e.target.value)}
-            placeholder="Paste mcpx add command..."
+            aria-label="Paste your mcpx add command"
+            placeholder="Paste your mcpx add command here..."
             disabled={loading}
           />
           <button

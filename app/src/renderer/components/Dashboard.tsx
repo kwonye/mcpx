@@ -17,6 +17,7 @@ import { ContextBudgetCard } from "./ContextBudgetCard";
 
 
 type Tab = "servers" | "browse" | "skills" | "settings" | "projects";
+type PendingAuthEntry = { serverName: string; oauthLikely?: boolean; status?: number };
 
 export function Dashboard() {
   const { status, loading, refresh } = useStatus();
@@ -24,16 +25,27 @@ export function Dashboard() {
   const [selectedServer, setSelectedServer] = useState<string | null>(null);
   const [browseState, setBrowseState] = useState<BrowseState>({});
   const [settingsLoaded, setSettingsLoaded] = useState(false);
-  const [pendingAuth, setPendingAuth] = useState<string | null>(null);
+  const [pendingAuth, setPendingAuth] = useState<PendingAuthEntry | null>(null);
 
   useEffect(() => {
-    window.mcpx.getPendingAuth().then((result: { serverName: string } | null) => {
-      if (result) {
-        setPendingAuth(result.serverName);
+    const pendingAuthPromise = window.mcpx.getPendingAuth?.();
+    if (!pendingAuthPromise) {
+      return;
+    }
+
+    pendingAuthPromise.then((result: PendingAuthEntry | PendingAuthEntry[] | null) => {
+      const entry = Array.isArray(result) ? result[0] : result;
+      if (entry) {
+        setPendingAuth(entry);
         setTab("servers");
       }
     }).catch(() => {
       // Handler may not be registered yet — ignore
+    });
+
+    return window.mcpx.onAuthRequired?.((entry: PendingAuthEntry) => {
+      setPendingAuth(entry);
+      setTab("servers");
     });
   }, []);
 
@@ -246,7 +258,8 @@ export function Dashboard() {
 
       {pendingAuth && (
         <AuthModal
-          serverName={pendingAuth}
+          serverName={pendingAuth.serverName}
+          oauthLikely={pendingAuth.oauthLikely}
           onClose={() => setPendingAuth(null)}
           onConfigured={() => { setPendingAuth(null); refresh(); }}
         />

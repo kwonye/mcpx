@@ -45,6 +45,7 @@ import { APP_VERSION } from "./version.js";
 import { getStagedCliPath, getStagedUpdate, clearStagedUpdate, checkForUpdates } from "./core/update.js";
 import { performUpdate, performRollback, runBackgroundUpdate } from "./core/update-manager.js";
 import { runStdioProxy } from "./core/proxy.js";
+import { runOAuthLogin } from "./core/oauth.js";
 
 const VALID_CLIENTS: ClientId[] = STATUS_CLIENTS;
 
@@ -1525,6 +1526,31 @@ function registerSecretsCommands(program: Command): void {
 
 function registerAuthCommands(program: Command): void {
   const auth = program.command("auth").description("Auth utilities");
+
+  auth
+    .command("login <server>")
+    .description("Run browser OAuth login for an HTTP upstream server")
+    .action(async (server: string) => {
+      const config = loadConfig();
+      const spec = getServerSpecOrThrow(config, server);
+      if (spec.transport !== "http") {
+        throw new Error(`OAuth login only supports HTTP servers.`);
+      }
+
+      const secrets = new SecretsManager();
+      await runOAuthLogin(server, spec, secrets, (url) => {
+        if (process.platform === "darwin") {
+          execFileSync("open", [url], { stdio: "ignore" });
+          return;
+        }
+        if (process.platform === "win32") {
+          execFileSync("cmd", ["/c", "start", "", url], { stdio: "ignore" });
+          return;
+        }
+        execFileSync("xdg-open", [url], { stdio: "ignore" });
+      });
+      process.stdout.write(`OAuth login complete for "${server}".\n`);
+    });
 
   auth
     .command("set <server>")

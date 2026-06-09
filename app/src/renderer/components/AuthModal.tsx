@@ -3,11 +3,12 @@ import { IPC } from "../../shared/ipc-channels";
 
 interface AuthModalProps {
   serverName: string;
+  oauthLikely?: boolean;
   onClose: () => void;
   onConfigured: () => void;
 }
 
-export function AuthModal({ serverName, onClose, onConfigured }: AuthModalProps) {
+export function AuthModal({ serverName, oauthLikely = false, onClose, onConfigured }: AuthModalProps) {
   const [headerName, setHeaderName] = useState("Authorization");
   const [authValue, setAuthValue] = useState("");
   const [secretName, setSecretName] = useState(`auth_${serverName.toLowerCase().replace(/[^a-z0-9._-]/g, "_")}_header_authorization`);
@@ -34,6 +35,20 @@ export function AuthModal({ serverName, onClose, onConfigured }: AuthModalProps)
     }
   }
 
+  async function handleOauthLogin() {
+    setSubmitting(true);
+    setError(null);
+
+    try {
+      await window.mcpx.startOauth(serverName);
+      onConfigured();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to start OAuth login");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   function handleOverlayClick(e: React.MouseEvent) {
     if (e.target === e.currentTarget) {
       onClose();
@@ -54,6 +69,12 @@ export function AuthModal({ serverName, onClose, onConfigured }: AuthModalProps)
           <p className="modal-desc">
             Server <strong>"{serverName}"</strong> requires authentication to function.
           </p>
+
+          {oauthLikely && (
+            <button type="button" className="btn btn-primary" onClick={handleOauthLogin} disabled={submitting}>
+              {submitting ? "Starting..." : "Sign in with browser"}
+            </button>
+          )}
 
           <div className="modal-form">
             <div className="form-field">

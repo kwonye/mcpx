@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Toggle } from "./ui";
 import { useStatus } from "../hooks/useMcpx";
 import { useServerEnabled } from "../hooks/useServerEnabled";
@@ -9,7 +9,7 @@ interface PopoverServerRowProps {
   server: {
     name: string;
     enabled: boolean;
-    tokenCount?: { tools: number; resources: number; prompts: number; total: number };
+    tokenCount?: { tools: number; resources: number; prompts: number; total: number; error?: string };
   };
   onRefresh: () => void;
 }
@@ -25,6 +25,11 @@ function PopoverServerRow({ server, onRefresh }: PopoverServerRowProps) {
           {server.enabled && server.tokenCount && server.tokenCount.total > 0 && (
             <span className="token-badge" title={`${server.tokenCount.tools} tools, ${server.tokenCount.resources} resources, ${server.tokenCount.prompts} prompts`} style={{ transform: 'scale(0.85)', transformOrigin: 'left center' }}>
               {formatTokenApprox(server.tokenCount.total)}
+            </span>
+          )}
+          {server.enabled && server.tokenCount?.error && (
+            <span className="token-badge token-badge--error" title={server.tokenCount.error} style={{ transform: 'scale(0.85)', transformOrigin: 'left center' }}>
+              token error
             </span>
           )}
         </div>
@@ -45,7 +50,27 @@ function PopoverServerRow({ server, onRefresh }: PopoverServerRowProps) {
 
 export function StatusPopover() {
   const { status, loading, refresh } = useStatus();
-  const [showAddServer, setShowAddServer] = useState(false);
+  const [showAddServer, setShowAddServer] = useState(true);
+  const [pendingAuth, setPendingAuth] = useState<Array<{ serverName: string; oauthLikely?: boolean }>>([]);
+
+  useEffect(() => {
+    void window.mcpx.getPendingAuth?.().then((result: { serverName: string; oauthLikely?: boolean } | Array<{ serverName: string; oauthLikely?: boolean }> | null) => {
+      if (!result) {
+        setPendingAuth([]);
+        return;
+      }
+      setPendingAuth(Array.isArray(result) ? result : [result]);
+    }).catch(() => {
+      setPendingAuth([]);
+    });
+
+    return window.mcpx.onAuthRequired?.((entry) => {
+      setPendingAuth((current) => [
+        entry,
+        ...current.filter((existing) => existing.serverName !== entry.serverName)
+      ]);
+    });
+  }, []);
 
   if (loading || !status) {
     return <div className="popover glass-panel">Loading...</div>;
@@ -58,7 +83,7 @@ export function StatusPopover() {
       name: string;
       enabled: boolean;
       clients: Array<{ clientId: string; status: string; managed: boolean }>;
-      tokenCount?: { tools: number; resources: number; prompts: number; total: number };
+      tokenCount?: { tools: number; resources: number; prompts: number; total: number; error?: string };
     }>;
     totalGlobalTokens?: number;
   };
@@ -83,6 +108,19 @@ export function StatusPopover() {
     } else {
       void window.mcpx.daemonStart().then(() => refresh());
     }
+  }
+
+  function handleOauth(serverName: string): void {
+    void window.mcpx.startOauth(serverName).then(() => {
+      setPendingAuth((current) => current.filter((entry) => entry.serverName !== serverName));
+      refresh();
+    });
+  }
+
+  function handleDismissAuth(serverName: string): void {
+    void window.mcpx.dismissAuth(serverName).then(() => {
+      setPendingAuth((current) => current.filter((entry) => entry.serverName !== serverName));
+    });
   }
 
   return (
@@ -119,6 +157,28 @@ export function StatusPopover() {
       </header>
 
       <main style={{ flex: 1, display: "flex", flexDirection: "column", gap: "12px", overflow: "auto", minHeight: 0 }}>
+        {pendingAuth.length > 0 && (
+          <section style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+            {pendingAuth.map((entry) => (
+              <div key={entry.serverName} className="popover-server-row" style={{ borderColor: "rgba(245, 158, 11, 0.35)" }}>
+                <div className="popover-server-row__meta" style={{ minWidth: 0, flex: 1 }}>
+                  <span className="popover-server-row__name" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {entry.serverName}
+                  </span>
+                  <span className="popover-server-row__state">Auth required</span>
+                </div>
+                {entry.oauthLikely && (
+                  <button type="button" className="popover-add-btn" title="Sign in with browser" onClick={() => handleOauth(entry.serverName)}>
+                    <span className="material-symbols-outlined" style={{ fontSize: "16px" }}>login</span>
+                  </button>
+                )}
+                <button type="button" className="popover-add-btn" title="Dismiss" onClick={() => handleDismissAuth(entry.serverName)}>
+                  <span className="material-symbols-outlined" style={{ fontSize: "16px" }}>close</span>
+                </button>
+              </div>
+            ))}
+          </section>
+        )}
         {report.servers.length > 0 ? (
           <section style={{ display: "flex", flexDirection: "column", gap: "8px", minHeight: 0, flex: 1 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 4px" }}>

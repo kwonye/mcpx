@@ -1,4 +1,4 @@
-import { app, ipcMain, dialog } from "electron";
+import { app, ipcMain, dialog, shell } from "electron";
 import fs from "node:fs";
 import path from "node:path";
 import {
@@ -29,9 +29,12 @@ import {
   probeHttpAuthRequirement,
   applyAuthReference,
   resolveAuthTarget,
-  toSecretRef
+  toSecretRef,
+  parseCliAddCommand,
+  tokenizeCommandLine,
+  runOAuthLogin
 } from "@mcpx/core";
-import type { StdioServerSpec, UpstreamServerSpec } from "@mcpx/core";
+import type { HttpServerSpec, StdioServerSpec, UpstreamServerSpec } from "@mcpx/core";
 import { IPC } from "../shared/ipc-channels";
 import type { DesktopSettingsPatch } from "../shared/desktop-settings";
 import { openDashboard } from "./dashboard";
@@ -42,10 +45,46 @@ import { loadDesktopSettings, updateDesktopSettings } from "./settings-store";
 import { applyStartOnLoginSetting } from "./login-item";
 import { checkForUpdatesNow, setAutoUpdateEnabled } from "./update-manager";
 import { updateTrayForDaemonStatus } from "./tray";
+import { dismissPendingAuth, getPendingAuth, queuePendingAuth } from "./auth-events";
 
 // Cache the selected option and required inputs between prepare and confirm calls
 let pendingAdd: { name: string; option: SelectedOption; requiredInputs: RequiredInput[] } | null = null;
-let pendingAuth: { serverName: string } | null = null;
+
+async function refreshTokenCountsSoon(): Promise<void> {
+  const config = loadConfig();
+  const secrets = new SecretsManager();
+  const token = secrets.resolveMaybeSecret(config.gateway.tokenRef);
+  if (!token) {
+    return;
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 2000);
+  try {
+    await fetch(`http://127.0.0.1:${config.gateway.port}/mcp`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        Authorization: `Bearer ${token}`
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: "refresh-token-counts",
+        method: "custom/refreshTokenCounts",
+        params: {}
+      }),
+      signal: controller.signal
+    });
+  } catch {
+    // Best-effort cache refresh only.
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function queueTokenCountRefresh(): void {
+  void refreshTokenCountsSoon();
+}
 
 function getCliDaemonPath(): string {
   const resourcesPath = process.resourcesPath ?? app.getAppPath();
@@ -57,256 +96,22 @@ function getCliDaemonPath(): string {
   return path.join(app.getAppPath(), "..", "cli", "dist", "cli.js");
 }
 
-function isHttpUrl(value: string): boolean {
-  try {
-    const parsed = new URL(value);
-    return parsed.protocol === "http:" || parsed.protocol === "https:";
-  } catch {
-    return false;
-  }
-}
-
-function parseKeyValueFlag(value: string, label: string): [string, string] {
-  const split = value.indexOf("=");
-  if (split <= 0 || split >= value.length - 1) {
-    throw new Error(`Invalid ${label} format: ${value}. Use KEY=VALUE.`);
-  }
-  return [value.slice(0, split), value.slice(split + 1)];
-}
-
-function parseCliAddCommand(command: string): { name: string; spec: UpstreamServerSpec } {
-  // Remove leading "mcpx" and trim
-  let trimmed = command.trim();
-  if (trimmed.startsWith("mcpx ")) {
-    trimmed = trimmed.slice(5).trim();
-  }
-  
-  // Handle client-native commands (claude mcp add, codex mcp add, qwen mcp add, code --add-mcp)
-  const parts = trimmed.split(/\s+/);
-  
-  // Check for client-native patterns
-  if (parts[0] === "claude" && parts[1] === "mcp" && parts[2] === "add") {
-    // Claude: claude mcp add <name> <url|command> [options]
-    return parseClaudeAdd(parts.slice(3));
-  }
-  
-  if (parts[0] === "codex" && parts[1] === "mcp" && parts[2] === "add") {
-    // Codex: codex mcp add <name> [--env KEY=VALUE] -- <command> [args...]
-    return parseCodexAdd(parts.slice(3));
-  }
-  
-  if (parts[0] === "qwen" && parts[1] === "mcp" && parts[2] === "add") {
-    // Qwen: qwen mcp add <name> <url|command> [options]
-    return parseQwenAdd(parts.slice(3));
-  }
-  
-  if (parts[0] === "code" && parts[1] === "--add-mcp") {
-    // VS Code: code --add-mcp '<json>'
-    return parseVSCodeAdd(parts[2]);
-  }
-  
-  // Standard mcpx add command
-  if (parts[0] === "add") {
-    return parseStandardAdd(parts.slice(1));
-  }
-  
-  // Assume it's a standard add command without "add" prefix
-  return parseStandardAdd(parts);
-}
-
-function parseStandardAdd(args: string[]): { name: string; spec: UpstreamServerSpec } {
-  const header: string[] = [];
-  const env: string[] = [];
-  let cwd: string | undefined;
-  const values: string[] = [];
-  
-  for (let i = 0; i < args.length; i++) {
-    const arg = args[i];
-    if (arg === "--transport") {
-      i++; // Skip next value
-    } else if (arg === "--header") {
-      header.push(args[++i]);
-    } else if (arg === "--env") {
-      env.push(args[++i]);
-    } else if (arg === "--cwd") {
-      cwd = args[++i];
-    } else if (arg === "--force") {
-      // Skip
-    } else {
-      values.push(arg);
-    }
-  }
-  
-  return buildServerSpec(values, { header, env, cwd });
-}
-
-function parseClaudeAdd(args: string[]): { name: string; spec: UpstreamServerSpec } {
-  const header: string[] = [];
-  const env: string[] = [];
-  let cwd: string | undefined;
-  const values: string[] = [];
-  
-  for (let i = 0; i < args.length; i++) {
-    const arg = args[i];
-    if (arg === "--header") {
-      header.push(args[++i]);
-    } else if (arg === "--env") {
-      env.push(args[++i]);
-    } else if (arg === "--cwd") {
-      cwd = args[++i];
-    } else if (arg === "--transport" || arg === "--scope") {
-      i++; // Skip
-    } else {
-      values.push(arg);
-    }
-  }
-  
-  return buildServerSpec(values, { header, env, cwd });
-}
-
-function parseCodexAdd(args: string[]): { name: string; spec: UpstreamServerSpec } {
-  const header: string[] = [];
-  const env: string[] = [];
-  let cwd: string | undefined;
-  const values: string[] = [];
-  
-  for (let i = 0; i < args.length; i++) {
-    const arg = args[i];
-    if (arg === "--env") {
-      env.push(args[++i]);
-    } else if (arg === "--") {
-      // Rest is command
-      values.push(...args.slice(i + 1));
-      break;
-    } else {
-      values.push(arg);
-    }
-  }
-  
-  return buildServerSpec(values, { header, env, cwd });
-}
-
-function parseQwenAdd(args: string[]): { name: string; spec: UpstreamServerSpec } {
-  const header: string[] = [];
-  const env: string[] = [];
-  let cwd: string | undefined;
-  const values: string[] = [];
-  
-  for (let i = 0; i < args.length; i++) {
-    const arg = args[i];
-    if (arg === "--header") {
-      header.push(args[++i]);
-    } else if (arg === "--env") {
-      env.push(args[++i]);
-    } else if (arg === "--cwd") {
-      cwd = args[++i];
-    } else if (arg === "--transport" || arg === "--scope" || arg === "--trust" || arg === "--include-tools" || arg === "--exclude-tools" || arg === "--timeout") {
-      i++; // Skip
-    } else {
-      values.push(arg);
-    }
-  }
-  
-  return buildServerSpec(values, { header, env, cwd });
-}
-
-function parseVSCodeAdd(jsonPayload: string): { name: string; spec: UpstreamServerSpec } {
-  if (!jsonPayload) {
-    throw new Error("Missing JSON payload for --add-mcp");
-  }
-  
-  const payload = JSON.parse(jsonPayload);
-  const name = payload.name;
-  
-  if (!name) {
-    throw new Error("Missing 'name' in JSON payload");
-  }
-  
-  if (payload.url) {
-    return {
-      name,
-      spec: {
-        transport: "http",
-        url: payload.url,
-        headers: payload.headers
-      }
-    };
-  }
-  
-  if (payload.command) {
-    return {
-      name,
-      spec: {
-        transport: "stdio",
-        command: payload.command,
-        args: payload.args,
-        env: payload.env,
-        cwd: payload.cwd
-      }
-    };
-  }
-  
-  throw new Error("JSON payload must include 'url' or 'command'");
-}
-
-function buildServerSpec(
-  values: string[],
-  options: { header: string[]; env: string[]; cwd?: string }
-): { name: string; spec: UpstreamServerSpec } {
-  if (values.length < 2) {
-    throw new Error("Usage: add [--transport auto|http|stdio] <name> <url|command> [args...]");
+function normalizeUpdatedSpec(spec: UpstreamServerSpec): UpstreamServerSpec {
+  if (spec.transport !== "stdio") {
+    return spec;
   }
 
-  const name = values[0] ?? "";
-  const target = values[1] ?? "";
-  const trailing = values.slice(2);
-  const transport = isHttpUrl(target) && trailing.length === 0 ? "http" : "stdio";
-
-  if (transport === "http") {
-    if (values.length !== 2) {
-      throw new Error("HTTP upstream usage: add <name> --transport http <url>");
-    }
-    if (!isHttpUrl(target)) {
-      throw new Error(`Invalid HTTP URL: ${target}`);
-    }
-    if (options.env.length > 0 || options.cwd) {
-      throw new Error("--env/--cwd are only valid for stdio transport.");
-    }
-
-    const headers: Record<string, string> = {};
-    for (const item of options.header) {
-      const [key, value] = parseKeyValueFlag(item, "header");
-      headers[key] = value;
-    }
-
-    const spec: UpstreamServerSpec = {
-      transport: "http",
-      url: target,
-      headers: Object.keys(headers).length > 0 ? headers : undefined
-    };
-
-    return { name, spec };
+  const parts = tokenizeCommandLine(spec.command);
+  if (parts.length <= 1) {
+    return parts[0] ? { ...spec, command: parts[0] } : spec;
   }
 
-  if (options.header.length > 0) {
-    throw new Error("--header is only valid for HTTP transport.");
-  }
-
-  const env: Record<string, string> = {};
-  for (const item of options.env) {
-    const [key, value] = parseKeyValueFlag(item, "env");
-    env[key] = value;
-  }
-
-  const spec: UpstreamServerSpec = {
-    transport: "stdio",
-    command: target,
-    args: trailing.length > 0 ? trailing : undefined,
-    env: Object.keys(env).length > 0 ? env : undefined,
-    cwd: options.cwd
+  const [command, ...args] = parts;
+  return {
+    ...spec,
+    command,
+    args: [...args, ...(spec.args ?? [])]
   };
-
-  return { name, spec };
 }
 
 export function registerIpcHandlers(): void {
@@ -346,15 +151,17 @@ export function registerIpcHandlers(): void {
     saveConfig(config);
     const secrets = new SecretsManager();
     const summary = syncAllClients(config, secrets);
+    queueTokenCountRefresh();
 
-    const result: { added: string; sync: typeof summary; authRequired?: boolean; authStatus?: number } = { added: name, sync: summary };
+    const result: { added: string; sync: typeof summary; authRequired?: boolean; authStatus?: number; oauthLikely?: boolean } = { added: name, sync: summary };
 
     if (spec.transport === "http") {
       const probe = await probeHttpAuthRequirement(spec, secrets);
       if (probe.authRequired) {
         result.authRequired = true;
         result.authStatus = probe.status;
-        pendingAuth = { serverName: name };
+        result.oauthLikely = probe.oauthLikely;
+        queuePendingAuth({ serverName: name, oauthLikely: probe.oauthLikely, status: probe.status });
       }
     }
 
@@ -375,14 +182,37 @@ export function registerIpcHandlers(): void {
     saveConfig(config);
 
     const summary = syncAllClients(config, secrets);
+    queueTokenCountRefresh();
 
-    pendingAuth = null;
+    dismissPendingAuth(serverName);
     return { configured: true, sync: summary };
   });
 
   ipcMain.handle(IPC.GET_PENDING_AUTH, () => {
-    const result = pendingAuth;
-    pendingAuth = null;
+    return getPendingAuth();
+  });
+
+  ipcMain.handle(IPC.DISMISS_AUTH, (_event, serverName: string) => {
+    dismissPendingAuth(serverName);
+    return { dismissed: serverName };
+  });
+
+  ipcMain.handle(IPC.START_OAUTH, async (_event, serverName: string) => {
+    const config = loadConfig();
+    const spec = config.servers[serverName];
+    if (!spec) {
+      throw new Error(`Server "${serverName}" not found.`);
+    }
+    if (spec.transport !== "http") {
+      throw new Error("OAuth login only supports HTTP servers.");
+    }
+
+    const secrets = new SecretsManager();
+    const result = await runOAuthLogin(serverName, spec as HttpServerSpec, secrets, (url) => {
+      void shell.openExternal(url);
+    });
+    dismissPendingAuth(serverName);
+    queueTokenCountRefresh();
     return result;
   });
 
@@ -405,6 +235,7 @@ export function registerIpcHandlers(): void {
               const merged = loadMergedConfig();
               const secrets = new SecretsManager();
               const summary = syncAllClients(merged, secrets);
+              queueTokenCountRefresh();
               return { removed: name, sync: summary };
             }
           }
@@ -417,6 +248,7 @@ export function registerIpcHandlers(): void {
     saveConfig(config);
     const secrets = new SecretsManager();
     const summary = syncAllClients(config, secrets);
+    queueTokenCountRefresh();
     return { removed: name, sync: summary };
   });
 
@@ -439,6 +271,7 @@ export function registerIpcHandlers(): void {
               const merged = loadMergedConfig();
               const secrets = new SecretsManager();
               const summary = syncAllClients(merged, secrets);
+              queueTokenCountRefresh();
               return { updated: name, enabled, sync: summary };
             }
           }
@@ -451,6 +284,7 @@ export function registerIpcHandlers(): void {
     saveConfig(config);
     const secrets = new SecretsManager();
     const summary = syncAllClients(config, secrets);
+    queueTokenCountRefresh();
     return { updated: name, enabled, sync: summary };
   });
 
@@ -465,6 +299,8 @@ export function registerIpcHandlers(): void {
         }
       }
     }
+
+    spec = normalizeUpdatedSpec(spec);
 
     // Auto-migrate plain-text values that look like secrets but weren't marked
     const secretKeyPattern = /^(api.?key|token|secret|password|auth.?token|access.?key|service.?role.?key)/i;
@@ -509,6 +345,7 @@ export function registerIpcHandlers(): void {
               saveProjectConfig(projectConfig, localPath);
               const merged = loadMergedConfig();
               const summary = syncAllClients(merged, secrets);
+              queueTokenCountRefresh();
               return { updated: name, sync: summary };
             }
           }
@@ -520,13 +357,16 @@ export function registerIpcHandlers(): void {
     updateServer(config, name, spec);
     saveConfig(config);
     const summary = syncAllClients(config, secrets);
+    queueTokenCountRefresh();
     return { updated: name, sync: summary };
   });
 
   ipcMain.handle(IPC.SYNC_ALL, () => {
     const config = loadMergedConfig();
     const secrets = new SecretsManager();
-    return syncAllClients(config, secrets);
+    const summary = syncAllClients(config, secrets);
+    queueTokenCountRefresh();
+    return summary;
   });
 
   ipcMain.handle(IPC.PROJECT_INIT, (_event, projectPath: string, name: string) => {
@@ -541,6 +381,7 @@ export function registerIpcHandlers(): void {
     const mergedConfig = loadMergedConfig();
     const secrets = new SecretsManager();
     const summary = syncAllClients(mergedConfig, secrets);
+    queueTokenCountRefresh();
     return { success: true, sync: summary };
   });
 
@@ -552,6 +393,7 @@ export function registerIpcHandlers(): void {
     const mergedConfig = loadMergedConfig();
     const secrets = new SecretsManager();
     const summary = syncAllClients(mergedConfig, secrets);
+    queueTokenCountRefresh();
     return { success: true, sync: summary };
   });
 
@@ -637,15 +479,17 @@ export function registerIpcHandlers(): void {
     addServer(config, name, spec, true);
     saveConfig(config);
     const summary = syncAllClients(config, secrets);
+    queueTokenCountRefresh();
 
-    const result: { added: string; sync: typeof summary; authRequired?: boolean; authStatus?: number } = { added: name, sync: summary };
+    const result: { added: string; sync: typeof summary; authRequired?: boolean; authStatus?: number; oauthLikely?: boolean } = { added: name, sync: summary };
 
     if (spec.transport === "http") {
       const probe = await probeHttpAuthRequirement(spec, secrets);
       if (probe.authRequired) {
         result.authRequired = true;
         result.authStatus = probe.status;
-        pendingAuth = { serverName: name };
+        result.oauthLikely = probe.oauthLikely;
+        queuePendingAuth({ serverName: name, oauthLikely: probe.oauthLikely, status: probe.status });
       }
     }
 
@@ -660,15 +504,17 @@ export function registerIpcHandlers(): void {
       saveConfig(config);
       const secrets = new SecretsManager();
       const summary = syncAllClients(config, secrets);
+      queueTokenCountRefresh();
 
-      const result: { added: string; sync: typeof summary; authRequired?: boolean; authStatus?: number } = { added: name, sync: summary };
+      const result: { added: string; sync: typeof summary; authRequired?: boolean; authStatus?: number; oauthLikely?: boolean } = { added: name, sync: summary };
 
       if (spec.transport === "http") {
         const probe = await probeHttpAuthRequirement(spec, secrets);
         if (probe.authRequired) {
           result.authRequired = true;
           result.authStatus = probe.status;
-          pendingAuth = { serverName: name };
+          result.oauthLikely = probe.oauthLikely;
+          queuePendingAuth({ serverName: name, oauthLikely: probe.oauthLikely, status: probe.status });
         }
       }
 

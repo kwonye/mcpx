@@ -38,6 +38,10 @@ function buildManagedEntries(config: McpxConfig, gatewayUrl: string, localToken:
   }));
 }
 
+function isClientInternalServerCommand(candidate: { spec: { transport: string; command?: string } }): boolean {
+  return candidate.spec.transport === "stdio" && /\.app\/Contents\//.test(candidate.spec.command ?? "");
+}
+
 export function syncAllClients(config: McpxConfig, secrets: SecretsManager, targetClients?: ClientId[]): SyncSummary {
   const adapters = getAdapters();
   const managedIndexPath = getManagedIndexPath();
@@ -60,6 +64,17 @@ export function syncAllClients(config: McpxConfig, secrets: SecretsManager, targ
       imports.skipped.push(...scan.skipped);
 
       for (const candidate of scan.candidates) {
+        if (isClientInternalServerCommand(candidate)) {
+          imports.skipped.push({
+            clientId: candidate.clientId,
+            configPath: candidate.configPath,
+            sourceEntryName: candidate.sourceEntryName,
+            serverName: candidate.serverName,
+            reason: "client-internal server"
+          });
+          continue;
+        }
+
         const existing = config.servers[candidate.serverName];
         if (!existing) {
           config.servers[candidate.serverName] = candidate.spec;
