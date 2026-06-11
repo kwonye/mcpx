@@ -37,7 +37,6 @@ export function Dashboard() {
       const entry = Array.isArray(result) ? result[0] : result;
       if (entry) {
         setPendingAuth(entry);
-        setTab("servers");
       }
     }).catch(() => {
       // Handler may not be registered yet — ignore
@@ -45,7 +44,6 @@ export function Dashboard() {
 
     return window.mcpx.onAuthRequired?.((entry: PendingAuthEntry) => {
       setPendingAuth(entry);
-      setTab("servers");
     });
   }, []);
 
@@ -260,7 +258,10 @@ export function Dashboard() {
         <AuthModal
           serverName={pendingAuth.serverName}
           oauthLikely={pendingAuth.oauthLikely}
-          onClose={() => setPendingAuth(null)}
+          onClose={() => {
+            void window.mcpx.dismissAuth?.(pendingAuth.serverName);
+            setPendingAuth(null);
+          }}
           onConfigured={() => { setPendingAuth(null); refresh(); }}
         />
       )}

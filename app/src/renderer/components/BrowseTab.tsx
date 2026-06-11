@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { useRegistryList } from "../hooks/useMcpx";
 import { AddServerForm } from "./AddServerForm";
-import { AuthModal } from "./AuthModal";
 
 interface BrowseTabProps {
   onServerAdded: () => void;
@@ -93,7 +92,6 @@ export function BrowseTab({ onServerAdded, status, initialState, onStateChange }
     requiredInputs: RequiredInput[];
   } | null>(null);
   const [addStatus, setAddStatus] = useState<string | null>(null);
-  const [authServer, setAuthServer] = useState<{ serverName: string; oauthLikely?: boolean } | null>(null);
   const [isError, setIsError] = useState(false);
   const [sortBy, setSortBy] = useState<"default" | "name" | "name-desc" | "updated">("default");
   const initialSearchTriggered = useRef(false);
@@ -152,12 +150,9 @@ export function BrowseTab({ onServerAdded, status, initialState, onStateChange }
       const result = await window.mcpx.registryPrepareAdd(registryName);
       if (result.requiredInputs.length === 0) {
         // No inputs needed — add directly
-        const addResult: { added: string; authRequired?: boolean; authStatus?: number; oauthLikely?: boolean } = await window.mcpx.registryConfirmAdd({});
+        const addResult: { added: string } = await window.mcpx.registryConfirmAdd({});
         setAddStatus(`Added "${addResult.added}" successfully!`);
         onServerAdded();
-        if (addResult.authRequired) {
-          setAuthServer({ serverName: addResult.added, oauthLikely: addResult.oauthLikely });
-        }
       } else {
         setAdding({
           registryName,
@@ -189,13 +184,10 @@ export function BrowseTab({ onServerAdded, status, initialState, onStateChange }
     try {
       setIsError(false);
       setAddStatus("Adding...");
-      const result: { added: string; authRequired?: boolean; authStatus?: number; oauthLikely?: boolean } = await window.mcpx.registryConfirmAdd(values);
+      const result: { added: string } = await window.mcpx.registryConfirmAdd(values);
       setAddStatus(`Added "${result.added}" successfully!`);
       setAdding(null);
       onServerAdded();
-      if (result.authRequired) {
-        setAuthServer({ serverName: result.added, oauthLikely: result.oauthLikely });
-      }
     } catch (err) {
       setIsError(true);
       setAddStatus(`Error: ${err instanceof Error ? err.message : String(err)}`);
@@ -371,14 +363,6 @@ export function BrowseTab({ onServerAdded, status, initialState, onStateChange }
         </div>
       )}
 
-      {authServer && (
-        <AuthModal
-          serverName={authServer.serverName}
-          oauthLikely={authServer.oauthLikely}
-          onClose={() => setAuthServer(null)}
-          onConfigured={() => { setAuthServer(null); onServerAdded(); }}
-        />
-      )}
     </div>
   );
 }
