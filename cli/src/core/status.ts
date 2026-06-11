@@ -138,11 +138,11 @@ export async function buildStatusReport(
     const spec = config.servers[name];
     let tokenCount = tokenCounts[name];
 
-    // Auth-configured servers have valid tokens (we just enrolled them).
-    // The gateway's token count computation calls upstream methods which may
-    // fail for reasons unrelated to auth (method not supported, scope limits,
-    // etc.). Don't conflate method-level errors with token validity.
-    if (tokenCount?.error && buildAuthBindings(spec).length > 0) {
+    // Only suppress method-level errors if at least one upstream call
+    // succeeded (total > 0). When all three fail (tools, resources, prompts)
+    // the error is likely auth or connectivity — show it so the user knows
+    // they need to configure auth or check the server.
+    if (tokenCount?.error && buildAuthBindings(spec).length > 0 && tokenCount.total > 0) {
       tokenCount = { ...tokenCount, error: undefined };
     }
 
