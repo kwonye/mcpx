@@ -157,6 +157,8 @@ class McpxOAuthProvider implements OAuthClientProvider {
 
 class InteractiveOAuthProvider extends McpxOAuthProvider {
   readonly #openUrl: (url: string) => void | Promise<void>;
+  #cachedClientInfo: OAuthClientInformationMixed | undefined;
+  #cachedCodeVerifier: string | undefined;
 
   constructor(serverName: string, secrets: SecretsManager, redirectUrl: string, state: string, openUrl: (url: string) => void | Promise<void>) {
     super(serverName, secrets, redirectUrl, state);
@@ -165,6 +167,38 @@ class InteractiveOAuthProvider extends McpxOAuthProvider {
 
   async redirectToAuthorization(authorizationUrl: URL): Promise<void> {
     await this.#openUrl(authorizationUrl.toString());
+  }
+
+  /** Cache credentials in memory to survive the SDK's retry path
+   *  (which calls invalidateCredentials('all') on InvalidClientError). Also
+   *  insulates against intermittent keychain read failures. */
+  clientInformation(): OAuthClientInformationMixed | undefined {
+    this.#cachedClientInfo ??= super.clientInformation();
+    return this.#cachedClientInfo;
+  }
+
+  saveClientInformation(clientInformation: OAuthClientInformationMixed): void {
+    super.saveClientInformation(clientInformation);
+    this.#cachedClientInfo = clientInformation;
+  }
+
+  codeVerifier(): string {
+    if (this.#cachedCodeVerifier !== undefined) {
+      return this.#cachedCodeVerifier;
+    }
+    return super.codeVerifier();
+  }
+
+  saveCodeVerifier(codeVerifier: string): void {
+    super.saveCodeVerifier(codeVerifier);
+    this.#cachedCodeVerifier = codeVerifier;
+  }
+
+  invalidateCredentials(scope: "all" | "client" | "tokens" | "verifier" | "discovery"): void {
+    super.invalidateCredentials(scope);
+    if (scope === "all" || scope === "client") {
+      this.#cachedClientInfo = undefined;
+    }
   }
 }
 
@@ -246,19 +280,39 @@ function bindOAuthReference(config: McpxConfig, serverName: string): void {
   };
 }
 
+export interface OAuthCodeReceiver {
+  redirectUrl: string;
+  waitForCode: (expectedState: string, timeoutMs?: number) => Promise<string>;
+}
+
 export async function runOAuthLogin(
   serverName: string,
   spec: HttpServerSpec,
   secrets: SecretsManager,
   openUrl: (url: string) => void | Promise<void>,
-  configPath?: string
+  configPath?: string,
+  codeReceiver?: OAuthCodeReceiver
 ): Promise<{ serverName: string; authorized: true }> {
+  // Clear any stale OAuth state from previous runs so the fresh flow
+  // always starts from a clean slate (DCR, PKCE, etc.).
+  new McpxOAuthProvider(serverName, secrets).invalidateCredentials("all");
+
   const state = crypto.randomUUID();
-  const callbackServer = http.createServer();
-  const port = await listen(callbackServer);
-  const redirectUrl = `http://127.0.0.1:${port}/callback`;
+  let callbackServer: http.Server | undefined;
+  let redirectUrl: string;
+  let codePromise: Promise<string>;
+
+  if (codeReceiver) {
+    redirectUrl = codeReceiver.redirectUrl;
+    codePromise = codeReceiver.waitForCode(state);
+  } else {
+    callbackServer = http.createServer();
+    const port = await listen(callbackServer);
+    redirectUrl = `http://127.0.0.1:${port}/callback`;
+    codePromise = waitForAuthorizationCode(callbackServer, state);
+  }
+
   const provider = new InteractiveOAuthProvider(serverName, secrets, redirectUrl, state, openUrl);
-  const codePromise = waitForAuthorizationCode(callbackServer, state);
 
   try {
     const initial = await auth(provider, {
@@ -269,6 +323,7 @@ export async function runOAuthLogin(
     }
 
     const authorizationCode = await codePromise;
+
     const result = await auth(provider, {
       serverUrl: spec.url,
       authorizationCode
@@ -283,7 +338,9 @@ export async function runOAuthLogin(
     syncAllClients(config, secrets);
     return { serverName, authorized: true };
   } finally {
-    await closeServer(callbackServer);
+    if (callbackServer) {
+      await closeServer(callbackServer);
+    }
   }
 }
 

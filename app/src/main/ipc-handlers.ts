@@ -208,11 +208,14 @@ export function registerIpcHandlers(): void {
     }
 
     const secrets = new SecretsManager();
-    const result = await runOAuthLogin(serverName, spec as HttpServerSpec, secrets, (url) => {
-      void shell.openExternal(url);
-    });
+    const result = await runOAuthLogin(
+      serverName,
+      spec as HttpServerSpec,
+      secrets,
+      (url) => { void shell.openExternal(url); },
+    );
     dismissPendingAuth(serverName);
-    queueTokenCountRefresh();
+    await refreshTokenCountsSoon();
     return result;
   });
 

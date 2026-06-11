@@ -205,6 +205,7 @@ export function Dashboard() {
                         tokenCount={(server as any).tokenCount}
                         onRefresh={refresh}
                         onClick={() => setSelectedServer(server.name)}
+                        onAuthClick={() => setPendingAuth({ serverName: server.name, oauthLikely: true })}
                       />
                     ))}
                   </div>

@@ -9,13 +9,17 @@ interface PopoverServerRowProps {
   server: {
     name: string;
     enabled: boolean;
+    transport?: string;
+    authBindings?: Array<{ kind: string; key: string; value: string }>;
     tokenCount?: { tools: number; resources: number; prompts: number; total: number; error?: string };
   };
   onRefresh: () => void;
+  onAuthClick?: () => void;
 }
 
-function PopoverServerRow({ server, onRefresh }: PopoverServerRowProps) {
+function PopoverServerRow({ server, onRefresh, onAuthClick }: PopoverServerRowProps) {
   const { isToggling, handleEnabledChange } = useServerEnabled(server.name, onRefresh);
+  const authConfigured = (server.authBindings?.length ?? 0) > 0;
 
   return (
     <div className="popover-server-row">
@@ -37,6 +41,16 @@ function PopoverServerRow({ server, onRefresh }: PopoverServerRowProps) {
           {server.enabled ? "Enabled" : "Disabled"}
         </span>
       </div>
+      {!authConfigured && server.transport === "http" && (
+        <button
+          type="button"
+          className="popover-add-btn"
+          title="Configure Auth"
+          onClick={onAuthClick}
+        >
+          <span className="material-symbols-outlined" style={{ fontSize: "16px" }}>lock_open</span>
+        </button>
+      )}
       <Toggle
         id={`popover-server-enabled-${server.name}`}
         checked={server.enabled}
@@ -82,6 +96,8 @@ export function StatusPopover() {
     servers: Array<{
       name: string;
       enabled: boolean;
+      transport: string;
+      authBindings: Array<{ kind: string; key: string; value: string }>;
       clients: Array<{ clientId: string; status: string; managed: boolean }>;
       tokenCount?: { tools: number; resources: number; prompts: number; total: number; error?: string };
     }>;
@@ -114,6 +130,8 @@ export function StatusPopover() {
     void window.mcpx.startOauth(serverName).then(() => {
       setPendingAuth((current) => current.filter((entry) => entry.serverName !== serverName));
       refresh();
+    }).catch((err) => {
+      console.error("OAuth failed:", err);
     });
   }
 
@@ -203,6 +221,7 @@ export function StatusPopover() {
                   key={server.name}
                   server={server}
                   onRefresh={refresh}
+                  onAuthClick={() => handleOauth(server.name)}
                 />
               ))}
             </div>

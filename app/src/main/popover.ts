@@ -27,6 +27,30 @@ function loadPopoverContent(window: BrowserWindow): void {
 function positionPopover(window: BrowserWindow, tray: Tray): void {
   const trayBounds = tray.getBounds();
   const windowBounds = window.getBounds();
+
+  // macOS tray.getBounds() is unreliable and can return all zeros.
+  // Fall back to cursor position (the user just clicked the tray).
+  const hasValidBounds = trayBounds.width > 0 && trayBounds.height > 0;
+  if (!hasValidBounds) {
+    const cursor = screen.getCursorScreenPoint();
+    const display = screen.getDisplayNearestPoint(cursor);
+    const workArea = display.workArea;
+    const x = Math.round(
+      Math.min(
+        Math.max(cursor.x - windowBounds.width / 2, workArea.x),
+        workArea.x + workArea.width - windowBounds.width
+      )
+    );
+    const y = Math.round(
+      Math.min(
+        Math.max(cursor.y + 8, workArea.y),
+        workArea.y + workArea.height - windowBounds.height
+      )
+    );
+    window.setPosition(x, y, false);
+    return;
+  }
+
   const display = screen.getDisplayMatching(trayBounds);
   const workArea = display.workArea;
 

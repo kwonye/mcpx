@@ -13,6 +13,7 @@ interface ServerCardProps {
   tokenCount?: { tools: number; resources: number; prompts: number; total: number; error?: string };
   onRefresh: () => void;
   onClick: () => void;
+  onAuthClick?: () => void;
 }
 
 export function ServerCard(props: ServerCardProps) {
@@ -60,11 +61,15 @@ export function ServerCard(props: ServerCardProps) {
               label={`${props.enabled ? "Disable" : "Enable"} ${props.name}`}
             />
           </div>
-          {props.authConfigured && (
+          {props.authConfigured ? (
             <div className="server-card__auth" title="Auth configured">
               <span className="material-symbols-outlined">lock</span>
             </div>
-          )}
+          ) : props.transport === "http" ? (
+            <button className="btn btn-ghost btn-sm" onClick={props.onAuthClick} style={{ fontSize: '0.75rem', padding: '2px 8px', minHeight: 'unset' }}>
+              Configure Auth
+            </button>
+          ) : null}
         </div>
       </div>
 

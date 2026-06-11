@@ -136,7 +136,16 @@ export async function buildStatusReport(
   const serverNames = Object.keys(config.servers).sort((left, right) => left.localeCompare(right));
   const servers = serverNames.map((name) => {
     const spec = config.servers[name];
-    const tokenCount = tokenCounts[name];
+    let tokenCount = tokenCounts[name];
+
+    // Auth-configured servers have valid tokens (we just enrolled them).
+    // The gateway's token count computation calls upstream methods which may
+    // fail for reasons unrelated to auth (method not supported, scope limits,
+    // etc.). Don't conflate method-level errors with token validity.
+    if (tokenCount?.error && buildAuthBindings(spec).length > 0) {
+      tokenCount = { ...tokenCount, error: undefined };
+    }
+
     const serverEntry = {
       name,
       enabled: isServerEnabled(spec),
