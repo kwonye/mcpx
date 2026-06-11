@@ -73,6 +73,7 @@ export function ensureGatewayToken(config: McpxConfig, secrets: SecretsManager):
   try {
     const fileValue = fs.readFileSync(tokenPath, "utf8").trim();
     if (fileValue) {
+      secrets.setSecret(secretName, fileValue);
       return fileValue;
     }
   } catch {
@@ -83,6 +84,7 @@ export function ensureGatewayToken(config: McpxConfig, secrets: SecretsManager):
   const token = crypto.randomBytes(32).toString("base64url");
   ensureParentDir(tokenPath);
   fs.writeFileSync(tokenPath, token, { mode: 0o600 });
+  secrets.setSecret(secretName, token);
   return token;
 }
 
@@ -93,6 +95,7 @@ export function rotateGatewayToken(config: McpxConfig, secrets: SecretsManager):
 
   ensureParentDir(tokenPath);
   fs.writeFileSync(tokenPath, token, { mode: 0o600 });
+  secrets.setSecret(secretName, token);
 
   return token;
 }
