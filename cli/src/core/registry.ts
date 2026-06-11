@@ -79,15 +79,7 @@ export function ensureGatewayToken(config: McpxConfig, secrets: SecretsManager):
     // File doesn't exist — fall through
   }
 
-  // 3. Keychain — migrate to file if found
-  const keychainValue = secrets.getSecret(secretName);
-  if (keychainValue) {
-    ensureParentDir(tokenPath);
-    fs.writeFileSync(tokenPath, keychainValue, { mode: 0o600 });
-    return keychainValue;
-  }
-
-  // 4. Generate new token
+  // 3. Generate new token
   const token = crypto.randomBytes(32).toString("base64url");
   ensureParentDir(tokenPath);
   fs.writeFileSync(tokenPath, token, { mode: 0o600 });
@@ -101,12 +93,6 @@ export function rotateGatewayToken(config: McpxConfig, secrets: SecretsManager):
 
   ensureParentDir(tokenPath);
   fs.writeFileSync(tokenPath, token, { mode: 0o600 });
-
-  try {
-    secrets.setSecret(secretName, token);
-  } catch {
-    // keytar may be unavailable — ignore
-  }
 
   return token;
 }

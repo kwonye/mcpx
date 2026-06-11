@@ -100,13 +100,13 @@ The desktop app is tightly integrated with the CLI's core logic. It does not use
 
 - **Alias:** `@mcpx/core` → `cli/src/core/index.ts` (resolved by `electron-vite`).
 - **IPC Bridge:** The Electron main process (`app/src/main/ipc-handlers.ts`) wraps core functions and exposes them to the renderer.
-- **Shared Secrets:** Both CLI and Desktop app share the same macOS Keychain backend for credentials.
+- **Shared Secrets:** Both CLI and Desktop app share the same encrypted-file secrets store (AES-256-GCM).
 
 ## Building and Running
 
 ### Prerequisites
 - Bun >= 1.2 (https://bun.sh)
-- macOS (required for keychain and desktop app features)
+- macOS (required for desktop app features)
 
 Note: the tray/app icon generation scripts (`generate-status-icons.js`, `generate-app-icons.sh`) have been removed. The committed PNGs in `app/resources/` and `app/build/icons/` are the source of truth.
 
@@ -178,7 +178,7 @@ These rules are foundational for any agent working on this project:
   - New logic in `cli/src/core/` must have tests in `cli/test/`.
   - UI components in `app/` should have tests in `app/test/components/`.
   - Significant user flows should be covered by Playwright in `app/e2e/`.
-- **Secrets Management:** Never log or expose secrets. Use the `SecretsManager` class which interfaces with the macOS Keychain.
+- **Secrets Management:** Never log or expose secrets. Use the `SecretsManager` class which manages an encrypted file store (AES-256-GCM).
 - **State:** Core state (servers, auth) is persisted in `~/.config/mcpx/config.json`.
 
 ## Developer Tools

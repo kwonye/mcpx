@@ -265,11 +265,6 @@ jobs:
         with:
           bun-version: latest
 
-      - name: Install system dependencies for keytar
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libsecret-1-dev
-
       - name: Install CLI dependencies
         run: bun install --frozen-lockfile
         working-directory: cli
@@ -285,13 +280,6 @@ jobs:
       - name: Build desktop bundle
         run: bun run build
         working-directory: app
-
-      - name: Rebuild keytar native addon for Linux
-        run: |
-          cd app/node_modules/keytar
-          npx node-gyp rebuild
-        env:
-          npm_config_arch: x64
 
       - name: Package Linux app
         run: bunx electron-builder build --linux --publish never
@@ -337,13 +325,6 @@ jobs:
       - name: Build desktop bundle
         run: bun run build
         working-directory: app
-
-      - name: Rebuild keytar native addon for Windows
-        run: |
-          cd app/node_modules/keytar
-          npx node-gyp rebuild
-        env:
-          npm_config_arch: x64
 
       - name: Package Windows app
         run: bunx electron-builder build --win --publish never

@@ -39,8 +39,12 @@ export function getManagedIndexPath(): string {
   return path.join(getDataRoot(), "mcpx", "managed-index.json");
 }
 
-export function getSecretNamesPath(): string {
-  return path.join(getDataRoot(), "mcpx", "secret-names.json");
+export function getSecretsStorePath(): string {
+  return path.join(getDataRoot(), "mcpx", "secrets.json");
+}
+
+export function getSecretsKeyPath(): string {
+  return path.join(getDataRoot(), "mcpx", "secrets.key");
 }
 
 export function getRuntimeDir(): string {

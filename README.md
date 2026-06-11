@@ -55,10 +55,6 @@ bun run desktop-install:dev
 ```bash
 git clone https://github.com/kwonye/mcpx.git
 cd mcpx/app
-
-# Install libsecret for keyring support
-sudo apt-get install -y libsecret-1-dev
-
 bun install
 bun run build
 bunx electron-builder build --linux
@@ -292,6 +288,5 @@ The desktop app imports the CLI's core logic directly via a `@mcpx/core` TypeScr
 ## Notes
 
 - Client connectivity is HTTP-first; upstreams can be HTTP or stdio
-- Secrets use OS-native keychains via [keytar](https://github.com/atom/node-keytar): macOS Keychain, Linux Secret Service (libsecret), Windows Credential Vault
+- Secrets are stored in an encrypted file (`secrets.json` + `secrets.key` in the data directory) using AES-256-GCM via Node's built-in `crypto`. No native dependencies, no Keychain prompts.
 - `MCPX_SECRET_<name>` env var overrides work on all platforms for CI/headless
-- Linux desktop app requires `libsecret-1-dev` for keyring support

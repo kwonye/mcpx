@@ -38,7 +38,7 @@ import {
   startDaemon,
   stopDaemon
 } from "./core/daemon.js";
-import { getConfigPath, getManagedIndexPath, findProjectConfigPath } from "./core/paths.js";
+import { getConfigPath, getManagedIndexPath, getSecretsStorePath, findProjectConfigPath } from "./core/paths.js";
 import { loadManagedIndex } from "./core/managed-index.js";
 import { STATUS_CLIENTS, buildStatusReport, type StatusAuthBinding, type StatusReport, type StatusServerEntry } from "./core/status.js";
 import { APP_VERSION } from "./version.js";
@@ -1358,27 +1358,12 @@ function registerDoctorCommand(program: Command): void {
         details: getManagedIndexPath()
       });
 
-      // Check keyring backend availability
+      // Check encrypted secrets store
       try {
-        // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
-        const keytar = require(path.join(__dirname, "..", "node_modules", "keytar", "lib", "keytar.js"));
-        // Try a no-op lookup to verify the native addon works
-        try {
-          keytar.getPassword("mcpx-doctor-check", "__probe__");
-        } catch {
-          // Expected to fail with "not found", but if it throws a native addon error, we'll catch it below
-        }
-        checks.push({ check: "keyring", status: "ok", details: "keytar native addon loaded" });
+        new SecretsManager().listSecretNames();
+        checks.push({ check: "secrets_store", status: "ok", details: getSecretsStorePath() });
       } catch {
-        if (process.platform === "linux") {
-          checks.push({ check: "keyring", status: "warn", details: "keytar native addon unavailable; install libsecret-1-dev and reinstall dependencies" });
-        } else if (process.platform === "win32") {
-          checks.push({ check: "keyring", status: "warn", details: "keytar native addon unavailable; rebuild keytar with 'npx node-gyp rebuild' in app/node_modules/keytar" });
-        } else if (process.platform === "darwin") {
-          checks.push({ check: "keyring", status: "warn", details: "keytar native addon unavailable; reinstall dependencies or check Xcode CLI tools" });
-        } else {
-          checks.push({ check: "keyring", status: "warn", details: "keytar native addon unavailable" });
-        }
+        checks.push({ check: "secrets_store", status: "warn", details: "encrypted secrets store unavailable" });
       }
 
       const daemon = getDaemonStatus(config);

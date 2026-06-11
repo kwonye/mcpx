@@ -7,7 +7,7 @@
 - **Unified Configuration:** Manages a central registry of MCP servers in `~/.config/mcpx/config.json`.
 - **Daemon Management:** Runs a background HTTP gateway that proxies client requests to upstream servers (stdio or HTTP).
 - **Client Sync:** Automates the registration of managed MCP endpoints into multiple AI clients (Claude, Cursor, Cline, VS Code, etc.).
-- **Secure Secrets:** Integrates with the macOS Keychain to store and rotate credentials (API keys, tokens).
+- **Secrets:** Encrypted file store (AES-256-GCM) for credentials (API keys, tokens). Zero native dependencies.
 - **Interactive Status:** Provides a rich TTY menu (`mcpx status`) for real-time monitoring and server management.
 - **Compatibility Layer:** Supports client-native "add" commands (e.g., `mcpx claude mcp add ...`) to ease migration.
 
@@ -17,7 +17,7 @@
   - `config.ts`: Zod-validated configuration management.
   - `daemon.ts`: Lifecycle management for the background gateway.
   - `sync.ts`: Logic for updating third-party client config files.
-  - `secrets.ts`: Keychain abstraction and secret resolution.
+  - `secrets.ts`: Encrypted file store and secret resolution.
   - `status.ts`: Health reporting and interactive menu logic.
 - **`gateway/`**: The HTTP server implementation.
   - Handles JSON-RPC multiplexing.
@@ -40,4 +40,4 @@ This package exports a barrel at `src/core/index.ts` which is consumed as a libr
 Tests are located in `test/` and include:
 - Unit tests for core logic.
 - Integration tests for the gateway server and sync adapters.
-- Mock-based testing for the macOS Keychain integration.
+- Tests use temporary isolated directories for the encrypted file store.
