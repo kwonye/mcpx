@@ -1,6 +1,9 @@
+import crypto from "node:crypto";
+import fs from "node:fs";
 import path from "node:path";
 import { normalizeServerSpecEnabled, type McpxConfig, type UpstreamServerSpec } from "../types.js";
 import { SecretsManager } from "./secrets.js";
+import { getGatewayTokenPath, ensureParentDir } from "./paths.js";
 
 export function validateServerName(name: string): void {
   if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,62}$/.test(name)) {
@@ -58,13 +61,54 @@ export function getGatewayTokenSecretName(config: McpxConfig): string {
 
 export function ensureGatewayToken(config: McpxConfig, secrets: SecretsManager): string {
   const secretName = getGatewayTokenSecretName(config);
-  const existing = secrets.getSecret(secretName);
+  const tokenPath = getGatewayTokenPath(secretName);
 
-  if (existing) {
-    return existing;
+  // 1. Env override (preserves desktop-app daemon spawning)
+  const envValue = process.env[`MCPX_SECRET_${secretName}`];
+  if (envValue && envValue.length > 0) {
+    return envValue;
   }
 
-  return secrets.rotateLocalToken(secretName);
+  // 2. Token file
+  try {
+    const fileValue = fs.readFileSync(tokenPath, "utf8").trim();
+    if (fileValue) {
+      return fileValue;
+    }
+  } catch {
+    // File doesn't exist — fall through
+  }
+
+  // 3. Keychain — migrate to file if found
+  const keychainValue = secrets.getSecret(secretName);
+  if (keychainValue) {
+    ensureParentDir(tokenPath);
+    fs.writeFileSync(tokenPath, keychainValue, { mode: 0o600 });
+    return keychainValue;
+  }
+
+  // 4. Generate new token
+  const token = crypto.randomBytes(32).toString("base64url");
+  ensureParentDir(tokenPath);
+  fs.writeFileSync(tokenPath, token, { mode: 0o600 });
+  return token;
+}
+
+export function rotateGatewayToken(config: McpxConfig, secrets: SecretsManager): string {
+  const secretName = getGatewayTokenSecretName(config);
+  const token = crypto.randomBytes(32).toString("base64url");
+  const tokenPath = getGatewayTokenPath(secretName);
+
+  ensureParentDir(tokenPath);
+  fs.writeFileSync(tokenPath, token, { mode: 0o600 });
+
+  try {
+    secrets.setSecret(secretName, token);
+  } catch {
+    // keytar may be unavailable — ignore
+  }
+
+  return token;
 }
 
 export function registerProject(globalConfig: McpxConfig, projectPath: string, name?: string): void {

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "bun:test";
-import { compareVersions } from "../src/core/update.js";
+import { compareVersions, shouldUseStagedCli } from "../src/core/update.js";
 
 describe("compareVersions", () => {
   it("returns 0 for equal versions", () => {
@@ -27,5 +27,21 @@ describe("compareVersions", () => {
   it("handles major version differences", () => {
     expect(compareVersions("10.0.0", "9.9.9")).toBe(1);
     expect(compareVersions("0.9.9", "1.0.0")).toBe(-1);
+  });
+});
+
+describe("shouldUseStagedCli", () => {
+  it("returns true when staged version is newer", () => {
+    expect(shouldUseStagedCli("1.0.0", "0.9.9")).toBe(true);
+    expect(shouldUseStagedCli("2.0.0", "1.0.0")).toBe(true);
+  });
+
+  it("returns false when versions are equal", () => {
+    expect(shouldUseStagedCli("1.0.0", "1.0.0")).toBe(false);
+  });
+
+  it("returns false when staged version is older", () => {
+    expect(shouldUseStagedCli("0.9.9", "1.0.0")).toBe(false);
+    expect(shouldUseStagedCli("1.0.0", "2.0.0")).toBe(false);
   });
 });

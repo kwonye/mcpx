@@ -10,7 +10,7 @@ import { pathToFileURL } from "node:url";
 import { emitKeypressEvents } from "node:readline";
 import { createInterface, type Interface as ReadlineInterface } from "node:readline/promises";
 import { loadConfig, saveConfig, loadMergedConfig, resolveActiveConfig, loadProjectConfig, saveProjectConfig } from "./core/config.js";
-import { addServer, removeServer, setServerEnabled, registerProject, unregisterProject } from "./core/registry.js";
+import { addServer, removeServer, setServerEnabled, registerProject, unregisterProject, rotateGatewayToken } from "./core/registry.js";
 import { listSkills, getSkill, saveSkill, deleteSkill } from "./core/skills.js";
 import { SecretsManager, readSecretValueFromStdin } from "./core/secrets.js";
 import { probeHttpAuthRequirement } from "./core/auth-probe.js";
@@ -42,7 +42,7 @@ import { getConfigPath, getManagedIndexPath, findProjectConfigPath } from "./cor
 import { loadManagedIndex } from "./core/managed-index.js";
 import { STATUS_CLIENTS, buildStatusReport, type StatusAuthBinding, type StatusReport, type StatusServerEntry } from "./core/status.js";
 import { APP_VERSION } from "./version.js";
-import { getStagedCliPath, getStagedUpdate, clearStagedUpdate, checkForUpdates } from "./core/update.js";
+import { getStagedCliPath, getStagedUpdate, clearStagedUpdate, checkForUpdates, shouldUseStagedCli } from "./core/update.js";
 import { performUpdate, performRollback, runBackgroundUpdate } from "./core/update-manager.js";
 import { runStdioProxy } from "./core/proxy.js";
 import { runOAuthLogin } from "./core/oauth.js";
@@ -1658,9 +1658,9 @@ function registerAuthCommands(program: Command): void {
     .command("rotate-local-token")
     .description("Rotate bearer token used for local client->mcpx auth")
     .action(async () => {
-      const secrets = new SecretsManager();
-      secrets.rotateLocalToken("local_gateway_token");
       const config = loadConfig();
+      const secrets = new SecretsManager();
+      rotateGatewayToken(config, secrets);
       await restartDaemon(config, process.argv[1] ?? "", secrets);
       process.stdout.write("Rotated local gateway token and restarted daemon.\n");
       process.stdout.write("No client configs were modified.\n");
@@ -1903,7 +1903,7 @@ export async function runCli(argv = process.argv): Promise<void> {
     const stagedCliPath = getStagedCliPath();
     const stagedInfo = getStagedUpdate();
 
-    if (stagedCliPath && stagedInfo && stagedCliPath !== argv[1]) {
+    if (stagedCliPath && stagedInfo && stagedCliPath !== argv[1] && shouldUseStagedCli(stagedInfo.version, APP_VERSION)) {
       execFileSync(process.execPath, [stagedCliPath, ...rawArgs], {
         stdio: "inherit",
         env: {

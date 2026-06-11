@@ -4,7 +4,7 @@ import { spawn } from "node:child_process";
 import { getLogPath, getPidPath, ensureParentDir } from "./paths.js";
 import { createGatewayServer } from "../gateway/server.js";
 import { SecretsManager } from "./secrets.js";
-import { ensureGatewayToken, getGatewayTokenSecretName } from "./registry.js";
+import { ensureGatewayToken } from "./registry.js";
 import type { McpxConfig } from "../types.js";
 import { saveConfig } from "./config.js";
 import { startBackgroundUpdateCheck } from "./update-manager.js";
@@ -231,13 +231,7 @@ export function readDaemonLogs(maxLines = 200): string {
 
 export function runDaemonForeground(config: McpxConfig, port: number, secrets: SecretsManager): Promise<void> {
   return new Promise((resolve, reject) => {
-    const tokenName = getGatewayTokenSecretName(config);
-    const token = secrets.getSecret(tokenName);
-
-    if (!token) {
-      reject(new Error(`Local gateway token not found: ${tokenName}`));
-      return;
-    }
+    const token = ensureGatewayToken(config, secrets);
 
     const server = createGatewayServer({
       port,

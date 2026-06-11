@@ -100,6 +100,10 @@ export function stageUpdate(version: string, cliPath: string): void {
   fs.writeFileSync(getStagedVersionPath(), JSON.stringify(stagedInfo, null, 2), "utf8");
 }
 
+export function shouldUseStagedCli(stagedVersion: string, currentVersion: string): boolean {
+  return compareVersions(stagedVersion, currentVersion) > 0;
+}
+
 export function clearStagedUpdate(): void {
   const stagedPath = getStagedVersionPath();
   if (fs.existsSync(stagedPath)) {

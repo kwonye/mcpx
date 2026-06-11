@@ -59,6 +59,10 @@ export function getLogPath(): string {
   return path.join(getLogDir(), "daemon.log");
 }
 
+export function getGatewayTokenPath(secretName: string): string {
+  return path.join(getConfigRoot(), "mcpx", `${secretName}.token`);
+}
+
 export function getUpdatesDir(): string {
   return path.join(getDataRoot(), "mcpx", "updates");
 }

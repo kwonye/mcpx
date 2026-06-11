@@ -20,7 +20,7 @@ export { syncAllClients, getGatewayUrl } from "./sync.js";
 export type { SyncSummary } from "./sync.js";
 
 // Registry (server add/remove)
-export { addServer, removeServer, updateServer, setServerEnabled, registerProject, unregisterProject } from "./registry.js";
+export { addServer, removeServer, updateServer, setServerEnabled, registerProject, unregisterProject, ensureGatewayToken, rotateGatewayToken } from "./registry.js";
 
 // Skills
 export { listSkills, getSkill, saveSkill, deleteSkill } from "./skills.js";
@@ -55,7 +55,7 @@ export { loadManagedIndex } from "./managed-index.js";
 export { getConfigPath, getManagedIndexPath } from "./paths.js";
 
 // Update
-export { checkForUpdates, getStagedUpdate, getStagedCliPath, clearStagedUpdate, compareVersions } from "./update.js";
+export { checkForUpdates, getStagedUpdate, getStagedCliPath, clearStagedUpdate, compareVersions, shouldUseStagedCli } from "./update.js";
 export type { UpdateStatus, StagedUpdateInfo } from "./update.js";
 export { startBackgroundUpdateCheck, performUpdate, performRollback } from "./update-manager.js";
 
