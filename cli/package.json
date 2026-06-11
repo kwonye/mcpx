@@ -45,7 +45,7 @@
     "dev": "bun run src/cli.ts --",
     "sync-version": "bun scripts/sync-version.mjs",
     "prebuild": "bun run sync-version",
-    "build": "bun build src/cli.ts src/core/index.ts src/types.ts --outdir dist --target node --format esm --splitting --external commander --external hono --external zod --external \"@modelcontextprotocol/sdk\" --external \"@iarna/toml\" && tsc -p tsconfig.json --emitDeclarationOnly --declaration --declarationMap",
+    "build": "bun build src/cli.ts src/core/index.ts src/types.ts --outdir dist --target node --format esm --splitting --external commander --external hono --external zod --external \"@modelcontextprotocol/sdk\" --external \"@iarna/toml\" --external keytar && tsc -p tsconfig.json --emitDeclarationOnly --declaration --declarationMap",
     "prepublishOnly": "bun run build",
     "test": "bun test",
     "test:watch": "bun test --watch"

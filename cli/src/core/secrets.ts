@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
+import { createRequire } from "node:module";
 import { getSecretNamesPath } from "./paths.js";
 import { readJsonFile, writeJsonAtomic } from "../util/fs.js";
 
@@ -12,8 +13,11 @@ let keytarSync: {
   deletePassword: (service: string, account: string) => boolean;
 } | null = null;
 try {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
-  const keytar = require("../node_modules/keytar/lib/keytar.js") as {
+  // Use createRequire so Node resolves keytar relative to this file, walking
+  // up node_modules as needed. This works in both the staged-update layout
+  // (keytar adjacent to dist/) and the hoisted npx layout.
+  const _require = createRequire(import.meta.url);
+  const keytar = _require("keytar") as {
     getPassword: (service: string, account: string) => string;
     setPassword: (service: string, account: string, password: string) => void;
     deletePassword: (service: string, account: string) => boolean;
