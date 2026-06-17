@@ -3,6 +3,21 @@ import { join } from "node:path";
 import { hidePopover, togglePopover } from "./popover";
 import { getDesktopProductName, isDevDesktopApp } from "./app-flavor";
 
+/**
+ * Resolve path to a bundled resource file.
+ * In production (asar bundle) __dirname points inside the asar archive where
+ * nativeImage.createFromPath() cannot read files. process.resourcesPath always
+ * points to the real filesystem directory (Contents/Resources on macOS), so
+ * we use that when running from a packaged app.
+ */
+function resourcePath(...segments: string[]): string {
+  if (app.isPackaged) {
+    return join(process.resourcesPath, "app.asar.unpacked", "resources", ...segments);
+  }
+  // Dev mode: __dirname is out/main, resources is two levels up
+  return join(__dirname, "../../resources", ...segments);
+}
+
 let tray: Tray | null = null;
 let daemonRunning = false;
 let onQuitRequested: (() => void) | null = null;
@@ -73,7 +88,7 @@ function loadStatusIcons(): { normal: StatusIcons; dev: StatusIcons } {
   if (process.platform !== "darwin") {
     // Linux and Windows: use PNG icons (no template image support)
     const icon = nativeImage.createFromPath(
-      join(__dirname, "../../resources/linux/tray-icon.png")
+      resourcePath("linux", "tray-icon.png")
     );
     return {
       normal: { green: icon, red: icon },
@@ -83,12 +98,12 @@ function loadStatusIcons(): { normal: StatusIcons; dev: StatusIcons } {
 
   return {
     normal: {
-      green: nativeImage.createFromPath(join(__dirname, "../../resources/trayIconTemplate-green.png")),
-      red: nativeImage.createFromPath(join(__dirname, "../../resources/trayIconTemplate-red.png"))
+      green: nativeImage.createFromPath(resourcePath("trayIconTemplate-green.png")),
+      red: nativeImage.createFromPath(resourcePath("trayIconTemplate-red.png"))
     },
     dev: {
-      green: nativeImage.createFromPath(join(__dirname, "../../resources/trayIconDevTemplate-green.png")),
-      red: nativeImage.createFromPath(join(__dirname, "../../resources/trayIconDevTemplate-red.png"))
+      green: nativeImage.createFromPath(resourcePath("trayIconDevTemplate-green.png")),
+      red: nativeImage.createFromPath(resourcePath("trayIconDevTemplate-red.png"))
     }
   };
 }
@@ -98,9 +113,9 @@ function getStatusIcon(running: boolean): NativeImage {
   const icons = cachedIcons[isDev ? 'dev' : 'normal'];
   
   if (running) {
-    return icons?.green || nativeImage.createFromPath(join(__dirname, "../../resources", isDev ? "trayIconDevTemplate-green.png" : "trayIconTemplate-green.png"));
+    return icons?.green || nativeImage.createFromPath(resourcePath(isDev ? "trayIconDevTemplate-green.png" : "trayIconTemplate-green.png"));
   } else {
-    return icons?.red || nativeImage.createFromPath(join(__dirname, "../../resources", isDev ? "trayIconDevTemplate-red.png" : "trayIconTemplate-red.png"));
+    return icons?.red || nativeImage.createFromPath(resourcePath(isDev ? "trayIconDevTemplate-red.png" : "trayIconTemplate-red.png"));
   }
 }
 

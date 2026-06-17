@@ -19,6 +19,14 @@ import { setAutoUpdateEnabled } from "./update-manager";
 import { getDesktopProductName, isDevDesktopApp } from "./app-flavor";
 import { resolveLoginShellPath } from "./shell-env";
 
+// Set activation policy synchronously at module load — this MUST happen before
+// any async work or app.whenReady() so macOS never allocates a Dock slot.
+// Using "regular" + dock.hide() is unreliable on macOS 13+ and prevents the
+// tray icon from appearing.
+if (process.platform === "darwin") {
+  app.setActivationPolicy("accessory");
+}
+
 // Export mutable state for testing lifecycle handlers
 export const lifecycleState = { allowQuit: false };
 
@@ -131,11 +139,6 @@ async function startMainProcessImpl(): Promise<void> {
 
   if (await runDaemonChildIfRequested()) {
     return;
-  }
-
-  if (process.platform === "darwin") {
-    app.setActivationPolicy("regular");
-    app.dock?.hide();
   }
 
   const loginShellPath = await resolveLoginShellPath();
