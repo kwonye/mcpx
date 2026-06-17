@@ -53,6 +53,9 @@
       ]
     },
     "asar": true,
+    "asarUnpack": [
+      "resources/**"
+    ],
     "files": [
       "out/**",
       "resources/**"
@@ -89,7 +92,11 @@
     "desktop-install:dev:cdp": "bash scripts/desktop-install.sh --flavor dev --dev --remote-debugging-port 9222"
   },
   "dependencies": {
+    "@iarna/toml": "^2.2.5",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "commander": "^15.0.0",
     "electron-updater": "^6.6.2",
+    "hono": "^4.12.25",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "zod": "^4.4.3"
