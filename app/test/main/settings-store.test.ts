@@ -35,7 +35,7 @@ describe("settings store", () => {
     expect(settings).toMatchObject({
       autoUpdateEnabled: true,
       startOnLoginEnabled: true,
-      browseState: {}
+      activeTab: "servers"
     });
 
     const persisted = JSON.parse(fs.readFileSync(settingsFilePath, "utf8"));
@@ -53,7 +53,7 @@ describe("settings store", () => {
     expect(settings).toMatchObject({
       autoUpdateEnabled: false,
       startOnLoginEnabled: true,
-      browseState: {}
+      activeTab: "servers"
     });
 
     const persisted = JSON.parse(fs.readFileSync(settingsFilePath, "utf8"));
@@ -69,7 +69,7 @@ describe("settings store", () => {
     expect(settings).toMatchObject({
       autoUpdateEnabled: true,
       startOnLoginEnabled: true,
-      browseState: {}
+      activeTab: "servers"
     });
 
     const persisted = JSON.parse(fs.readFileSync(settingsFilePath, "utf8"));

@@ -2,10 +2,10 @@ import { Tray, nativeImage, Menu, app, NativeImage } from "electron";
 import { join } from "node:path";
 import { hidePopover, togglePopover } from "./popover";
 import { getDesktopProductName, isDevDesktopApp } from "./app-flavor";
+import { quitApp } from "./app-control";
 
 let tray: Tray | null = null;
 let daemonRunning = false;
-let onQuitRequested: (() => void) | null = null;
 let onStartDaemonRequested: (() => void) | null = null;
 let onStopDaemonRequested: (() => void) | null = null;
 
@@ -21,10 +21,6 @@ let cachedIcons: {
   normal: null,
   dev: null
 };
-
-export function setQuitHandler(handler: () => void): void {
-  onQuitRequested = handler;
-}
 
 export function setStartDaemonHandler(handler: () => void): void {
   onStartDaemonRequested = handler;
@@ -61,9 +57,7 @@ function buildContextMenu(daemonRunning: boolean): Menu {
 
   template.push({
     label: "Quit",
-    click: () => {
-      onQuitRequested?.();
-    }
+    click: quitApp
   });
 
   return Menu.buildFromTemplate(template);

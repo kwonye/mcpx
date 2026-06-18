@@ -55,7 +55,7 @@ export function SettingsPanel() {
   };
 
   if (!settings) {
-    return <div className="browse-empty">Loading settings...</div>;
+    return <div className="empty-state">Loading settings...</div>;
   }
 
   const busy = savingKey !== null;

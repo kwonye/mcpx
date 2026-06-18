@@ -17,14 +17,8 @@ const api = {
   daemonStart: () => ipcRenderer.invoke(IPC.DAEMON_START),
   daemonStop: () => ipcRenderer.invoke(IPC.DAEMON_STOP),
   daemonRestart: () => ipcRenderer.invoke(IPC.DAEMON_RESTART),
-  registryList: (cursor?: string, query?: string, limit?: number, updatedSince?: string) => {
-    const args = [cursor ?? null, query ?? null, limit ?? null];
-    return updatedSince ? ipcRenderer.invoke(IPC.REGISTRY_LIST, ...args, updatedSince) : ipcRenderer.invoke(IPC.REGISTRY_LIST, ...args);
-  },
-  registryGet: (name: string) => ipcRenderer.invoke(IPC.REGISTRY_GET, name),
-  registryPrepareAdd: (registryName: string) => ipcRenderer.invoke(IPC.REGISTRY_PREPARE_ADD, registryName),
-  registryConfirmAdd: (resolvedValues: Record<string, string>) => ipcRenderer.invoke(IPC.REGISTRY_CONFIRM_ADD, resolvedValues),
   openDashboard: () => ipcRenderer.invoke(IPC.OPEN_DASHBOARD),
+  quitApp: () => ipcRenderer.invoke(IPC.QUIT_APP),
   getPendingAuth: () => ipcRenderer.invoke(IPC.GET_PENDING_AUTH),
   onAuthRequired: (callback: (entry: { serverName: string; oauthLikely?: boolean; status?: number }) => void) => {
     const listener = (_event: IpcRendererEvent, entry: { serverName: string; oauthLikely?: boolean; status?: number }) => callback(entry);

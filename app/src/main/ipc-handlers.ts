@@ -38,17 +38,12 @@ import type { HttpServerSpec, StdioServerSpec, UpstreamServerSpec } from "@mcpx/
 import { IPC } from "../shared/ipc-channels";
 import type { DesktopSettingsPatch } from "../shared/desktop-settings";
 import { openDashboard } from "./dashboard";
-import { fetchRegistryServers, fetchServerDetail } from "./registry-client";
-import { selectBestPackage, extractRequiredInputs, mapServerToSpec } from "./server-mapper";
-import type { RequiredInput, SelectedOption } from "./server-mapper";
 import { loadDesktopSettings, updateDesktopSettings } from "./settings-store";
 import { applyStartOnLoginSetting } from "./login-item";
 import { checkForUpdatesNow, setAutoUpdateEnabled } from "./update-manager";
 import { updateTrayForDaemonStatus } from "./tray";
 import { dismissPendingAuth, getPendingAuth, queuePendingAuth } from "./auth-events";
-
-// Cache the selected option and required inputs between prepare and confirm calls
-let pendingAdd: { name: string; option: SelectedOption; requiredInputs: RequiredInput[] } | null = null;
+import { quitApp } from "./app-control";
 
 async function refreshTokenCountsSoon(): Promise<void> {
   const config = loadConfig();
@@ -117,6 +112,10 @@ function normalizeUpdatedSpec(spec: UpstreamServerSpec): UpstreamServerSpec {
 export function registerIpcHandlers(): void {
   ipcMain.handle(IPC.OPEN_DASHBOARD, () => {
     openDashboard();
+  });
+
+  ipcMain.handle(IPC.QUIT_APP, () => {
+    quitApp();
   });
 
   ipcMain.handle(IPC.GET_STATUS, async () => {
@@ -430,72 +429,6 @@ export function registerIpcHandlers(): void {
     const secrets = new SecretsManager();
     const result = await restartDaemon(config, getCliDaemonPath(), secrets);
     updateTrayForDaemonStatus(true);
-    return result;
-  });
-
-  ipcMain.handle(IPC.REGISTRY_LIST, (_event, cursor?: string, query?: string, limit?: number, updatedSince?: string) => {
-    return fetchRegistryServers(cursor, query, limit, updatedSince ?? undefined);
-  });
-
-  ipcMain.handle(IPC.REGISTRY_GET, (_event, name: string) => {
-    return fetchServerDetail(name);
-  });
-
-  ipcMain.handle(IPC.REGISTRY_PREPARE_ADD, async (_event, registryName: string) => {
-    const detail = await fetchServerDetail(registryName);
-    const option = selectBestPackage(detail.server.packages, detail.server.remotes);
-    const requiredInputs = extractRequiredInputs(option);
-    // Derive a short local name from the registry name
-    const shortName = registryName.split("/").pop() ?? registryName;
-    pendingAdd = { name: shortName, option, requiredInputs };
-    return { shortName, requiredInputs, option };
-  });
-
-  ipcMain.handle(IPC.REGISTRY_CONFIRM_ADD, async (_event, resolvedValues: Record<string, string>) => {
-    if (!pendingAdd) throw new Error("No pending add operation");
-    const { name, option, requiredInputs } = pendingAdd;
-    pendingAdd = null;
-    const spec = mapServerToSpec(name, option, resolvedValues);
-    const config = loadConfig();
-    const secrets = new SecretsManager();
-
-    // Store secret values in the keychain and replace plain values with secret:// refs
-    for (const input of requiredInputs) {
-      if (!input.isSecret) continue;
-      const rawValue = resolvedValues[input.name];
-      if (!rawValue) continue;
-
-      const secretName = `auth_${name.toLowerCase().replace(/[^a-z0-9._-]/g, "_")}_${input.kind}_${input.name.toLowerCase().replace(/[^a-z0-9._-]/g, "_")}`;
-      secrets.setSecret(secretName, rawValue);
-
-      if (input.kind === "header" && spec.transport === "http") {
-        const headers = { ...(spec.headers ?? {}) };
-        headers[input.name] = `secret://${secretName}`;
-        spec.headers = Object.keys(headers).length > 0 ? headers : undefined;
-      } else if (input.kind === "env" && spec.transport === "stdio") {
-        const env = { ...(spec.env ?? {}) };
-        env[input.name] = `secret://${secretName}`;
-        spec.env = Object.keys(env).length > 0 ? env : undefined;
-      }
-    }
-
-    addServer(config, name, spec, true);
-    saveConfig(config);
-    const summary = syncAllClients(config, secrets);
-    queueTokenCountRefresh();
-
-    const result: { added: string; sync: typeof summary; authRequired?: boolean; authStatus?: number; oauthLikely?: boolean } = { added: name, sync: summary };
-
-    if (spec.transport === "http") {
-      const probe = await probeHttpAuthRequirement(spec, secrets);
-      if (probe.authRequired) {
-        result.authRequired = true;
-        result.authStatus = probe.status;
-        result.oauthLikely = probe.oauthLikely;
-        queuePendingAuth({ serverName: name, oauthLikely: probe.oauthLikely, status: probe.status });
-      }
-    }
-
     return result;
   });
 

@@ -1,6 +1,7 @@
 import { Menu } from "electron";
 import { shell } from "electron";
 import { getDesktopProductName } from "./app-flavor";
+import { hideDashboard, quitApp } from "./app-control";
 
 export function buildApplicationMenu(): Menu {
   const productName = getDesktopProductName();
@@ -13,7 +14,11 @@ export function buildApplicationMenu(): Menu {
         { role: "hide" },
         { role: "hideOthers" },
         { type: "separator" },
-        { role: "quit" }
+        {
+          label: `Quit ${productName}`,
+          accelerator: "CommandOrControl+Q",
+          click: quitApp
+        }
       ]
     },
     {
@@ -45,6 +50,11 @@ export function buildApplicationMenu(): Menu {
     {
       label: "Window",
       submenu: [
+        {
+          label: "Close Window",
+          accelerator: "CommandOrControl+W",
+          click: hideDashboard
+        },
         { role: "minimize" },
         { role: "zoom" },
         { type: "separator" },

@@ -7,7 +7,7 @@ import {
   type DesktopSettingsPatch
 } from "../shared/desktop-settings";
 
-const VALID_TABS = ["servers", "browse", "settings"] as const;
+const VALID_TABS = ["servers", "projects", "skills", "settings"] as const;
 
 function settingsPath(): string {
   return path.join(app.getPath("userData"), "settings.json");
@@ -18,22 +18,10 @@ function normalizeSettings(value: unknown): DesktopSettings {
     ? (value as Partial<DesktopSettings>)
     : {};
 
-  const browseStatePartial = partial.browseState && typeof partial.browseState === "object"
-    ? (partial.browseState as { searchQuery?: unknown; activeCategory?: unknown; activeTab?: unknown })
-    : {};
-
-  const normalizedBrowseState = {
-    searchQuery: typeof browseStatePartial.searchQuery === "string"
-      ? browseStatePartial.searchQuery
-      : undefined,
-    activeCategory: typeof browseStatePartial.activeCategory === "string"
-      ? browseStatePartial.activeCategory
-      : undefined,
-    activeTab: typeof browseStatePartial.activeTab === "string" &&
-      VALID_TABS.includes(browseStatePartial.activeTab as typeof VALID_TABS[number])
-      ? browseStatePartial.activeTab
-      : undefined
-  };
+  const activeTab = typeof partial.activeTab === "string" &&
+    VALID_TABS.includes(partial.activeTab as typeof VALID_TABS[number])
+    ? partial.activeTab
+    : "servers";
 
   return {
     autoUpdateEnabled: typeof partial.autoUpdateEnabled === "boolean"
@@ -42,7 +30,7 @@ function normalizeSettings(value: unknown): DesktopSettings {
     startOnLoginEnabled: typeof partial.startOnLoginEnabled === "boolean"
       ? partial.startOnLoginEnabled
       : DEFAULT_DESKTOP_SETTINGS.startOnLoginEnabled,
-    browseState: normalizedBrowseState
+    activeTab
   };
 }
 

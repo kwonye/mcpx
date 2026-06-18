@@ -4,26 +4,25 @@ import { useStatus } from "../hooks/useMcpx";
 import { ServerCard } from "./ServerCard";
 import { ServerDetail } from "./ServerDetail";
 import { AuthModal } from "./AuthModal";
-import { BrowseTab } from "./BrowseTab";
 import { SkillsTab } from "./SkillsTab";
 import { DaemonControls } from "./DaemonControls";
 import { SettingsPanel } from "./SettingsPanel";
 import { CliCommandInput } from "./CliCommandInput";
-import type { BrowseState } from "../../shared/desktop-settings";
-import { DESKTOP_MANAGER_NAME, DESKTOP_PRODUCT_NAME } from "../../shared/build-constants";
+import type { DesktopTab } from "../../shared/desktop-settings";
+import { DESKTOP_MANAGER_NAME } from "../../shared/build-constants";
 import { ProjectsTab } from "./ProjectsTab";
 import { formatTokenApprox } from "../utils/tokenHelper";
 import { ContextBudgetCard } from "./ContextBudgetCard";
 
-
-type Tab = "servers" | "browse" | "skills" | "settings" | "projects";
 type PendingAuthEntry = { serverName: string; oauthLikely?: boolean; status?: number };
+const VALID_TABS: DesktopTab[] = ["servers", "projects", "skills", "settings"];
 
 export function Dashboard() {
   const { status, loading, refresh } = useStatus();
-  const [tab, setTab] = useState<Tab>("servers");
+  const [tab, setTab] = useState<DesktopTab>("servers");
   const [selectedServer, setSelectedServer] = useState<string | null>(null);
-  const [browseState, setBrowseState] = useState<BrowseState>({});
+  const [selectedProjectPath, setSelectedProjectPath] = useState<string | null>(null);
+  const [expandedProjects, setExpandedProjects] = useState<Set<string>>(() => new Set());
   const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [pendingAuth, setPendingAuth] = useState<PendingAuthEntry | null>(null);
 
@@ -47,15 +46,13 @@ export function Dashboard() {
     });
   }, []);
 
-  // Load settings on mount to restore persisted state
   useEffect(() => {
     async function loadSettings() {
       try {
         const settings = await window.mcpx.getDesktopSettings();
-        if (settings.browseState?.activeTab) {
-          setTab(settings.browseState.activeTab as Tab);
+        if (settings.activeTab && VALID_TABS.includes(settings.activeTab)) {
+          setTab(settings.activeTab);
         }
-        setBrowseState(settings.browseState ?? {});
       } catch {
         // Use defaults if settings fail to load
       }
@@ -64,25 +61,11 @@ export function Dashboard() {
     loadSettings();
   }, []);
 
-  // Persist tab changes to settings
-  const handleTabChange = async (newTab: Tab) => {
+  const handleTabChange = async (newTab: DesktopTab) => {
     setTab(newTab);
     setSelectedServer(null);
-    const newBrowseState = { ...browseState, activeTab: newTab };
-    setBrowseState(newBrowseState);
     try {
-      await window.mcpx.updateDesktopSettings({ browseState: newBrowseState });
-    } catch {
-      // Ignore persistence errors
-    }
-  };
-
-  // Handle browse state changes from BrowseTab
-  const handleBrowseStateChange = async (state: { searchQuery?: string; activeCategory?: string }) => {
-    const newBrowseState = { ...browseState, ...state, activeTab: "browse" as const };
-    setBrowseState(newBrowseState);
-    try {
-      await window.mcpx.updateDesktopSettings({ browseState: newBrowseState });
+      await window.mcpx.updateDesktopSettings({ activeTab: newTab });
     } catch {
       // Ignore persistence errors
     }
@@ -105,11 +88,36 @@ export function Dashboard() {
       target: string;
       authBindings: Array<{ kind: string; key: string; value: string }>;
       clients: Array<{ clientId: string; status: string; managed: boolean }>;
+      tokenCount?: { tools: number; resources: number; prompts: number; total: number; error?: string };
     }>;
     projects?: Record<string, { name: string; path: string }>;
+    totalGlobalTokens?: number;
+    totalProjectTokens?: Record<string, number>;
   };
 
   const activeServer = selectedServer ? report.servers.find((s) => s.name === selectedServer) : null;
+  const projects = Object.values(report.projects ?? {}).sort((left, right) => left.name.localeCompare(right.name));
+
+  function getProjectServers(projectName: string) {
+    return report.servers.filter((server) => server.name.startsWith(`${projectName}.`));
+  }
+
+  function toggleProject(path: string): void {
+    setExpandedProjects((current) => {
+      const next = new Set(current);
+      if (next.has(path)) {
+        next.delete(path);
+      } else {
+        next.add(path);
+      }
+      return next;
+    });
+  }
+
+  function selectProject(path: string): void {
+    setSelectedProjectPath(path);
+    void handleTabChange("projects");
+  }
 
   return (
     <div className="dashboard-container">
@@ -131,23 +139,70 @@ export function Dashboard() {
           <button
             className="nav-button"
             data-active={tab === "projects"}
-            onClick={() => handleTabChange("projects")}
+            onClick={() => {
+              if (!selectedProjectPath && projects[0]) {
+                setSelectedProjectPath(projects[0].path);
+              }
+              void handleTabChange("projects");
+            }}
           >
             <span className="material-symbols-outlined">folder</span>
             <span className="nav-button__label">Projects</span>
           </button>
-          <button
-            className="nav-button"
-            data-active={tab === "browse"}
-            onClick={() => handleTabChange("browse")}
-          >
-            <span className="material-symbols-outlined">explore</span>
-            <span className="nav-button__label">Browse Registry</span>
-          </button>
+          {projects.length > 0 && (
+            <div className="project-nav-tree">
+              {projects.map((project) => {
+                const isExpanded = expandedProjects.has(project.path) || selectedProjectPath === project.path;
+                const projectServers = getProjectServers(project.name);
+                return (
+                  <div className="project-nav-group" key={project.path}>
+                    <button
+                      className="project-nav-root"
+                      data-active={tab === "projects" && selectedProjectPath === project.path}
+                      onClick={() => selectProject(project.path)}
+                    >
+                      <span className="material-symbols-outlined project-nav-root__icon">folder</span>
+                      <span className="project-nav-root__name">{project.name}</span>
+                      <span
+                        className="material-symbols-outlined project-nav-root__chevron"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          toggleProject(project.path);
+                        }}
+                      >
+                        {isExpanded ? "expand_more" : "chevron_right"}
+                      </span>
+                    </button>
+                    {isExpanded && (
+                      <div className="project-nav-children">
+                        {projectServers.length > 0 ? (
+                          projectServers.map((server) => (
+                            <button
+                              className="project-nav-child"
+                              key={server.name}
+                              onClick={() => {
+                                setSelectedProjectPath(project.path);
+                                setSelectedServer(server.name);
+                              }}
+                            >
+                              <span className="material-symbols-outlined">dns</span>
+                              <span>{server.name.slice(project.name.length + 1)}</span>
+                            </button>
+                          ))
+                        ) : (
+                          <span className="project-nav-empty">No local MCPs</span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
           <button
             className="nav-button"
             data-active={tab === "skills"}
-            onClick={() => handleTabChange("skills")}
+            onClick={() => void handleTabChange("skills")}
           >
             <span className="material-symbols-outlined">psychology</span>
             <span className="nav-button__label">Skills</span>
@@ -156,7 +211,7 @@ export function Dashboard() {
           <button
             className="nav-button"
             data-active={tab === "settings"}
-            onClick={() => handleTabChange("settings")}
+            onClick={() => void handleTabChange("settings")}
           >
             <span className="material-symbols-outlined">settings</span>
             <span className="nav-button__label">Settings</span>
@@ -176,17 +231,17 @@ export function Dashboard() {
             <>
               {tab === "servers" && (
                 <>
-                  <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
+                  <div className="page-header page-header--split">
                     <h1 className="page-title">My Servers</h1>
-                    {report.daemon?.running && typeof (report as any).totalGlobalTokens === "number" && (
+                    {report.daemon?.running && typeof report.totalGlobalTokens === "number" && (
                       <div className="token-badge-total" title="Context window tokens consumed by globally enabled MCP servers">
-                        <span className="material-symbols-outlined font-icon-sm" style={{ fontSize: '18px' }}>analytics</span>
-                        <span>{formatTokenApprox((report as any).totalGlobalTokens)} Global Tokens Active</span>
+                        <span className="material-symbols-outlined font-icon-sm">analytics</span>
+                        <span>{formatTokenApprox(report.totalGlobalTokens)} Global Tokens Active</span>
                       </div>
                     )}
                   </div>
-                  {report.daemon?.running && typeof (report as any).totalGlobalTokens === "number" && (
-                    <ContextBudgetCard totalTokens={(report as any).totalGlobalTokens} />
+                  {report.daemon?.running && typeof report.totalGlobalTokens === "number" && (
+                    <ContextBudgetCard totalTokens={report.totalGlobalTokens} />
                   )}
                   <div className="servers-controls-container">
                     <CliCommandInput onServerAdded={refresh} />
@@ -202,7 +257,7 @@ export function Dashboard() {
                         authConfigured={server.authBindings.length > 0}
                         syncedCount={server.clients.filter((c) => c.managed && c.status === "SYNCED").length}
                         errorCount={server.clients.filter((c) => c.managed && c.status === "ERROR").length}
-                        tokenCount={(server as any).tokenCount}
+                        tokenCount={server.tokenCount}
                         onRefresh={refresh}
                         onClick={() => setSelectedServer(server.name)}
                         onAuthClick={() => setPendingAuth({ serverName: server.name, oauthLikely: true })}
@@ -212,29 +267,17 @@ export function Dashboard() {
                 </>
               )}
 
-              {tab === "browse" && (
-                <>
-                  <div className="page-header">
-                    <h1 className="page-title">Registry</h1>
-                  </div>
-                  <BrowseTab
-                    onServerAdded={refresh}
-                    status={report}
-                    initialState={{
-                      searchQuery: browseState.searchQuery,
-                      activeCategory: browseState.activeCategory
-                    }}
-                    onStateChange={handleBrowseStateChange}
-                  />
-                </>
-              )}
-
               {tab === "projects" && (
                 <>
                   <div className="page-header">
                     <h1 className="page-title">Projects</h1>
                   </div>
-                  <ProjectsTab status={report} onRefresh={refresh} />
+                  <ProjectsTab
+                    status={report}
+                    onRefresh={refresh}
+                    selectedProjectPath={selectedProjectPath}
+                    onSelectedProjectPathChange={setSelectedProjectPath}
+                  />
                 </>
               )}
 

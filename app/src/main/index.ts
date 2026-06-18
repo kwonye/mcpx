@@ -8,19 +8,18 @@ import {
   getDaemonStatus,
   SecretsManager
 } from "@mcpx/core";
-import { createTray, setQuitHandler, setStartDaemonHandler, setStopDaemonHandler, updateTrayForDaemonStatus } from "./tray";
+import { createTray, setStartDaemonHandler, setStopDaemonHandler, updateTrayForDaemonStatus } from "./tray";
 import { buildApplicationMenu } from "./menu";
-import { openDashboard, hideDashboard, closeDashboard } from "./dashboard";
+import { openDashboard } from "./dashboard";
 import { registerIpcHandlers } from "./ipc-handlers";
 import { runDaemonChildIfRequested } from "./daemon-child";
+import { showPopover } from "./popover";
 import { loadDesktopSettings } from "./settings-store";
 import { applyStartOnLoginSetting, wasOpenedAtLogin } from "./login-item";
 import { setAutoUpdateEnabled } from "./update-manager";
 import { getDesktopProductName, isDevDesktopApp } from "./app-flavor";
 import { resolveLoginShellPath } from "./shell-env";
-
-// Export mutable state for testing lifecycle handlers
-export const lifecycleState = { allowQuit: false };
+import { hideDashboard } from "./app-control";
 
 let daemonRunning = false;
 
@@ -31,33 +30,14 @@ let daemonRunning = false;
 export function registerLifecycleHandlers(deps: {
   app: typeof import("electron").app;
   openDashboard: () => void;
-  closeDashboard: () => void;
+  hideDashboard: () => void;
 }): void {
-  // Cmd+Q quits the entire app (dashboard + daemon + tray)
-  // Prevents quit from window close, allows quit only via tray menu (allowQuit flag)
-  deps.app.on("before-quit", (e) => {
-    if (!lifecycleState.allowQuit) {
-      e.preventDefault();
-      deps.closeDashboard();
-      if (process.platform === "darwin") {
-        deps.app.hide();
-      }
-      return;
-    }
-    // Allow quit to proceed
-  });
-
-  // When all windows are closed:
-  // - Windows: quit (standard Electron behavior)
-  // - macOS: stay running (menu bar app)
-  // - Linux: quit only if tray is disabled
   deps.app.on("window-all-closed", () => {
     if (process.platform === "win32") {
       deps.app.quit();
     } else if (process.platform === "linux" && !process.env.MCPX_ENABLE_TRAY) {
       deps.app.quit();
     }
-    // On macOS (and Linux with tray enabled), keep running
   });
 
   deps.app.on("activate", () => {
@@ -172,19 +152,11 @@ async function startMainProcessImpl(): Promise<void> {
   updateTrayForDaemonStatus(false);
 
   if (isDevDesktopApp()) {
-    const { showPopover } = await import("./popover");
     showPopover(tray);
   }
 
   // Register IPC handlers
   registerIpcHandlers();
-
-  // Set up quit handler from tray menu
-  setQuitHandler(() => {
-    lifecycleState.allowQuit = true;
-    closeDashboard();
-    app.quit();
-  });
 
   // Set up daemon start/stop handlers from tray
   setStartDaemonHandler(() => {
@@ -197,7 +169,7 @@ async function startMainProcessImpl(): Promise<void> {
   // ============================================================================
   // Lifecycle Handlers
   // ============================================================================
-  registerLifecycleHandlers({ app, openDashboard, closeDashboard });
+  registerLifecycleHandlers({ app, openDashboard, hideDashboard });
   // ============================================================================
 
   // Check daemon status on startup and auto-start if needed

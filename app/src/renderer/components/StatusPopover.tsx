@@ -23,16 +23,16 @@ function PopoverServerRow({ server, onRefresh, onAuthClick }: PopoverServerRowPr
 
   return (
     <div className="popover-server-row">
-      <div className="popover-server-row__meta" style={{ minWidth: 0, flex: 1 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-          <span className="popover-server-row__name" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{server.name}</span>
+      <div className="popover-server-row__meta">
+        <div className="popover-server-row__title">
+          <span className="popover-server-row__name">{server.name}</span>
           {server.enabled && server.tokenCount && server.tokenCount.total > 0 && (
-            <span className="token-badge" title={`${server.tokenCount.tools} tools, ${server.tokenCount.resources} resources, ${server.tokenCount.prompts} prompts`} style={{ transform: 'scale(0.85)', transformOrigin: 'left center' }}>
+            <span className="token-badge token-badge--compact" title={`${server.tokenCount.tools} tools, ${server.tokenCount.resources} resources, ${server.tokenCount.prompts} prompts`}>
               {formatTokenApprox(server.tokenCount.total)}
             </span>
           )}
           {server.enabled && server.tokenCount?.error && (
-            <span className="token-badge token-badge--error" title={server.tokenCount.error} style={{ transform: 'scale(0.85)', transformOrigin: 'left center' }}>
+            <span className="token-badge token-badge--error token-badge--compact" title={server.tokenCount.error}>
               token error
             </span>
           )}
@@ -45,11 +45,11 @@ function PopoverServerRow({ server, onRefresh, onAuthClick }: PopoverServerRowPr
         <button
           type="button"
           className="popover-add-btn"
-          title="Configure Auth"
-          onClick={onAuthClick}
-        >
-          <span className="material-symbols-outlined" style={{ fontSize: "16px" }}>lock_open</span>
-        </button>
+        title="Configure Auth"
+        onClick={onAuthClick}
+      >
+        <span className="material-symbols-outlined">lock_open</span>
+      </button>
       )}
       <Toggle
         id={`popover-server-enabled-${server.name}`}
@@ -65,6 +65,7 @@ function PopoverServerRow({ server, onRefresh, onAuthClick }: PopoverServerRowPr
 export function StatusPopover() {
   const { status, loading, refresh } = useStatus();
   const [showAddServer, setShowAddServer] = useState(true);
+  const [showMenu, setShowMenu] = useState(false);
   const [pendingAuth, setPendingAuth] = useState<Array<{ serverName: string; oauthLikely?: boolean }>>([]);
 
   useEffect(() => {
@@ -87,7 +88,7 @@ export function StatusPopover() {
   }, []);
 
   if (loading || !status) {
-    return <div className="popover glass-panel">Loading...</div>;
+    return <div className="popover">Loading...</div>;
   }
 
   const report = status as {
@@ -142,65 +143,72 @@ export function StatusPopover() {
   }
 
   return (
-    <div className="popover glass-panel">
-      <header className="popover-header" style={{ justifyContent: "space-between", borderBottom: "1px solid rgba(255, 255, 255, 0.4)", paddingBottom: "12px", alignItems: "center" }}>
-        <div style={{ display: "flex", flexDirection: "column" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-            <span style={{ fontSize: "14px", fontWeight: 700, color: "var(--text-main)", letterSpacing: "-0.015em" }}>mcpx</span>
-            <div className={`status-dot ${report.daemon.running ? 'status-online' : 'status-offline'}`} style={{ width: "8px", height: "8px" }} />
+    <div className="popover">
+      <header className="popover-header">
+        <div className="popover-title-block">
+          <div className="popover-title-row">
+            <span className="popover-title">mcpx</span>
+            <div className={`status-dot ${report.daemon.running ? 'status-online' : 'status-offline'}`} />
           </div>
-          <span style={{ fontSize: "10px", fontWeight: 600, color: "var(--text-muted)", letterSpacing: "0.05em" }}>
+          <span className="popover-subtitle">
             Gateway {report.daemon.running ? `Online (Port: ${report.daemon.port})` : "Offline"} • <span>{report.upstreamCount} Active</span>
             {report.daemon.running && typeof report.totalGlobalTokens === "number" && report.totalGlobalTokens > 0 && (
               <span> • {formatTokenApprox(report.totalGlobalTokens)} Tokens</span>
             )}
           </span>
         </div>
-        <button
-          type="button"
-          onClick={handleDaemonToggle}
-          style={{
-            padding: "4px 12px",
-            fontSize: "11px",
-            fontWeight: 600,
-            borderRadius: "6px",
-            border: "1px solid var(--primary)",
-            backgroundColor: "var(--primary)",
-            color: "white",
-            cursor: "pointer",
-          }}
-        >
-          {report.daemon.running ? "Stop" : "Start"}
-        </button>
+        <div className="popover-header-actions">
+          <button type="button" onClick={handleDaemonToggle} className="popover-daemon-btn">
+            {report.daemon.running ? "Stop" : "Start"}
+          </button>
+          <div className="popover-menu-wrap">
+            <button
+              type="button"
+              className="popover-add-btn"
+              title="More"
+              aria-label="More"
+              onClick={() => setShowMenu((value) => !value)}
+            >
+              <span className="material-symbols-outlined">more_horiz</span>
+            </button>
+            {showMenu && (
+              <div className="popover-menu">
+                <button type="button" onClick={() => window.mcpx.quitApp()}>
+                  Quit mcpx
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
       </header>
 
-      <main style={{ flex: 1, display: "flex", flexDirection: "column", gap: "12px", overflow: "auto", minHeight: 0 }}>
+      <main className="popover-main">
         {pendingAuth.length > 0 && (
-          <section style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+          <section className="popover-section">
             {pendingAuth.map((entry) => (
-              <div key={entry.serverName} className="popover-server-row" style={{ borderColor: "rgba(245, 158, 11, 0.35)" }}>
-                <div className="popover-server-row__meta" style={{ minWidth: 0, flex: 1 }}>
-                  <span className="popover-server-row__name" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              <div key={entry.serverName} className="popover-server-row popover-server-row--warning">
+                <div className="popover-server-row__meta">
+                  <span className="popover-server-row__name">
                     {entry.serverName}
                   </span>
                   <span className="popover-server-row__state">Auth required</span>
                 </div>
                 {entry.oauthLikely && (
                   <button type="button" className="popover-add-btn" title="Sign in with browser" onClick={() => handleOauth(entry.serverName)}>
-                    <span className="material-symbols-outlined" style={{ fontSize: "16px" }}>login</span>
+                    <span className="material-symbols-outlined">login</span>
                   </button>
                 )}
                 <button type="button" className="popover-add-btn" title="Dismiss" onClick={() => handleDismissAuth(entry.serverName)}>
-                  <span className="material-symbols-outlined" style={{ fontSize: "16px" }}>close</span>
+                  <span className="material-symbols-outlined">close</span>
                 </button>
               </div>
             ))}
           </section>
         )}
         {report.servers.length > 0 ? (
-          <section style={{ display: "flex", flexDirection: "column", gap: "8px", minHeight: 0, flex: 1 }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 4px" }}>
-              <h2 style={{ fontSize: "11px", fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+          <section className="popover-section popover-section--fill">
+            <div className="popover-section-header">
+              <h2>
                 Servers
               </h2>
               <button
@@ -209,13 +217,13 @@ export function StatusPopover() {
                 className="popover-add-btn"
                 title="Add Server"
               >
-                <span className="material-symbols-outlined" style={{ fontSize: "16px" }}>
+                <span className="material-symbols-outlined">
                   {showAddServer ? "close" : "add"}
                 </span>
               </button>
             </div>
             {showAddServer && <CompactCliInput onServerAdded={refresh} />}
-            <div className="popover-server-list glass-panel">
+            <div className="popover-server-list">
               {report.servers.map((server) => (
                 <PopoverServerRow
                   key={server.name}
@@ -227,8 +235,8 @@ export function StatusPopover() {
             </div>
           </section>
         ) : (
-          <section style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-            <h2 style={{ fontSize: "11px", fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.05em", padding: "0 4px" }}>
+          <section className="popover-section">
+            <h2 className="popover-section-title">
               Add Your First Server
             </h2>
             <CompactCliInput onServerAdded={refresh} />
@@ -237,9 +245,9 @@ export function StatusPopover() {
       </main>
 
       <footer className="popover-actions">
-        <button className="popover-btn primary" onClick={() => window.mcpx.openDashboard()} style={{ display: "flex", justifyContent: "center", gap: "8px", width: "100%" }}>
+        <button className="popover-btn primary" onClick={() => window.mcpx.openDashboard()}>
           <span>Open Dashboard</span>
-          <span className="material-symbols-outlined" style={{ fontSize: "16px" }}>open_in_new</span>
+          <span className="material-symbols-outlined">open_in_new</span>
         </button>
       </footer>
     </div>

@@ -32,7 +32,7 @@ export function ServerCard(props: ServerCardProps) {
           </div>
           <div className="server-card__body">
             <h3 className="server-card__title">{props.name}</h3>
-            <div className="server-card__status" style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+            <div className="server-card__status">
               <div className={`status-dot ${isWarning ? 'status-error' : isHealthy ? 'status-online' : 'status-offline'}`}></div>
               <span>
                 {isWarning ? `${props.errorCount} Errors` : props.enabled ? isHealthy ? 'Online' : 'Offline' : 'Disabled'}
@@ -66,7 +66,7 @@ export function ServerCard(props: ServerCardProps) {
               <span className="material-symbols-outlined">lock</span>
             </div>
           ) : props.transport === "http" ? (
-            <button className="btn btn-ghost btn-sm" onClick={props.onAuthClick} style={{ fontSize: '0.75rem', padding: '2px 8px', minHeight: 'unset' }}>
+            <button className="btn btn-ghost btn-sm server-card__auth-button" onClick={props.onAuthClick}>
               Configure Auth
             </button>
           ) : null}

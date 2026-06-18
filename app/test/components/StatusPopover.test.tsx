@@ -1,5 +1,5 @@
-import { describe, expect, it, vi, beforeAll } from "vitest";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { StatusPopover } from "../../src/renderer/components/StatusPopover";
 
 const mockMcpx = {
@@ -15,11 +15,13 @@ const mockMcpx = {
   daemonStart: vi.fn().mockResolvedValue(undefined),
   daemonStop: vi.fn().mockResolvedValue(undefined),
   openDashboard: vi.fn(),
+  quitApp: vi.fn(),
   setServerEnabled: vi.fn().mockResolvedValue(undefined),
   invoke: vi.fn()
 };
 
-beforeAll(() => {
+beforeEach(() => {
+  vi.clearAllMocks();
   Object.defineProperty(window, "mcpx", { value: mockMcpx, writable: true });
 });
 
@@ -78,6 +80,15 @@ describe("StatusPopover", () => {
     // Filter to only buttons in the footer (not header)
     const footerButtons = buttons.filter(btn => btn.textContent?.includes("Open Dashboard") || btn.textContent?.includes("Start") || btn.textContent?.includes("Stop"));
     expect(footerButtons.length).toBe(2);
+  });
+
+  it("quits from the overflow menu", async () => {
+    render(<StatusPopover />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /More/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /Quit mcpx/i }));
+
+    expect(mockMcpx.quitApp).toHaveBeenCalledTimes(1);
   });
 
   it("does not show Sync All Clients button", async () => {

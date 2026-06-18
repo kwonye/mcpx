@@ -58,7 +58,6 @@ describe("crashReporter initialization", () => {
 
     vi.doMock("../../src/main/tray", () => ({
       createTray: vi.fn(),
-      setQuitHandler: vi.fn(),
       setStartDaemonHandler: vi.fn(),
       setStopDaemonHandler: vi.fn(),
       updateTrayForDaemonStatus: vi.fn(),
@@ -66,8 +65,11 @@ describe("crashReporter initialization", () => {
 
     vi.doMock("../../src/main/dashboard", () => ({
       openDashboard: vi.fn(),
+    }));
+
+    vi.doMock("../../src/main/app-control", () => ({
       hideDashboard: vi.fn(),
-      closeDashboard: vi.fn(),
+      quitApp: vi.fn(),
     }));
 
     vi.doMock("../../src/main/ipc-handlers", () => ({
@@ -147,7 +149,6 @@ describe("crashReporter initialization", () => {
 
     vi.doMock("../../src/main/tray", () => ({
       createTray: vi.fn(),
-      setQuitHandler: vi.fn(),
       setStartDaemonHandler: vi.fn(),
       setStopDaemonHandler: vi.fn(),
       updateTrayForDaemonStatus: vi.fn(),
@@ -155,8 +156,11 @@ describe("crashReporter initialization", () => {
 
     vi.doMock("../../src/main/dashboard", () => ({
       openDashboard: vi.fn(),
+    }));
+
+    vi.doMock("../../src/main/app-control", () => ({
       hideDashboard: vi.fn(),
-      closeDashboard: vi.fn(),
+      quitApp: vi.fn(),
     }));
 
     vi.doMock("../../src/main/ipc-handlers", () => ({

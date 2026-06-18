@@ -102,9 +102,7 @@ test.describe("before-quit", () => {
     const windows = await app.windows();
     expect(windows.length).toBeGreaterThan(0);
     
-    // App.quit() is blocked by before-quit handler unless allowQuit=true
-    // This test verifies that the handler exists and the app is controllable
-    // Full quit testing requires IPC to set allowQuit, tested manually via Cmd+Q
+    // Full quit behavior is covered by main-process menu/tray tests.
     await app.evaluate(({ app }) => app.exit(0));
   });
 });

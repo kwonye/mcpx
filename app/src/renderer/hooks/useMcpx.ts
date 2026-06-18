@@ -1,14 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { debounce } from "../utils/debounce";
-
-const SEARCH_DEBOUNCE_MS = 300;
-
-function registryList(cursor: string | undefined, query: string | undefined, limit: number, updatedSince?: string) {
-  if (updatedSince) {
-    return window.mcpx.registryList(cursor, query, limit, updatedSince);
-  }
-  return window.mcpx.registryList(cursor, query, limit);
-}
+import { useCallback, useEffect, useState } from "react";
 
 export function useStatus() {
   const [status, setStatus] = useState<unknown>(null);
@@ -32,79 +22,4 @@ export function useStatus() {
   }, [refresh]);
 
   return { status, loading, refresh };
-}
-
-export function useRegistryList() {
-  const [servers, setServers] = useState<unknown[]>([]);
-  const [cursor, setCursor] = useState<string | undefined>();
-  const [loading, setLoading] = useState(false);
-  const requestIdRef = useRef(0);
-  const currentQueryRef = useRef<string | undefined>();
-  const currentUpdatedSinceRef = useRef<string | undefined>();
-
-  const search = useCallback(async (query?: string, updatedSince?: string) => {
-    const normalizedQuery = query?.trim();
-    const requestId = ++requestIdRef.current;
-    currentQueryRef.current = normalizedQuery;
-    currentUpdatedSinceRef.current = updatedSince;
-    setLoading(true);
-    try {
-      const limit = normalizedQuery ? 200 : 100;
-      const result = await registryList(undefined, normalizedQuery || undefined, limit, updatedSince);
-      if (requestId !== requestIdRef.current) return;
-
-      setServers(result.servers ?? []);
-      setCursor(result.metadata?.nextCursor ?? undefined);
-    } catch (err) {
-      console.error("Registry search error:", err);
-    } finally {
-      if (requestId === requestIdRef.current) {
-        setLoading(false);
-      }
-    }
-  }, []);
-
-  const loadMore = useCallback(async (query?: string) => {
-    if (!cursor || loading) return;
-    const normalizedQuery = query?.trim() || currentQueryRef.current;
-    const requestId = ++requestIdRef.current;
-    setLoading(true);
-    try {
-      const limit = normalizedQuery ? 200 : 100;
-      const result = await registryList(cursor, normalizedQuery || undefined, limit, currentUpdatedSinceRef.current);
-      if (requestId !== requestIdRef.current) return;
-
-      setServers((prev) => [...prev, ...(result.servers ?? [])]);
-      setCursor(result.metadata?.nextCursor ?? undefined);
-    } catch (err) {
-      console.error("Registry loadMore error:", err);
-    } finally {
-      if (requestId === requestIdRef.current) {
-        setLoading(false);
-      }
-    }
-  }, [cursor, loading]);
-
-  // Initial load
-  useEffect(() => {
-    search(undefined);
-  }, [search]);
-
-  // Debounced search for real-time input
-  const debouncedSearchRef = useRef(debounce((query: string) => {
-    search(query);
-  }, SEARCH_DEBOUNCE_MS));
-
-  const debouncedSearch = useCallback((query: string) => {
-    debouncedSearchRef.current(query);
-  }, []);
-
-  return { 
-    servers, 
-    loading, 
-    search, 
-    debouncedSearch,
-    loadMore, 
-    hasMore: Boolean(cursor) 
-  };
 }

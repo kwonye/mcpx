@@ -1,37 +1,22 @@
-import { BrowserWindow, app } from "electron";
+import { BrowserWindow } from "electron";
 import { fileURLToPath } from "node:url";
 import { hidePopover } from "./popover";
-
-let dashboard: BrowserWindow | null = null;
+import { getDashboardWindow, revealDashboard, setDashboardWindow, hideDashboard as hideDashboardWindow } from "./app-control";
 
 function rendererEntryPath(): string {
   return fileURLToPath(new URL("../renderer/index.html", import.meta.url));
 }
 
-function revealDashboard(window: BrowserWindow): void {
-  if (process.platform === "darwin") {
-    app.dock?.show();
-    app.focus({ steal: true });
-  }
-
-  if (!window.isVisible()) {
-    window.show();
-  }
-
-  window.setAlwaysOnTop(true);
-  window.setAlwaysOnTop(false);
-  window.focus();
-}
-
 export function openDashboard(): BrowserWindow {
   hidePopover();
 
-  if (dashboard && !dashboard.isDestroyed()) {
-    revealDashboard(dashboard);
-    return dashboard;
+  const existing = getDashboardWindow();
+  if (existing) {
+    revealDashboard();
+    return existing;
   }
 
-  dashboard = new BrowserWindow({
+  const dashboard = new BrowserWindow({
     width: 1100,
     height: 700,
     titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
@@ -54,26 +39,24 @@ export function openDashboard(): BrowserWindow {
   dashboard.loadFile(rendererEntryPath(), { hash: "dashboard" });
 
   dashboard.once("ready-to-show", () => {
-    if (dashboard && !dashboard.isDestroyed()) {
-      revealDashboard(dashboard);
+    if (!dashboard.isDestroyed()) {
+      revealDashboard();
     }
   });
 
-  dashboard.on("closed", () => {
-    dashboard = null;
+  dashboard.on("close", (event) => {
+    event.preventDefault();
+    hideDashboardWindow();
   });
 
+  dashboard.on("closed", () => {
+    setDashboardWindow(null);
+  });
+
+  setDashboardWindow(dashboard);
   return dashboard;
 }
 
 export function hideDashboard(): void {
-  if (dashboard && !dashboard.isDestroyed()) {
-    dashboard.hide();
-  }
-}
-
-export function closeDashboard(): void {
-  if (dashboard && !dashboard.isDestroyed()) {
-    dashboard.close();
-  }
+  hideDashboardWindow();
 }

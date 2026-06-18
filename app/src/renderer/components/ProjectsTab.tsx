@@ -24,6 +24,8 @@ interface ProjectsTabProps {
     totalProjectTokens?: Record<string, number>;
   };
   onRefresh: () => void;
+  selectedProjectPath: string | null;
+  onSelectedProjectPathChange: (projectPath: string | null) => void;
 }
 
 // Utility to extract directory name from an absolute path
@@ -32,14 +34,14 @@ const getDirName = (fullPath: string): string => {
   return segments.filter(Boolean).pop() || "";
 };
 
-export function ProjectsTab({ status, onRefresh }: ProjectsTabProps) {
+export function ProjectsTab({ status, onRefresh, selectedProjectPath, onSelectedProjectPathChange }: ProjectsTabProps) {
   const [newProjectPath, setNewProjectPath] = useState("");
-  const [selectedProjectPath, setSelectedProjectPath] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   const projects = Object.values(status.projects ?? {});
+  const selectedProject = projects.find((p) => p.path === selectedProjectPath) ?? null;
 
   // Handle opening directory selector
   const handleSelectDirectory = async () => {
@@ -78,6 +80,7 @@ export function ProjectsTab({ status, onRefresh }: ProjectsTabProps) {
       await window.mcpx.projectInit(cleanPath, inferredName);
       setSuccess(`Project "${inferredName}" successfully registered.`);
       setNewProjectPath("");
+      onSelectedProjectPathChange(cleanPath);
       onRefresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to initialize project");
@@ -100,7 +103,7 @@ export function ProjectsTab({ status, onRefresh }: ProjectsTabProps) {
       await window.mcpx.projectRemove(projectPath);
       setSuccess(`Project "${name}" unregistered successfully.`);
       if (selectedProjectPath === projectPath) {
-        setSelectedProjectPath(null);
+        onSelectedProjectPathChange(null);
       }
       onRefresh();
     } catch (err) {
@@ -110,10 +113,6 @@ export function ProjectsTab({ status, onRefresh }: ProjectsTabProps) {
     }
   };
 
-  // Find the currently selected project
-  const selectedProject = projects.find((p) => p.path === selectedProjectPath);
-
-  // Filter servers belonging to the selected project
   const projectServers = selectedProject
     ? status.servers.filter((server) => {
         return server.name.startsWith(`${selectedProject.name}.`);
@@ -131,129 +130,38 @@ export function ProjectsTab({ status, onRefresh }: ProjectsTabProps) {
 
   return (
     <div className="projects-tab-container">
-      {/* Feedback Messages */}
       {error && <div className="feedback-message error mb-4">{error}</div>}
       {success && <div className="feedback-message success mb-4">{success}</div>}
 
       <div className="projects-layout">
-        {/* Sidebar / List of Projects */}
-        <div className="projects-sidebar-column">
-          <div className="glass-panel project-form-panel">
-            <h3>Add / Track Project</h3>
-            <p className="subtitle-sm">Initialize `.mcpx.json` and register a path globally.</p>
-            <form onSubmit={handleAddProject} className="project-form">
-              <div className="form-field">
-                <label>Project Directory</label>
-                <div className="directory-picker-row">
-                  <input
-                    type="text"
-                    className="glass-input text-sm mono-text"
-                    value={newProjectPath}
-                    placeholder="No folder selected"
-                    readOnly
-                    disabled={loading}
-                  />
-                  <button
-                    type="button"
-                    className="btn btn-secondary btn-sm picker-btn"
-                    onClick={handleSelectDirectory}
-                    disabled={loading}
-                  >
-                    <span className="material-symbols-outlined font-icon-sm">folder_open</span>
-                    Choose Folder
-                  </button>
-                </div>
-              </div>
-              {newProjectPath && (
-                <div className="inferred-name-preview">
-                  <span className="label">Inferred Name:</span>
-                  <span className="badge-pill">{getDirName(newProjectPath)}</span>
-                </div>
-              )}
-              <button type="submit" className="btn btn-primary btn-sm mt-2" disabled={loading || !newProjectPath}>
-                <span className="material-symbols-outlined font-icon-sm">add_box</span>
-                Add Project
-              </button>
-            </form>
-          </div>
-
-          <div className="projects-list-header">
-            <h3>Registered Projects</h3>
-            <span className="badge-pill">{projects.length}</span>
-          </div>
-
-          <div className="projects-list-scroll">
-            {projects.length === 0 ? (
-              <div className="glass-panel no-projects-placeholder">
-                <span className="material-symbols-outlined placeholder-icon">folder_open</span>
-                <p>No projects registered.</p>
-                <p className="hint">Register a directory path above to manage its local MCP configs.</p>
-              </div>
-            ) : (
-              projects.map((project) => {
-                const isSelected = selectedProjectPath === project.path;
-                const localServersCount = status.servers.filter((s) => s.name.startsWith(`${project.name}.`)).length;
-                const enabledServersCount = status.servers.filter((s) => s.name.startsWith(`${project.name}.`) && s.enabled).length;
-
-                return (
-                  <div
-                    key={project.path}
-                    className={`glass-panel project-list-item ${isSelected ? "selected" : ""}`}
-                    onClick={() => setSelectedProjectPath(project.path)}
-                  >
-                    <div className="project-item-header">
-                      <div className="project-item-meta">
-                        <span className="material-symbols-outlined project-folder-icon">folder</span>
-                        <span className="project-name">{project.name}</span>
-                      </div>
-                      <button
-                        className="btn-icon-danger"
-                        title="Unregister project"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleRemoveProject(project.path, project.name);
-                        }}
-                      >
-                        <span className="material-symbols-outlined">delete</span>
-                      </button>
-                    </div>
-                    <p className="project-path mono-text" title={project.path}>
-                      {project.path}
-                    </p>
-                    <div className="project-item-footer">
-                      <span className="badge-pill badge-outline">
-                        {enabledServersCount} / {localServersCount} MCPs enabled
-                      </span>
-                    </div>
-                  </div>
-                );
-              })
-            )}
-          </div>
-        </div>
-
-        {/* Detail Panel for Selected Project */}
         <div className="project-detail-column">
           {selectedProject ? (
-            <div className="glass-panel project-detail-card">
-              <div className="project-detail-header-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
+            <div className="project-detail-card">
+              <div className="project-detail-header-row">
                 <div>
                   <div className="detail-eyebrow">Project Context</div>
-                  <h2 style={{ margin: 0 }}>{selectedProject.name}</h2>
+                  <h2>{selectedProject.name}</h2>
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <div className="project-detail-actions">
                   {typeof status.totalProjectTokens?.[selectedProject.path] === "number" && (
                     <div className="token-badge-total" title="Context window tokens consumed by project-specific enabled MCP servers">
-                      <span className="material-symbols-outlined font-icon-sm" style={{ fontSize: '18px' }}>analytics</span>
+                      <span className="material-symbols-outlined font-icon-sm">analytics</span>
                       <span>{formatTokenApprox(status.totalProjectTokens[selectedProject.path])} Project Tokens Active</span>
                     </div>
                   )}
-                  <span className="detail-path-badge mono-text" style={{ margin: 0 }}>{selectedProject.path}</span>
+                  <button
+                    className="btn-icon-danger"
+                    title="Unregister project"
+                    onClick={() => handleRemoveProject(selectedProject.path, selectedProject.name)}
+                  >
+                    <span className="material-symbols-outlined">delete</span>
+                  </button>
                 </div>
+                <span className="detail-path-badge mono-text">{selectedProject.path}</span>
               </div>
 
               {typeof status.totalProjectTokens?.[selectedProject.path] === "number" && (
-                <div style={{ marginTop: '16px' }}>
+                <div>
                   <ContextBudgetCard totalTokens={status.totalProjectTokens[selectedProject.path]} />
                 </div>
               )}
@@ -278,9 +186,9 @@ export function ProjectsTab({ status, onRefresh }: ProjectsTabProps) {
                     {projectServers.map((server) => {
                       const baseName = server.name.slice(selectedProject.name.length + 1);
                       return (
-                        <div key={server.name} className="project-mcp-row glass-panel">
+                        <div key={server.name} className="project-mcp-row">
                           <div className="project-mcp-info">
-                            <div className="project-mcp-name-row" style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                            <div className="project-mcp-name-row">
                               <span className="mcp-name">{baseName}</span>
                               <span className="mcp-transport-badge">{server.transport}</span>
                               {server.enabled && server.tokenCount && server.tokenCount.total > 0 && (
@@ -319,10 +227,41 @@ export function ProjectsTab({ status, onRefresh }: ProjectsTabProps) {
               </div>
             </div>
           ) : (
-            <div className="glass-panel project-detail-empty">
+            <div className="project-detail-empty">
               <span className="material-symbols-outlined empty-icon">folder_zip</span>
-              <h3>Select a Project</h3>
-              <p>Choose a project from the sidebar to manage its directory-specific MCP context.</p>
+              <h3>{projects.length > 0 ? "Select a Project" : "No Projects Registered"}</h3>
+              <p>{projects.length > 0 ? "Choose a project from the sidebar to manage its directory-specific MCP context." : "Register a folder to start using project-local MCP servers."}</p>
+              <form onSubmit={handleAddProject} className="project-form project-form--empty">
+                <div className="directory-picker-row">
+                  <input
+                    type="text"
+                    className="glass-input text-sm mono-text"
+                    value={newProjectPath}
+                    placeholder="No folder selected"
+                    readOnly
+                    disabled={loading}
+                  />
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm picker-btn"
+                    onClick={handleSelectDirectory}
+                    disabled={loading}
+                  >
+                    <span className="material-symbols-outlined font-icon-sm">folder_open</span>
+                    Choose Folder
+                  </button>
+                </div>
+                {newProjectPath && (
+                  <div className="inferred-name-preview">
+                    <span className="label">Inferred Name:</span>
+                    <span className="badge-pill">{getDirName(newProjectPath)}</span>
+                  </div>
+                )}
+                <button type="submit" className="btn btn-primary btn-sm" disabled={loading || !newProjectPath}>
+                  <span className="material-symbols-outlined font-icon-sm">add_box</span>
+                  Add Project
+                </button>
+              </form>
             </div>
           )}
         </div>

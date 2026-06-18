@@ -89,6 +89,7 @@
     "desktop-install:dev:cdp": "bash scripts/desktop-install.sh --flavor dev --dev --remote-debugging-port 9222"
   },
   "dependencies": {
+    "@iarna/toml": "2.2.5",
     "electron-updater": "^6.6.2",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",

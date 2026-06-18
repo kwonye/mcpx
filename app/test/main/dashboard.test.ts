@@ -10,7 +10,7 @@ describe("dashboard window configuration", () => {
         "utf-8"
       );
       
-      expect(source).toContain('titleBarStyle: "hiddenInset"');
+      expect(source).toContain('titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default"');
     });
 
     it("positions traffic lights at macOS standard position", async () => {
@@ -22,28 +22,30 @@ describe("dashboard window configuration", () => {
       expect(source).toContain("trafficLightPosition");
     });
 
-    it("does not toggle the dock icon when opening or closing the dashboard", async () => {
+    it("does not show the dock icon when opening the dashboard", async () => {
       const source = await readFile(
         join(__dirname, "../../src/main/dashboard.ts"),
         "utf-8"
       );
 
-      // dock show/hide is used only in revealDashboard() to bring the window to front,
-      // not to add the app to the dock (it's hidden via app.dock?.hide() in index.ts)
-      expect(source).toContain("app.dock?.show()");
-      expect(source).toContain("app.focus({ steal: true })");
+      expect(source).not.toContain("app.dock?.show()");
+      expect(source).not.toContain("setAlwaysOnTop");
     });
 
     it("reveals the dashboard without relying on the dock", async () => {
       const source = await readFile(
-        join(__dirname, "../../src/main/dashboard.ts"),
+        join(__dirname, "../../src/main/app-control.ts"),
         "utf-8"
       );
 
       expect(source).toContain('app.focus({ steal: true })');
-      expect(source).toContain('show: false');
-      expect(source).toContain('dashboard.once("ready-to-show"');
-      expect(source).toContain('dashboard.loadFile(rendererEntryPath(), { hash: "dashboard" })');
+      const dashboardSource = await readFile(
+        join(__dirname, "../../src/main/dashboard.ts"),
+        "utf-8"
+      );
+      expect(dashboardSource).toContain('show: false');
+      expect(dashboardSource).toContain('dashboard.once("ready-to-show"');
+      expect(dashboardSource).toContain('dashboard.loadFile(rendererEntryPath(), { hash: "dashboard" })');
     });
   });
 

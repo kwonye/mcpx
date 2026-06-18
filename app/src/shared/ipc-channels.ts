@@ -17,11 +17,8 @@ export const IPC = {
   DAEMON_START: "mcpx:daemon-start",
   DAEMON_STOP: "mcpx:daemon-stop",
   DAEMON_RESTART: "mcpx:daemon-restart",
-  REGISTRY_LIST: "mcpx:registry-list",
-  REGISTRY_GET: "mcpx:registry-get",
-  REGISTRY_PREPARE_ADD: "mcpx:registry-prepare-add",
-  REGISTRY_CONFIRM_ADD: "mcpx:registry-confirm-add",
   OPEN_DASHBOARD: "mcpx:open-dashboard",
+  QUIT_APP: "mcpx:quit-app",
   EXECUTE_CLI_COMMAND: "mcpx:execute-cli-command",
 
   // Skills

@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 describe("tray click behavior", () => {
   const togglePopoverMock = vi.fn();
   const hidePopoverMock = vi.fn();
+  const quitAppMock = vi.fn();
   const trayInstances: MockTray[] = [];
   const createFromPathMock = vi.fn(() => ({ path: "icon" }));
 
@@ -51,6 +52,10 @@ describe("tray click behavior", () => {
       togglePopover: togglePopoverMock,
       hidePopover: hidePopoverMock
     }));
+
+    vi.doMock("../../src/main/app-control", () => ({
+      quitApp: quitAppMock
+    }));
   });
 
   it("opens the popover on left click and hides it on right click", async () => {
@@ -67,6 +72,10 @@ describe("tray click behavior", () => {
     expect(hidePopoverMock).toHaveBeenCalledTimes(1);
     expect(tray.popUpContextMenu).toHaveBeenCalledTimes(1);
     expect(createFromPathMock).toHaveBeenCalledWith(expect.stringContaining("trayIconTemplate-"));
+
+    const menu = tray.popUpContextMenu.mock.calls[0][0] as { template: Array<{ label: string; click?: () => void }> };
+    menu.template.find((item) => item.label === "Quit")?.click?.();
+    expect(quitAppMock).toHaveBeenCalledTimes(1);
   });
 
   it("updates the tray icon when daemon status changes", async () => {

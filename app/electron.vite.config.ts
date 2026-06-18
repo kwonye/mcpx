@@ -20,7 +20,10 @@ export default defineConfig({
     define,
     build: {
       sourcemap: desktopDebug,
-      minify: desktopDebug ? false : undefined
+      minify: desktopDebug ? false : undefined,
+      rollupOptions: {
+        external: ["@iarna/toml"]
+      }
     },
     resolve: {
       alias: {

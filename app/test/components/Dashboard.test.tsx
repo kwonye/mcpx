@@ -22,8 +22,19 @@ const mockMcpx = {
         target: "npx @mcp/github",
         authBindings: [],
         clients: [{ clientId: "claude", status: "ERROR", managed: true }]
+      },
+      {
+        name: "example.filesystem",
+        enabled: true,
+        transport: "stdio",
+        target: "npx filesystem",
+        authBindings: [],
+        clients: [{ clientId: "claude", status: "SYNCED", managed: true }]
       }
-    ]
+    ],
+    projects: {
+      "/tmp/example": { name: "example", path: "/tmp/example" }
+    }
   }),
   syncAll: vi.fn(),
   addServer: vi.fn(),
@@ -40,10 +51,7 @@ const mockMcpx = {
     startOnLoginEnabled: true
   }),
   openDashboard: vi.fn(),
-  registryList: vi.fn().mockResolvedValue({ servers: [], metadata: {} }),
-  registryGet: vi.fn(),
-  registryPrepareAdd: vi.fn(),
-  registryConfirmAdd: vi.fn(),
+  quitApp: vi.fn(),
   updateServer: vi.fn(),
   setServerEnabled: vi.fn().mockResolvedValue({})
 };
@@ -66,8 +74,23 @@ describe("Dashboard", () => {
   it("shows tab navigation", async () => {
     render(<Dashboard />);
     expect(await screen.findByRole("button", { name: /My Servers/i })).toBeDefined();
-    expect(screen.getByRole("button", { name: /Browse Registry/i })).toBeDefined();
+    expect(screen.queryByRole("button", { name: /Browse Registry/i })).toBeNull();
+    expect(screen.getByRole("button", { name: /Projects/i })).toBeDefined();
+    expect(screen.getByRole("button", { name: /Skills/i })).toBeDefined();
     expect(screen.getByRole("button", { name: /Settings/i })).toBeDefined();
+  });
+
+  it("falls back to servers for stale browse settings", async () => {
+    mockMcpx.getDesktopSettings.mockResolvedValueOnce({
+      autoUpdateEnabled: true,
+      startOnLoginEnabled: true,
+      activeTab: "browse"
+    });
+
+    render(<Dashboard />);
+
+    expect(await screen.findByRole("heading", { name: "My Servers" })).toBeDefined();
+    expect(screen.queryByText("Registry")).toBeNull();
   });
 
   it("navigates to server detail on click", async () => {
@@ -90,6 +113,15 @@ describe("Dashboard", () => {
     expect(await screen.findByText("Auto-update")).toBeDefined();
     expect(await screen.findByText("Start on login")).toBeDefined();
     expect(mockMcpx.getDesktopSettings).toHaveBeenCalledTimes(2);
+  });
+
+  it("selects a project from the sidebar", async () => {
+    render(<Dashboard />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /example/i }));
+
+    expect(await screen.findByText("Project Context")).toBeDefined();
+    expect(screen.getByText("/tmp/example")).toBeDefined();
   });
 
   it("shows product-aware settings copy", async () => {
