@@ -7,6 +7,7 @@ import {
   getDefaultEnvironment,
   type StdioServerParameters
 } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { StreamableHTTPClientTransport, StreamableHTTPError } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { loadMergedConfig } from "../core/config.js";
 import { buildEnrichedPath } from "../core/spawn-env.js";
 import { getOAuthAccessToken, isOAuthReference, oauthReferenceServerName } from "../core/oauth.js";
@@ -40,21 +41,22 @@ interface GatewayServerOptions {
   secrets: SecretsManager;
 }
 
-interface StdioConnection {
+interface UpstreamConnection {
   fingerprint: string;
   client: Client;
-  transport: StdioClientTransport;
+  transport: StdioClientTransport | StreamableHTTPClientTransport;
 }
 
-interface StdioConnectionEntry {
+interface UpstreamConnectionEntry {
   fingerprint: string;
-  promise: Promise<StdioConnection>;
+  promise: Promise<UpstreamConnection>;
 }
 
 interface GatewayRuntimeState {
-  stdioConnections: Map<string, StdioConnectionEntry>;
+  upstreamConnections: Map<string, UpstreamConnectionEntry>;
   tokenCache?: Map<string, { fingerprint: string; count: UpstreamTokenCount }>;
   upstreamErrors?: Map<string, string>;
+  lastWwwAuthenticate?: Map<string, string>;
 }
 
 class UpstreamHttpError extends Error {
@@ -271,18 +273,7 @@ async function callUpstream(
   runtime: GatewayRuntimeState,
   passthroughAuthorizationHeader?: string
 ): Promise<unknown> {
-  if (upstream.spec.transport === "stdio") {
-    return callStdioUpstream(upstream as UpstreamServerRuntime & { spec: StdioServerSpec }, method, params, secrets, runtime);
-  }
-
-  return callHttpUpstream(
-    upstream as UpstreamServerRuntime & { spec: HttpServerSpec },
-    method,
-    params,
-    id,
-    secrets,
-    passthroughAuthorizationHeader
-  );
+  return callUpstreamOnce(upstream, method, params, secrets, runtime, passthroughAuthorizationHeader, false);
 }
 
 export async function getUpstreamTokenCounts(
@@ -403,7 +394,30 @@ function buildStdioServerParameters(spec: StdioServerSpec, secrets: SecretsManag
   };
 }
 
-async function closeStdioConnection(entry: StdioConnectionEntry): Promise<void> {
+async function buildHttpHeaders(
+  upstream: UpstreamServerRuntime & { spec: HttpServerSpec },
+  secrets: SecretsManager,
+  options: { forceOAuthRefresh?: boolean; passthroughAuthorizationHeader?: string }
+): Promise<Record<string, string>> {
+  const headers: Record<string, string> = {};
+  for (const [key, value] of Object.entries(upstream.spec.headers ?? {})) {
+    if (key.toLowerCase() === "authorization" && isOAuthReference(value)) {
+      const oauthServerName = oauthReferenceServerName(value);
+      const accessToken = await getOAuthAccessToken(oauthServerName, upstream.spec, secrets, {
+        forceRefresh: options.forceOAuthRefresh
+      });
+      headers[key] = `Bearer ${accessToken}`;
+    } else {
+      headers[key] = secrets.resolveMaybeSecret(value);
+    }
+  }
+  if (options.passthroughAuthorizationHeader) {
+    headers.Authorization = options.passthroughAuthorizationHeader;
+  }
+  return headers;
+}
+
+async function closeUpstreamConnection(entry: UpstreamConnectionEntry): Promise<void> {
   try {
     const connection = await entry.promise;
     await connection.transport.close();
@@ -412,338 +426,177 @@ async function closeStdioConnection(entry: StdioConnectionEntry): Promise<void> 
   }
 }
 
-async function reconcileStdioConnections(config: McpxConfig, runtime: GatewayRuntimeState): Promise<void> {
+async function reconcileUpstreamConnections(config: McpxConfig, runtime: GatewayRuntimeState): Promise<void> {
   const activeSpecs = new Map(
     Object.entries(config.servers)
       .filter(([, spec]) => isServerEnabled(spec))
       .map(([name, spec]) => [name, specFingerprint(spec)])
   );
 
-  const staleNames: string[] = [];
-  for (const [name, entry] of runtime.stdioConnections.entries()) {
-    const expectedFingerprint = activeSpecs.get(name);
+  const staleKeys: string[] = [];
+  for (const [key, entry] of runtime.upstreamConnections.entries()) {
+    // Cache keys may have a ':passthrough' suffix; extract the upstream name before the first ':'
+    const upstreamName = key.includes(":") ? key.slice(0, key.indexOf(":")) : key;
+    const expectedFingerprint = activeSpecs.get(upstreamName);
     if (!expectedFingerprint || expectedFingerprint !== entry.fingerprint) {
-      staleNames.push(name);
+      staleKeys.push(key);
     }
   }
 
-  for (const name of staleNames) {
-    const entry = runtime.stdioConnections.get(name);
+  for (const key of staleKeys) {
+    const entry = runtime.upstreamConnections.get(key);
     if (!entry) {
       continue;
     }
-
-    runtime.stdioConnections.delete(name);
-    await closeStdioConnection(entry);
+    runtime.upstreamConnections.delete(key);
+    await closeUpstreamConnection(entry);
   }
 }
 
-function invalidateStdioConnection(name: string, runtime: GatewayRuntimeState): void {
-  const existing = runtime.stdioConnections.get(name);
+function invalidateUpstreamConnection(
+  upstreamName: string,
+  passthroughAuthorizationHeader: string | undefined,
+  runtime: GatewayRuntimeState
+): void {
+  const key = passthroughAuthorizationHeader ? `${upstreamName}:passthrough` : upstreamName;
+  const existing = runtime.upstreamConnections.get(key);
   if (!existing) {
     return;
   }
-
-  runtime.stdioConnections.delete(name);
-  void closeStdioConnection(existing);
+  runtime.upstreamConnections.delete(key);
+  void closeUpstreamConnection(existing);
 }
 
-async function getStdioConnection(
-  upstream: UpstreamServerRuntime & { spec: StdioServerSpec },
+async function getUpstreamConnection(
+  upstream: UpstreamServerRuntime,
   secrets: SecretsManager,
-  runtime: GatewayRuntimeState
-): Promise<StdioConnection> {
+  runtime: GatewayRuntimeState,
+  options: { forceOAuthRefresh?: boolean; passthroughAuthorizationHeader?: string } = {}
+): Promise<UpstreamConnection> {
+  const { forceOAuthRefresh = false, passthroughAuthorizationHeader } = options;
+  const cacheKey = passthroughAuthorizationHeader ? `${upstream.name}:passthrough` : upstream.name;
   const fingerprint = specFingerprint(upstream.spec);
-  const existing = runtime.stdioConnections.get(upstream.name);
-  if (existing) {
-    if (existing.fingerprint === fingerprint) {
-      return existing.promise;
-    }
 
-    runtime.stdioConnections.delete(upstream.name);
-    void closeStdioConnection(existing);
+  if (!forceOAuthRefresh) {
+    const existing = runtime.upstreamConnections.get(cacheKey);
+    if (existing) {
+      if (existing.fingerprint === fingerprint) {
+        return existing.promise;
+      }
+      runtime.upstreamConnections.delete(cacheKey);
+      void closeUpstreamConnection(existing);
+    }
   }
 
-  const promise = (async (): Promise<StdioConnection> => {
-    const transport = new StdioClientTransport(buildStdioServerParameters(upstream.spec, secrets));
-    const client = new Client({
-      name: "mcpx",
-      version: SERVER_VERSION
-    });
-    
-    // Add connection timeout
+  const promise = (async (): Promise<UpstreamConnection> => {
+    let transport: StdioClientTransport | StreamableHTTPClientTransport;
+
+    if (upstream.spec.transport === "stdio") {
+      transport = new StdioClientTransport(buildStdioServerParameters(upstream.spec as StdioServerSpec, secrets));
+    } else {
+      const headers = await buildHttpHeaders(
+        upstream as UpstreamServerRuntime & { spec: HttpServerSpec },
+        secrets,
+        { forceOAuthRefresh, passthroughAuthorizationHeader }
+      );
+      const capturingFetch = async (url: string | URL, init?: RequestInit): Promise<Response> => {
+        const response = await fetch(url, init);
+        const wwwAuth = response.headers.get("www-authenticate");
+        if (wwwAuth) {
+          if (!runtime.lastWwwAuthenticate) {
+            runtime.lastWwwAuthenticate = new Map();
+          }
+          runtime.lastWwwAuthenticate.set(upstream.name, wwwAuth);
+        }
+        return response;
+      };
+      transport = new StreamableHTTPClientTransport(
+        new URL((upstream.spec as HttpServerSpec).url),
+        { requestInit: { headers }, fetch: capturingFetch }
+      );
+    }
+
+    const client = new Client({ name: "mcpx", version: SERVER_VERSION });
     await withTimeout(
       client.connect(transport),
       DEFAULT_CONNECT_TIMEOUT_MS,
       `Upstream ${upstream.name} failed to connect within ${DEFAULT_CONNECT_TIMEOUT_MS}ms.`
     );
-
-    return {
-      fingerprint,
-      client,
-      transport
-    };
+    return { fingerprint, client, transport };
   })();
 
-  runtime.stdioConnections.set(upstream.name, {
-    fingerprint,
-    promise
-  });
+  runtime.upstreamConnections.set(cacheKey, { fingerprint, promise });
 
   try {
     return await promise;
   } catch (error) {
-    runtime.stdioConnections.delete(upstream.name);
+    runtime.upstreamConnections.delete(cacheKey);
     throw error;
   }
 }
 
-async function callStdioUpstream(
-  upstream: UpstreamServerRuntime & { spec: StdioServerSpec },
+async function callUpstreamOnce(
+  upstream: UpstreamServerRuntime,
   method: string,
   params: unknown,
   secrets: SecretsManager,
-  runtime: GatewayRuntimeState
+  runtime: GatewayRuntimeState,
+  passthroughAuthorizationHeader: string | undefined,
+  forceOAuthRefresh: boolean
 ): Promise<unknown> {
+  const hasOAuth = upstream.spec.transport === "http"
+    && Object.values((upstream.spec as HttpServerSpec).headers ?? {}).some(isOAuthReference);
+
   try {
-    const connection = await getStdioConnection(upstream, secrets, runtime);
+    const connection = await getUpstreamConnection(upstream, secrets, runtime, {
+      forceOAuthRefresh,
+      passthroughAuthorizationHeader
+    });
+
     const timeoutMs = getConfiguredTimeoutMs();
     const timeoutMessage = `Upstream ${upstream.name} timed out after ${timeoutMs}ms for method ${method}.`;
 
     if (method === "tools/list") {
       return withTimeout(connection.client.listTools(params as never), timeoutMs, timeoutMessage);
     }
-
     if (method === "resources/list") {
       return withTimeout(connection.client.listResources(params as never), timeoutMs, timeoutMessage);
     }
-
     if (method === "prompts/list") {
       return withTimeout(connection.client.listPrompts(params as never), timeoutMs, timeoutMessage);
     }
-
     if (method === "tools/call") {
       return withTimeout(connection.client.callTool(params as never), timeoutMs, timeoutMessage);
     }
-
     if (method === "resources/read") {
       return withTimeout(connection.client.readResource(params as never), timeoutMs, timeoutMessage);
     }
-
     if (method === "prompts/get") {
       return withTimeout(connection.client.getPrompt(params as never), timeoutMs, timeoutMessage);
     }
 
-    throw new Error(`Unsupported stdio passthrough method: ${method}`);
+    throw new Error(`Unsupported method: ${method}`);
   } catch (error) {
-    invalidateStdioConnection(upstream.name, runtime);
-    throw error;
-  }
-}
+    // Invalidate connection on any error so the next call reconnects cleanly.
+    invalidateUpstreamConnection(upstream.name, passthroughAuthorizationHeader, runtime);
 
-async function callHttpUpstream(
-  upstream: UpstreamServerRuntime & { spec: HttpServerSpec },
-  method: string,
-  params: unknown,
-  id: string | number | null,
-  secrets: SecretsManager,
-  passthroughAuthorizationHeader?: string
-): Promise<unknown> {
-  return callHttpUpstreamOnce(upstream, method, params, id, secrets, passthroughAuthorizationHeader, false);
-}
-
-async function callHttpUpstreamOnce(
-  upstream: UpstreamServerRuntime & { spec: HttpServerSpec },
-  method: string,
-  params: unknown,
-  id: string | number | null,
-  secrets: SecretsManager,
-  passthroughAuthorizationHeader: string | undefined,
-  forceOAuthRefresh: boolean
-): Promise<unknown> {
-  const headers: Record<string, string> = {
-    "content-type": "application/json",
-    accept: "application/json, text/event-stream"
-  };
-
-  for (const [key, value] of Object.entries(upstream.spec.headers ?? {})) {
-    if (key.toLowerCase() === "authorization" && isOAuthReference(value)) {
-      const oauthServerName = oauthReferenceServerName(value);
-      const accessToken = await getOAuthAccessToken(oauthServerName, upstream.spec, secrets, { forceRefresh: forceOAuthRefresh });
-      headers[key] = `Bearer ${accessToken}`;
-    } else {
-      headers[key] = secrets.resolveMaybeSecret(value);
-    }
-  }
-
-  if (passthroughAuthorizationHeader) {
-    headers.Authorization = passthroughAuthorizationHeader;
-  }
-
-  const timeoutMs = getConfiguredTimeoutMs();
-  const timeoutController = new AbortController();
-  const timeoutHandle = setTimeout(() => timeoutController.abort(), timeoutMs);
-
-  let response: Response;
-  try {
-    response = await fetch(upstream.spec.url, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({
-        jsonrpc: JSON_RPC_VERSION,
-        id,
-        method,
-        params
-      }),
-      signal: timeoutController.signal
-    });
-  } catch (error) {
-    const name = (error as { name?: string }).name;
-    if (name === "AbortError") {
-      throw new Error(`Upstream ${upstream.name} timed out after ${timeoutMs}ms for method ${method}.`);
-    }
-    throw error;
-  } finally {
-    clearTimeout(timeoutHandle);
-  }
-
-  if (!response.ok) {
-    const responseText = await response.text();
+    // HTTP-specific: retry once with a refreshed OAuth token on 401/403.
     if (
       !forceOAuthRefresh
-      && (response.status === 401 || response.status === 403)
-      && Object.values(upstream.spec.headers ?? {}).some((value) => isOAuthReference(value))
+      && hasOAuth
+      && error instanceof StreamableHTTPError
+      && (error.code === 401 || error.code === 403)
     ) {
-      return callHttpUpstreamOnce(upstream, method, params, id, secrets, passthroughAuthorizationHeader, true);
+      return callUpstreamOnce(upstream, method, params, secrets, runtime, passthroughAuthorizationHeader, true);
     }
 
-    throw new UpstreamHttpError(
-      upstream.name,
-      response.status,
-      responseText,
-      response.headers.get("www-authenticate") ?? undefined
-    );
-  }
-
-  let payload: JsonRpcResponse | null = null;
-  const contentType = response.headers.get("content-type") ?? "";
-
-  if (contentType.includes("application/json")) {
-    payload = JSON.parse(await response.text()) as JsonRpcResponse;
-  } else if (contentType.includes("text/event-stream")) {
-    payload = await readSseJsonRpcResponse(response, id);
-  } else {
-    try {
-      payload = JSON.parse(await response.text()) as JsonRpcResponse;
-    } catch {
-      payload = null;
-    }
-  }
-
-  if (!payload) {
-    throw new Error(`Upstream ${upstream.name} response could not be parsed as JSON-RPC payload.`);
-  }
-
-  if (payload.error) {
-    throw new Error(`Upstream ${upstream.name} error: ${payload.error.message}`);
-  }
-
-  return payload.result;
-}
-
-async function readSseJsonRpcResponse(response: Response, expectedId: string | number | null): Promise<JsonRpcResponse | null> {
-  if (!response.body) {
-    return null;
-  }
-
-  const decoder = new TextDecoder();
-  const reader = response.body.getReader();
-  let buffer = "";
-  let dataLines: string[] = [];
-  let latestPayload: JsonRpcResponse | null = null;
-
-  const consumeEvent = (): JsonRpcResponse | null => {
-    if (dataLines.length === 0) {
-      return null;
+    // Convert HTTP-level errors to UpstreamHttpError so auth-challenge detection works.
+    if (upstream.spec.transport === "http" && error instanceof StreamableHTTPError && error.code) {
+      const wwwAuthenticate = runtime.lastWwwAuthenticate?.get(upstream.name);
+      throw new UpstreamHttpError(upstream.name, error.code, error.message ?? "", wwwAuthenticate);
     }
 
-    const combined = dataLines.join("\n").trim();
-    dataLines = [];
-
-    if (!combined || combined === "[DONE]") {
-      return null;
-    }
-
-    try {
-      const parsed = JSON.parse(combined) as JsonRpcResponse;
-      latestPayload = parsed;
-
-      const parsedId = parsed.id ?? null;
-      if (parsedId === expectedId) {
-        return parsed;
-      }
-
-      return null;
-    } catch {
-      return null;
-    }
-  };
-
-  try {
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) {
-        break;
-      }
-
-      buffer += decoder.decode(value, { stream: true });
-
-      while (true) {
-        const newlineIndex = buffer.indexOf("\n");
-        if (newlineIndex < 0) {
-          break;
-        }
-
-        let line = buffer.slice(0, newlineIndex);
-        buffer = buffer.slice(newlineIndex + 1);
-
-        if (line.endsWith("\r")) {
-          line = line.slice(0, -1);
-        }
-
-        if (line.startsWith("data:")) {
-          dataLines.push(line.slice("data:".length).trimStart());
-          continue;
-        }
-
-        if (line === "") {
-          const matched = consumeEvent();
-          if (matched) {
-            return matched;
-          }
-        }
-      }
-    }
-
-    buffer += decoder.decode();
-    if (buffer.length > 0) {
-      let finalLine = buffer;
-      if (finalLine.endsWith("\r")) {
-        finalLine = finalLine.slice(0, -1);
-      }
-
-      if (finalLine.startsWith("data:")) {
-        dataLines.push(finalLine.slice("data:".length).trimStart());
-      }
-    }
-
-    return consumeEvent() ?? latestPayload;
-  } finally {
-    try {
-      await reader.cancel();
-    } catch {
-      // Ignore reader cancellation issues.
-    }
+    throw error;
   }
 }
 
@@ -1113,7 +966,7 @@ async function handleRequestObject(
   if (upstreamFilter && listUpstreams(config, upstreamFilter).length === 0) {
     return makeError(id, -32602, `Unknown upstream: ${upstreamFilter}`);
   }
-  await reconcileStdioConnections(config, runtime);
+  await reconcileUpstreamConnections(config, runtime);
 
   if (request.method === "custom/tokenCounts") {
     const result = await getUpstreamTokenCounts(config, secrets, runtime);
@@ -1253,7 +1106,7 @@ async function maybeHandleWellKnownOAuthRequest(
 export function createGatewayServer(options: GatewayServerOptions): http.Server {
   const debug = process.env.MCPX_GATEWAY_DEBUG === "1";
   const runtime: GatewayRuntimeState = {
-    stdioConnections: new Map(),
+    upstreamConnections: new Map(),
     upstreamErrors: new Map()
   };
 
@@ -1436,10 +1289,10 @@ export function createGatewayServer(options: GatewayServerOptions): http.Server 
   });
 
   server.on("close", () => {
-    for (const entry of runtime.stdioConnections.values()) {
-      void closeStdioConnection(entry);
+    for (const entry of runtime.upstreamConnections.values()) {
+      void closeUpstreamConnection(entry);
     }
-    runtime.stdioConnections.clear();
+    runtime.upstreamConnections.clear();
   });
 
   server.listen(options.port, "127.0.0.1");

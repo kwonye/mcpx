@@ -29,7 +29,17 @@ class MemorySecrets extends SecretsManager {
 
 async function startServer(handler: http.RequestListener): Promise<StartedServer> {
   return new Promise((resolve, reject) => {
-    const server = http.createServer(handler);
+    const server = http.createServer((req, res) => {
+      // The MCP SDK sends a GET request (Accept: text/event-stream) to probe for
+      // an SSE stream. Return 405 so it gives up gracefully (per spec, 405 means
+      // SSE not supported). Don't intercept other GET requests (e.g. .well-known/).
+      if (req.method === "GET" && req.headers.accept?.includes("text/event-stream")) {
+        res.statusCode = 405;
+        res.end();
+        return;
+      }
+      handler(req, res);
+    });
     server.once("error", reject);
     server.listen(0, "127.0.0.1", () => {
       const address = server.address();
@@ -60,6 +70,21 @@ async function waitForListening(server: http.Server): Promise<void> {
   });
 }
 
+function respondWithInit(res: http.ServerResponse, id: string | number | null): void {
+  res.setHeader("content-type", "application/json");
+  res.end(
+    JSON.stringify({
+      jsonrpc: "2.0",
+      id,
+      result: {
+        protocolVersion: "2024-11-05",
+        capabilities: {},
+        serverInfo: { name: "test-upstream", version: "1.0.0" }
+      }
+    })
+  );
+}
+
 describe("gateway passthrough", () => {
   const cleanups: Array<() => Promise<void> | void> = [];
 
@@ -83,15 +108,20 @@ describe("gateway passthrough", () => {
       }
 
       const payload = JSON.parse(Buffer.concat(chunks).toString("utf8")) as { method: string; id: string | number | null };
+      if (payload.method === "initialize") {
+        respondWithInit(res, payload.id);
+        return;
+      }
+
       if (payload.method === "tools/list") {
         res.setHeader("content-type", "application/json");
-        res.end(JSON.stringify({ jsonrpc: "2.0", id: payload.id, result: { tools: [{ name: "echo", description: "Echo" }] } }));
+        res.end(JSON.stringify({ jsonrpc: "2.0", id: payload.id, result: { tools: [{ name: "echo", description: "Echo", inputSchema: { type: "object" } }] } }));
         return;
       }
 
       if (payload.method === "tools/call") {
         res.setHeader("content-type", "application/json");
-        res.end(JSON.stringify({ jsonrpc: "2.0", id: payload.id, result: { ok: true } }));
+        res.end(JSON.stringify({ jsonrpc: "2.0", id: payload.id, result: { content: [{ type: "text", text: "ok" }] } }));
         return;
       }
 
@@ -159,9 +189,14 @@ describe("gateway passthrough", () => {
       }
 
       const payload = JSON.parse(Buffer.concat(chunks).toString("utf8")) as { method: string; id: string | number | null };
+      if (payload.method === "initialize") {
+        respondWithInit(res, payload.id);
+        return;
+      }
+
       if (payload.method === "tools/list") {
         res.setHeader("content-type", "application/json");
-        res.end(JSON.stringify({ jsonrpc: "2.0", id: payload.id, result: { tools: [{ name: "echo", description: "Echo" }] } }));
+        res.end(JSON.stringify({ jsonrpc: "2.0", id: payload.id, result: { tools: [{ name: "echo", description: "Echo", inputSchema: { type: "object" } }] } }));
         return;
       }
 
@@ -222,7 +257,7 @@ describe("gateway passthrough", () => {
       const payload = JSON.parse(Buffer.concat(chunks).toString("utf8")) as { method: string; id: string | number | null };
       if (payload.method === "tools/list") {
         res.setHeader("content-type", "application/json");
-        res.end(JSON.stringify({ jsonrpc: "2.0", id: payload.id, result: { tools: [{ name: "echo", description: "Echo" }] } }));
+        res.end(JSON.stringify({ jsonrpc: "2.0", id: payload.id, result: { tools: [{ name: "echo", description: "Echo", inputSchema: { type: "object" } }] } }));
         return;
       }
 
@@ -448,9 +483,14 @@ describe("gateway passthrough", () => {
         chunks.push(Buffer.from(chunk));
       }
 
-      const payload = JSON.parse(Buffer.concat(chunks).toString("utf8")) as { id: string | number | null };
+      const payload = JSON.parse(Buffer.concat(chunks).toString("utf8")) as { method: string; id: string | number | null };
+      if (payload.method === "initialize") {
+        respondWithInit(res, payload.id);
+        return;
+      }
+
       res.setHeader("content-type", "application/json");
-      res.end(JSON.stringify({ jsonrpc: "2.0", id: payload.id, result: { tools: [{ name: "echo" }] } }));
+      res.end(JSON.stringify({ jsonrpc: "2.0", id: payload.id, result: { tools: [{ name: "echo", inputSchema: { type: "object" } }] } }));
     });
     cleanups.push(() => closeServer(upstream.server));
 
@@ -511,9 +551,14 @@ describe("gateway passthrough", () => {
       }
       const payload = JSON.parse(Buffer.concat(chunks).toString("utf8")) as { method: string; id: string | number | null };
 
+      if (payload.method === "initialize") {
+        respondWithInit(res, payload.id);
+        return;
+      }
+
       if (payload.method === "tools/list") {
         res.setHeader("content-type", "application/json");
-        res.end(JSON.stringify({ jsonrpc: "2.0", id: payload.id, result: { tools: [{ name: "echo" }] } }));
+        res.end(JSON.stringify({ jsonrpc: "2.0", id: payload.id, result: { tools: [{ name: "echo", inputSchema: { type: "object" } }] } }));
         return;
       }
 
@@ -645,12 +690,20 @@ describe("gateway passthrough", () => {
         method: string;
         params?: { name?: string };
       };
+      if (payload.method === "initialize") {
+        respondWithInit(res, payload.id);
+        return;
+      }
+
       if (payload.method === "tools/call") {
         upstreamToolName = payload.params?.name ?? "";
+        res.setHeader("content-type", "application/json");
+        res.end(JSON.stringify({ jsonrpc: "2.0", id: payload.id, result: { content: [{ type: "text", text: "ok" }] } }));
+        return;
       }
 
       res.setHeader("content-type", "application/json");
-      res.end(JSON.stringify({ jsonrpc: "2.0", id: payload.id, result: { ok: true } }));
+      res.end(JSON.stringify({ jsonrpc: "2.0", id: payload.id, result: {} }));
     });
     cleanups.push(() => closeServer(upstream.server));
 
@@ -690,8 +743,7 @@ describe("gateway passthrough", () => {
       })
     });
 
-    const payload = (await response.json()) as { result: { ok: boolean } };
-    expect(payload.result.ok).toBe(true);
+    expect(response.status).toBe(200);
     expect(upstreamToolName).toBe("explain_vercel_concept");
   });
 
@@ -798,9 +850,14 @@ describe("gateway passthrough", () => {
       }
 
       const payload = JSON.parse(Buffer.concat(chunks).toString("utf8")) as { method: string; id: string | number | null };
+      if (payload.method === "initialize") {
+        respondWithInit(res, payload.id);
+        return;
+      }
+
       if (payload.method === "tools/list") {
         res.setHeader("content-type", "application/json");
-        res.end(JSON.stringify({ jsonrpc: "2.0", id: payload.id, result: { tools: [{ name: "echo", description: "Echo" }] } }));
+        res.end(JSON.stringify({ jsonrpc: "2.0", id: payload.id, result: { tools: [{ name: "echo", description: "Echo", inputSchema: { type: "object" } }] } }));
         return;
       }
 
@@ -882,9 +939,21 @@ describe("gateway passthrough", () => {
         return;
       }
 
+      if (payload.method === "initialize") {
+        respondWithInit(res, payload.id);
+        return;
+      }
+
+      if (!payload.id) {
+        // notification (e.g. notifications/initialized) — no response needed
+        res.statusCode = 202;
+        res.end();
+        return;
+      }
+
       expect(payload.method).toBe("tools/list");
       res.setHeader("content-type", "application/json");
-      res.end(JSON.stringify({ jsonrpc: "2.0", id: payload.id, result: { tools: [{ name: "echo" }] } }));
+      res.end(JSON.stringify({ jsonrpc: "2.0", id: payload.id, result: { tools: [{ name: "echo", inputSchema: { type: "object" } }] } }));
     });
     cleanups.push(() => closeServer(upstream.server));
 
@@ -944,7 +1013,7 @@ describe("gateway passthrough", () => {
 
     expect(response.status).toBe(200);
     const payload = (await response.json()) as { result: { tools: Array<{ name: string }> } };
-    expect(payload.result.tools).toEqual([{ name: "echo" }]);
+    expect(payload.result.tools.map((t: { name: string }) => t.name)).toEqual(["echo"]);
     expect(tokenRequests).toBe(1);
     expect(JSON.parse(secrets.getSecret("oauth_vercel_tokens") ?? "{}").tokens.access_token).toBe("new-token");
   });
