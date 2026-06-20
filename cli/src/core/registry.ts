@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { normalizeServerSpecEnabled, type McpxConfig, type UpstreamServerSpec } from "../types.js";
+import { isServerEnabled, normalizeServerSpecEnabled, type McpxConfig, type UpstreamServerSpec } from "../types.js";
 import { SecretsManager } from "./secrets.js";
 import { getGatewayTokenPath, ensureParentDir } from "./paths.js";
 
@@ -104,16 +104,50 @@ export function registerProject(globalConfig: McpxConfig, projectPath: string, n
   if (!globalConfig.projects) {
     globalConfig.projects = {};
   }
-  
-  const projectName = name?.trim() || path.basename(projectPath);
-  globalConfig.projects[projectPath] = {
+
+  const resolvedPath = path.resolve(projectPath);
+  const projectName = name?.trim() || path.basename(resolvedPath);
+  const existing = globalConfig.projects[resolvedPath];
+  globalConfig.projects[resolvedPath] = {
     name: projectName,
-    path: projectPath
+    path: resolvedPath,
+    disabledServers: existing?.disabledServers ?? []
   };
 }
 
 export function unregisterProject(globalConfig: McpxConfig, projectPath: string): void {
   if (globalConfig.projects) {
-    delete globalConfig.projects[projectPath];
+    delete globalConfig.projects[path.resolve(projectPath)];
+  }
+}
+
+export function setProjectServerEnabled(
+  globalConfig: McpxConfig,
+  projectPath: string,
+  serverName: string,
+  enabled: boolean
+): void {
+  if (!globalConfig.projects) globalConfig.projects = {};
+  const resolvedPath = path.resolve(projectPath);
+  const project = globalConfig.projects[resolvedPath];
+  if (!project) {
+    throw new Error(`Project "${resolvedPath}" is not registered.`);
+  }
+
+  if (!project.disabledServers) {
+    project.disabledServers = [];
+  }
+
+  if (enabled) {
+    project.disabledServers = project.disabledServers.filter((s) => s !== serverName);
+    // Vice-versa rule: if the server is globally disabled, flip it ON too
+    const serverSpec = globalConfig.servers[serverName];
+    if (serverSpec && !isServerEnabled(serverSpec)) {
+      globalConfig.servers[serverName] = { ...serverSpec, enabled: true };
+    }
+  } else {
+    if (!project.disabledServers.includes(serverName)) {
+      project.disabledServers.push(serverName);
+    }
   }
 }

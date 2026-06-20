@@ -2,10 +2,12 @@ import type {
   ClientId,
   ManagedGatewayEntry,
   McpxConfig,
+  ProjectScope,
   SyncImportReport,
   SyncResult
 } from "../types.js";
 import { isServerEnabled } from "../types.js";
+import { managedGatewayEntryName } from "../adapters/utils/index.js";
 import { getAdapters } from "../adapters/index.js";
 import { serverSpecsEqual } from "../adapters/utils/index.js";
 import { loadManagedIndex, saveManagedIndex } from "./managed-index.js";
@@ -24,6 +26,22 @@ export interface SyncSummary {
 
 export function getGatewayUrl(config: McpxConfig): string {
   return `http://127.0.0.1:${config.gateway.port}/mcp`;
+}
+
+function buildProjectScopes(config: McpxConfig): ProjectScope[] {
+  const globallyEnabled = new Set(
+    Object.entries(config.servers)
+      .filter(([, spec]) => isServerEnabled(spec))
+      .map(([name]) => name)
+  );
+  return Object.values(config.projects ?? {}).map((project) => {
+    const disabledServerNames = (project.disabledServers ?? [])
+      // Only servers that are globally enabled can be effectively subtracted per project;
+      // globally disabled ones aren't in root mcpServers anyway.
+      .filter((name) => globallyEnabled.has(name))
+      .map((name) => managedGatewayEntryName(name));
+    return { path: project.path, disabledServerNames };
+  });
 }
 
 function buildManagedEntries(config: McpxConfig, gatewayUrl: string, localToken: string): ManagedGatewayEntry[] {
@@ -151,7 +169,8 @@ export function syncAllClients(config: McpxConfig, secrets: SecretsManager, targ
       managedEntries,
       managedIndex,
       managedIndexPath,
-      sourceEntriesToRemove: Array.from(sourceEntriesToRemove.get(adapter.id) ?? [])
+      sourceEntriesToRemove: Array.from(sourceEntriesToRemove.get(adapter.id) ?? []),
+      projectScopes: buildProjectScopes(config)
     });
 
     results.push(result);

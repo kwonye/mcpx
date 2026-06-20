@@ -35,6 +35,8 @@ const api = {
   },
   projectInit: (projectPath: string, name: string) => ipcRenderer.invoke(IPC.PROJECT_INIT, projectPath, name),
   projectRemove: (projectPath: string) => ipcRenderer.invoke(IPC.PROJECT_REMOVE, projectPath),
+  setProjectServerEnabled: (projectPath: string, serverName: string, enabled: boolean) =>
+    ipcRenderer.invoke(IPC.PROJECT_SET_SERVER_ENABLED, projectPath, serverName, enabled),
   selectDirectory: () => ipcRenderer.invoke(IPC.SELECT_DIRECTORY) as Promise<string | null>,
   invoke: (channel: string, ...args: unknown[]) => ipcRenderer.invoke(channel, ...args)
 };

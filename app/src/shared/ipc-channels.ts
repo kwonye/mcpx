@@ -30,5 +30,6 @@ export const IPC = {
   // Projects
   PROJECT_INIT: "mcpx:project-init",
   PROJECT_REMOVE: "mcpx:project-remove",
+  PROJECT_SET_SERVER_ENABLED: "mcpx:project-set-server-enabled",
   SELECT_DIRECTORY: "mcpx:select-directory"
 } as const;

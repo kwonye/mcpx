@@ -1158,37 +1158,30 @@ function registerAddCommand(parent: Command, cliPath: string): void {
           }
         }
 
-        let resolvedServerName = shortName;
         if (context.type === "project") {
           const globalConfig = loadConfig();
-          registerProject(globalConfig, context.projectPath!, context.config.name);
+          registerProject(globalConfig, context.projectPath!);
           saveConfig(globalConfig);
-
-          const projectName = context.config.name || path.basename(context.projectPath!);
-          resolvedServerName = `${projectName}.${shortName}`;
         }
 
         addServer(context.config, shortName, spec, options.force ?? false);
+        await maybeAutoConfigureAuthForAddedServer(shortName, spec, secrets);
         context.save();
-        process.stdout.write(`Added server: ${shortName} (${spec.transport}) from registry "${registryName}" ${context.type === "project" ? `to project: ${context.projectPath}` : "globally"}\n`);
+        process.stdout.write(`Added server: ${shortName} (${spec.transport}) from registry "${registryName}"${context.type === "project" ? ` (project: ${context.projectPath})` : ""}\n`);
       } else {
         const parsed = parseAddServerSpec(safeValues, options);
 
-        let resolvedServerName = parsed.name;
         if (context.type === "project") {
           const globalConfig = loadConfig();
-          registerProject(globalConfig, context.projectPath!, context.config.name);
+          registerProject(globalConfig, context.projectPath!);
           saveConfig(globalConfig);
-
-          const projectName = context.config.name || path.basename(context.projectPath!);
-          resolvedServerName = `${projectName}.${parsed.name}`;
         }
 
         addServer(context.config, parsed.name, parsed.spec, options.force ?? false);
-        await maybeAutoConfigureAuthForAddedServer(resolvedServerName, parsed.spec, secrets);
+        await maybeAutoConfigureAuthForAddedServer(parsed.name, parsed.spec, secrets);
         context.save();
 
-        process.stdout.write(`Added server: ${parsed.name} (${parsed.spec.transport}) ${context.type === "project" ? `to project: ${context.projectPath}` : "globally"}\n`);
+        process.stdout.write(`Added server: ${parsed.name} (${parsed.spec.transport})${context.type === "project" ? ` (project: ${context.projectPath})` : ""}\n`);
       }
 
       process.stdout.write("Auto-syncing managed gateway entries across all supported clients...\n");

@@ -36,6 +36,12 @@ export interface ClientSyncState {
 export interface ProjectConfig {
   name: string;
   path: string;
+  disabledServers?: string[];
+}
+
+export interface ProjectScope {
+  path: string;
+  disabledServerNames: string[]; // already in "<server> (mcpx)" form
 }
 
 export interface McpxConfig {
@@ -147,6 +153,7 @@ export interface SyncClientOptions {
   managedIndex: ManagedIndex;
   managedIndexPath: string;
   sourceEntriesToRemove?: string[];
+  projectScopes?: ProjectScope[];
 }
 
 export interface ManagedGatewayEntry {

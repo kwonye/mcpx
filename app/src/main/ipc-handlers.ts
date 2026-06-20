@@ -5,10 +5,9 @@ import {
   loadConfig,
   saveConfig,
   loadMergedConfig,
-  loadProjectConfig,
-  saveProjectConfig,
   registerProject,
   unregisterProject,
+  setProjectServerEnabled,
   getDaemonStatus,
   startDaemon,
   stopDaemon,
@@ -219,75 +218,33 @@ export function registerIpcHandlers(): void {
   });
 
   ipcMain.handle(IPC.REMOVE_SERVER, (_event, name: string) => {
-    if (name.includes(".")) {
-      const parts = name.split(".");
-      const projectName = parts[0];
-      const baseServerName = parts.slice(1).join(".");
-      
-      const globalConfigForProjects = loadConfig();
-      if (globalConfigForProjects.projects) {
-        const projectEntry = Object.values(globalConfigForProjects.projects).find(p => p.name === projectName);
-        if (projectEntry) {
-          const localPath = path.join(projectEntry.path, ".mcpx.json");
-          if (fs.existsSync(localPath)) {
-            const projectConfig = loadProjectConfig(localPath);
-            if (projectConfig.servers[baseServerName]) {
-              removeServer(projectConfig as any, baseServerName, false);
-              saveProjectConfig(projectConfig, localPath);
-              const merged = loadMergedConfig();
-              const secrets = new SecretsManager();
-              const summary = syncAllClients(merged, secrets);
-              queueTokenCountRefresh();
-              return { removed: name, sync: summary };
-            }
-          }
-        }
-      }
-    }
-
     const config = loadConfig();
     removeServer(config, name, false);
     saveConfig(config);
     const secrets = new SecretsManager();
-    const summary = syncAllClients(config, secrets);
+    const summary = syncAllClients(loadMergedConfig(), secrets);
     queueTokenCountRefresh();
     return { removed: name, sync: summary };
   });
 
   ipcMain.handle(IPC.SET_SERVER_ENABLED, (_event, name: string, enabled: boolean) => {
-    if (name.includes(".")) {
-      const parts = name.split(".");
-      const projectName = parts[0];
-      const baseServerName = parts.slice(1).join(".");
-      
-      const globalConfigForProjects = loadConfig();
-      if (globalConfigForProjects.projects) {
-        const projectEntry = Object.values(globalConfigForProjects.projects).find(p => p.name === projectName);
-        if (projectEntry) {
-          const localPath = path.join(projectEntry.path, ".mcpx.json");
-          if (fs.existsSync(localPath)) {
-            const projectConfig = loadProjectConfig(localPath);
-            if (projectConfig.servers[baseServerName]) {
-              setServerEnabled(projectConfig as any, baseServerName, enabled);
-              saveProjectConfig(projectConfig, localPath);
-              const merged = loadMergedConfig();
-              const secrets = new SecretsManager();
-              const summary = syncAllClients(merged, secrets);
-              queueTokenCountRefresh();
-              return { updated: name, enabled, sync: summary };
-            }
-          }
-        }
-      }
-    }
-
     const config = loadConfig();
     setServerEnabled(config, name, enabled);
     saveConfig(config);
     const secrets = new SecretsManager();
-    const summary = syncAllClients(config, secrets);
+    const summary = syncAllClients(loadMergedConfig(), secrets);
     queueTokenCountRefresh();
     return { updated: name, enabled, sync: summary };
+  });
+
+  ipcMain.handle(IPC.PROJECT_SET_SERVER_ENABLED, (_event, projectPath: string, serverName: string, enabled: boolean) => {
+    const config = loadConfig();
+    setProjectServerEnabled(config, projectPath, serverName, enabled);
+    saveConfig(config);
+    const secrets = new SecretsManager();
+    const summary = syncAllClients(loadMergedConfig(), secrets);
+    queueTokenCountRefresh();
+    return { updated: serverName, projectPath, enabled, sync: summary };
   });
 
   ipcMain.handle(IPC.UPDATE_SERVER, (_event, name: string, spec: UpstreamServerSpec, resolvedSecrets?: Record<string, string>) => {
@@ -330,35 +287,10 @@ export function registerIpcHandlers(): void {
       }
     }
     
-    if (name.includes(".")) {
-      const parts = name.split(".");
-      const projectName = parts[0];
-      const baseServerName = parts.slice(1).join(".");
-      
-      const globalConfigForProjects = loadConfig();
-      if (globalConfigForProjects.projects) {
-        const projectEntry = Object.values(globalConfigForProjects.projects).find(p => p.name === projectName);
-        if (projectEntry) {
-          const localPath = path.join(projectEntry.path, ".mcpx.json");
-          if (fs.existsSync(localPath)) {
-            const projectConfig = loadProjectConfig(localPath);
-            if (projectConfig.servers[baseServerName]) {
-              updateServer(projectConfig as any, baseServerName, spec);
-              saveProjectConfig(projectConfig, localPath);
-              const merged = loadMergedConfig();
-              const summary = syncAllClients(merged, secrets);
-              queueTokenCountRefresh();
-              return { updated: name, sync: summary };
-            }
-          }
-        }
-      }
-    }
-
     const config = loadConfig();
     updateServer(config, name, spec);
     saveConfig(config);
-    const summary = syncAllClients(config, secrets);
+    const summary = syncAllClients(loadMergedConfig(), secrets);
     queueTokenCountRefresh();
     return { updated: name, sync: summary };
   });
@@ -372,17 +304,12 @@ export function registerIpcHandlers(): void {
   });
 
   ipcMain.handle(IPC.PROJECT_INIT, (_event, projectPath: string, name: string) => {
-    const localConfig = { name, servers: {} };
-    const targetPath = path.join(projectPath, ".mcpx.json");
-    saveProjectConfig(localConfig, targetPath);
-    
     const globalConfig = loadConfig();
     registerProject(globalConfig, projectPath, name);
     saveConfig(globalConfig);
-    
-    const mergedConfig = loadMergedConfig();
+
     const secrets = new SecretsManager();
-    const summary = syncAllClients(mergedConfig, secrets);
+    const summary = syncAllClients(loadMergedConfig(), secrets);
     queueTokenCountRefresh();
     return { success: true, sync: summary };
   });

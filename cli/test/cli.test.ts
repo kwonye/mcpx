@@ -71,7 +71,7 @@ describe("cli project-based configurations", () => {
     }
   });
 
-  it("initializes project, adds, lists and removes servers scoped to project", async () => {
+  it("initializes a project and adds/removes servers from the global catalog", async () => {
     const env = setupTempEnv("mcpx-cli-project-");
     cleanups.push(env.restore);
     const originalSkipAutostart = process.env.MCPX_SKIP_DAEMON_AUTOSTART;
@@ -90,36 +90,28 @@ describe("cli project-based configurations", () => {
 
     try {
       // 1. Run "mcpx project init my-cool-project"
+      // The CLI still writes a .mcpx.json marker for backward compat, but servers go to global catalog.
       await runCli(["node", "mcpx", "project", "init", "my-cool-project"]);
 
-      const localConfigPath = path.join(projectPath, ".mcpx.json");
-      expect(fs.existsSync(localConfigPath)).toBe(true);
-
-      const localConfig = JSON.parse(fs.readFileSync(localConfigPath, "utf8"));
-      expect(localConfig.name).toBe("my-cool-project");
-      expect(localConfig.servers).toEqual({});
-
-      // Verify it was registered globally
+      // Project is registered globally
       const globalConfig = loadConfig();
       expect(globalConfig.projects[projectPath]).toMatchObject({
         name: "my-cool-project",
         path: projectPath
       });
 
-      // 2. Add an MCP server to the project locally
-      // We run `mcpx add local-sqlite --transport stdio sqlite3 data.db`
-      // Wait, process.cwd() points to projectPath so it should auto-detect and write to .mcpx.json
+      // 2. Add an MCP server — in the new unified-catalog model, this goes to the global catalog
       await runCli(["node", "mcpx", "add", "local-sqlite", "--transport", "stdio", "sqlite3", "data.db"]);
 
-      const localConfigAfterAdd = JSON.parse(fs.readFileSync(localConfigPath, "utf8"));
-      expect(localConfigAfterAdd.servers["local-sqlite"]).toMatchObject({
+      const globalConfigAfterAdd = loadConfig();
+      expect(globalConfigAfterAdd.servers["local-sqlite"]).toMatchObject({
         transport: "stdio",
         command: "sqlite3",
         args: ["data.db"],
         enabled: true
       });
 
-      // 3. List the servers - should show merged servers with correct scopes
+      // 3. List the servers — server appears in global catalog
       let listOutput = "";
       const originalStdoutWrite = process.stdout.write;
       process.stdout.write = (chunk: any) => {
@@ -131,9 +123,7 @@ describe("cli project-based configurations", () => {
       } finally {
         process.stdout.write = originalStdoutWrite;
       }
-
       expect(listOutput).toContain("local-sqlite");
-      expect(listOutput).toContain("project: my-cool-project");
 
       // 4. List registered projects
       let projectListOutput = "";
@@ -146,14 +136,13 @@ describe("cli project-based configurations", () => {
       } finally {
         process.stdout.write = originalStdoutWrite;
       }
-
       expect(projectListOutput).toContain("my-cool-project");
       expect(projectListOutput).toContain(projectPath);
 
-      // 5. Remove the server from project
+      // 5. Remove the server — removes from global catalog
       await runCli(["node", "mcpx", "remove", "local-sqlite"]);
-      const localConfigAfterRemove = JSON.parse(fs.readFileSync(localConfigPath, "utf8"));
-      expect(localConfigAfterRemove.servers["local-sqlite"]).toBeUndefined();
+      const globalConfigAfterRemove = loadConfig();
+      expect(globalConfigAfterRemove.servers["local-sqlite"]).toBeUndefined();
 
       // 6. Unregister the project globally
       await runCli(["node", "mcpx", "project", "remove", projectPath]);

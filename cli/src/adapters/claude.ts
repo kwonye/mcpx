@@ -1,4 +1,5 @@
 import os from "node:os";
+import fs from "node:fs";
 import { homeDir } from "../core/paths.js";
 import path from "node:path";
 import { z } from "zod";
@@ -18,6 +19,29 @@ import {
 } from "./utils/index.js";
 
 type JsonObject = Record<string, unknown>;
+
+function normalizeProjectKey(p: string): string {
+  try {
+    return fs.realpathSync(path.resolve(p));
+  } catch {
+    return path.resolve(p);
+  }
+}
+
+function syncProjectDisabledArray(
+  project: JsonObject,
+  managedNames: string[],
+  disabledForThisProject: string[]
+): void {
+  const existingNonManaged = ((project.disabledMcpServers as string[] | undefined) ?? [])
+    .filter((name) => !managedNames.includes(name));
+  const combined = [...existingNonManaged, ...disabledForThisProject];
+  if (combined.length > 0) {
+    project.disabledMcpServers = combined;
+  } else {
+    delete project.disabledMcpServers;
+  }
+}
 const stringMapSchema = z.record(z.string(), z.string());
 const claudeEntrySchema = z.object({
   type: z.string().optional(),
@@ -154,11 +178,34 @@ export class ClaudeAdapter implements ClientAdapter {
 
       syncDisabledMcpServersArray(raw, managedNames, options.managedEntries);
 
+      // Per-directory scoping: reconcile each Claude project entry against registered
+      // mcpx project scopes. Unregistered project entries get their managed disabled
+      // names stripped (stop the old global-mirroring behavior).
+      const scopeByNormalizedPath = new Map<string, string[]>();
+      for (const scope of (options.projectScopes ?? [])) {
+        scopeByNormalizedPath.set(normalizeProjectKey(scope.path), scope.disabledServerNames);
+      }
+
       const projects = (raw.projects as Record<string, JsonObject> | undefined) ?? {};
+
+      // Reconcile every existing Claude project entry
       for (const projectPath of Object.keys(projects)) {
         const project = projects[projectPath] ?? {};
-        syncDisabledMcpServersArray(project, managedNames, options.managedEntries);
+        const disabledForThis = scopeByNormalizedPath.get(normalizeProjectKey(projectPath)) ?? [];
+        syncProjectDisabledArray(project, managedNames, disabledForThis);
         projects[projectPath] = project;
+      }
+
+      // Create entries for registered scopes that Claude hasn't seen yet (only when non-empty)
+      for (const scope of (options.projectScopes ?? [])) {
+        if (scope.disabledServerNames.length === 0) continue;
+        const normalizedKey = normalizeProjectKey(scope.path);
+        const alreadyExists = Object.keys(projects).some(
+          (p) => normalizeProjectKey(p) === normalizedKey
+        );
+        if (!alreadyExists) {
+          projects[scope.path] = { disabledMcpServers: [...scope.disabledServerNames] };
+        }
       }
       raw.projects = projects;
 

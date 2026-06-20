@@ -15,6 +15,7 @@ interface ServerEntry {
 interface ProjectEntry {
   name: string;
   path: string;
+  disabledServers?: string[];
 }
 
 interface ProjectsTabProps {
@@ -91,7 +92,7 @@ export function ProjectsTab({ status, onRefresh, selectedProjectPath, onSelected
 
   // Handle removing/unregistering a project
   const handleRemoveProject = async (projectPath: string, name: string) => {
-    if (!confirm(`Are you sure you want to unregister project "${name}"?\nThis won't delete the local .mcpx.json file, but it will remove it from mcpx.`)) {
+    if (!confirm(`Are you sure you want to unregister project "${name}"?\nThis won't delete any files, but it will remove it from mcpx.`)) {
       return;
     }
 
@@ -113,15 +114,14 @@ export function ProjectsTab({ status, onRefresh, selectedProjectPath, onSelected
     }
   };
 
-  const projectServers = selectedProject
-    ? status.servers.filter((server) => {
-        return server.name.startsWith(`${selectedProject.name}.`);
-      })
-    : [];
+  // For the selected project, effective enabled = globally enabled AND not in project's disabledServers
+  const disabledServers = new Set(selectedProject?.disabledServers ?? []);
+  const catalogServers = status.servers;
 
-  const handleToggleServer = async (fullName: string, currentEnabled: boolean) => {
+  const handleToggleServer = async (serverName: string, effectiveEnabled: boolean) => {
+    if (!selectedProject) return;
     try {
-      await window.mcpx.setServerEnabled(fullName, !currentEnabled);
+      await window.mcpx.setProjectServerEnabled(selectedProject.path, serverName, !effectiveEnabled);
       onRefresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to toggle server state");
@@ -144,7 +144,7 @@ export function ProjectsTab({ status, onRefresh, selectedProjectPath, onSelected
                 </div>
                 <div className="project-detail-actions">
                   {typeof status.totalProjectTokens?.[selectedProject.path] === "number" && (
-                    <div className="token-badge-total" title="Context window tokens consumed by project-specific enabled MCP servers">
+                    <div className="token-badge-total" title="Context window tokens consumed by enabled MCP servers in this project">
                       <span className="material-symbols-outlined font-icon-sm">analytics</span>
                       <span>{formatTokenApprox(status.totalProjectTokens[selectedProject.path])} Project Tokens Active</span>
                     </div>
@@ -167,38 +167,44 @@ export function ProjectsTab({ status, onRefresh, selectedProjectPath, onSelected
               )}
 
               <div className="project-mcp-section">
-                <h3>Project-Specific MCP Servers</h3>
+                <h3>MCP Servers</h3>
                 <p className="section-description">
-                  These servers are declared in the project's local `.mcpx.json` config.
+                  These are your global MCP servers. Toggle each one on or off for this project specifically.
+                  Disabling a server here only affects this project — it stays on globally for other directories.
                 </p>
 
-                {projectServers.length === 0 ? (
+                {catalogServers.length === 0 ? (
                   <div className="empty-mcp-placeholder">
                     <span className="material-symbols-outlined">info</span>
-                    <p>No project-specific servers configured yet.</p>
+                    <p>No MCP servers configured yet.</p>
                     <p className="hint">
-                      Add servers locally by running: <br />
-                      <code className="inline-code">mcpx add &lt;name&gt; &lt;command&gt;</code> inside this directory.
+                      Add servers from the Servers tab.
                     </p>
                   </div>
                 ) : (
                   <div className="project-mcp-list">
-                    {projectServers.map((server) => {
-                      const baseName = server.name.slice(selectedProject.name.length + 1);
+                    {catalogServers.map((server) => {
+                      const effectiveEnabled = server.enabled && !disabledServers.has(server.name);
+                      const globallyDisabled = !server.enabled;
                       return (
                         <div key={server.name} className="project-mcp-row">
                           <div className="project-mcp-info">
                             <div className="project-mcp-name-row">
-                              <span className="mcp-name">{baseName}</span>
+                              <span className="mcp-name">{server.name}</span>
                               <span className="mcp-transport-badge">{server.transport}</span>
-                              {server.enabled && server.tokenCount && server.tokenCount.total > 0 && (
+                              {effectiveEnabled && server.tokenCount && server.tokenCount.total > 0 && (
                                 <span className="token-badge" title={`${server.tokenCount.tools} tools, ${server.tokenCount.resources} resources, ${server.tokenCount.prompts} prompts`}>
                                   {formatTokenApprox(server.tokenCount.total)} tokens
                                 </span>
                               )}
-                              {server.enabled && server.tokenCount?.error && (
+                              {effectiveEnabled && server.tokenCount?.error && (
                                 <span className="token-badge token-badge--error" title={server.tokenCount.error}>
                                   token error
+                                </span>
+                              )}
+                              {globallyDisabled && (
+                                <span className="mcp-transport-badge" title="Globally disabled — enabling here will turn it on globally">
+                                  globally off
                                 </span>
                               )}
                             </div>
@@ -206,16 +212,16 @@ export function ProjectsTab({ status, onRefresh, selectedProjectPath, onSelected
                               {server.target}
                             </span>
                           </div>
-                          
+
                           <div className="project-mcp-controls">
                             <div className="toggle-container">
                               <span className="toggle-status-label">
-                                {server.enabled ? "Enabled" : "Disabled"}
+                                {effectiveEnabled ? "Enabled" : "Disabled"}
                               </span>
                               <Toggle
                                   id={`toggle-${server.name}`}
-                                  checked={server.enabled}
-                                  onChange={() => handleToggleServer(server.name, server.enabled)}
+                                  checked={effectiveEnabled}
+                                  onChange={() => handleToggleServer(server.name, effectiveEnabled)}
                               />
                             </div>
                           </div>
@@ -230,7 +236,7 @@ export function ProjectsTab({ status, onRefresh, selectedProjectPath, onSelected
             <div className="project-detail-empty">
               <span className="material-symbols-outlined empty-icon">folder_zip</span>
               <h3>{projects.length > 0 ? "Select a Project" : "No Projects Registered"}</h3>
-              <p>{projects.length > 0 ? "Choose a project from the sidebar to manage its directory-specific MCP context." : "Register a folder to start using project-local MCP servers."}</p>
+              <p>{projects.length > 0 ? "Choose a project from the sidebar to manage its MCP server visibility." : "Register a folder to customize which MCP servers are active in that directory."}</p>
               <form onSubmit={handleAddProject} className="project-form project-form--empty">
                 <div className="directory-picker-row">
                   <input

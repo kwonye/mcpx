@@ -130,7 +130,7 @@ describe("project config and merging", () => {
     }
   });
 
-  it("loads and merges project-scoped configs", () => {
+  it("folds legacy .mcpx.json servers into the global catalog on load", () => {
     const env = setupTempEnv("mcpx-config-merged-");
     cleanups.push(env.restore);
 
@@ -141,7 +141,7 @@ describe("project config and merging", () => {
     const projectPath = path.join(env.root, "my-demo-project");
     fs.mkdirSync(projectPath, { recursive: true });
 
-    // 1. Write global config registering the project
+    // 1. Write global config registering the project (project starts with disabledServers=[])
     fs.writeFileSync(configPath, JSON.stringify({
       schemaVersion: 1,
       gateway: { port: 37373, tokenRef: "secret://local_gateway_token", autoStart: true },
@@ -155,12 +155,13 @@ describe("project config and merging", () => {
       projects: {
         [projectPath]: {
           name: "my-demo-project",
-          path: projectPath
+          path: projectPath,
+          disabledServers: []
         }
       }
     }, null, 2));
 
-    // 2. Write project local .mcpx.json config
+    // 2. Write legacy project local .mcpx.json (migration source)
     const localConfigPath = path.join(projectPath, ".mcpx.json");
     fs.writeFileSync(localConfigPath, JSON.stringify({
       name: "custom-project-name",
@@ -177,21 +178,30 @@ describe("project config and merging", () => {
     const { loadMergedConfig } = require("../src/core/config.js");
     const merged = loadMergedConfig();
 
-    // Verify global server is present
+    // Global server still present
     expect(merged.servers.globalServer).toMatchObject({
       transport: "http",
       url: "https://global.com",
       enabled: true
     });
 
-    // Verify project server is namespaced and has CWD defaulted to projectPath
-    expect(merged.servers["custom-project-name.projectServer"]).toMatchObject({
+    // Legacy project server is now folded into the global catalog under its plain name
+    // (no namespace prefix), with cwd defaulted to the project path
+    expect(merged.servers["projectServer"]).toMatchObject({
       transport: "stdio",
       command: "node",
       args: ["server.js"],
       cwd: projectPath,
       enabled: true
     });
+
+    // The old namespaced form no longer exists
+    expect(merged.servers["custom-project-name.projectServer"]).toBeUndefined();
+    expect(merged.servers["my-demo-project.projectServer"]).toBeUndefined();
+
+    // Migration is idempotent: if globalServer is already in catalog, it is not overwritten
+    const merged2 = loadMergedConfig();
+    expect(merged2.servers.globalServer.enabled).toBe(true);
   });
 
   it("resolves active config context correctly", () => {
@@ -213,42 +223,40 @@ describe("project config and merging", () => {
       projects: {}
     }, null, 2));
 
+    // Create a .mcpx.json so project detection works
     const localConfigPath = path.join(projectPath, ".mcpx.json");
     fs.writeFileSync(localConfigPath, JSON.stringify({
       name: "active-project",
-      servers: {
-        localOne: { transport: "http", url: "https://local.com" }
-      }
+      servers: {}
     }, null, 2));
 
     const { resolveActiveConfig } = require("../src/core/config.js");
 
-    // Force global context
+    // Global context: always returns global config
     const globalContext = resolveActiveConfig({ global: true });
     expect(globalContext.type).toBe("global");
     expect(globalContext.config.servers.globalOne).toBeDefined();
-    expect(globalContext.config.servers.localOne).toBeUndefined();
 
-    // Force local context using process.cwd() mock
+    // Project context: type is "project", projectPath is set, but config is still global
     const originalCwd = process.cwd;
     process.cwd = () => projectPath;
     try {
       const localContext = resolveActiveConfig({ local: true });
       expect(localContext.type).toBe("project");
       expect(localContext.projectPath).toBe(projectPath);
-      expect(localContext.config.servers.localOne).toBeDefined();
-      expect(localContext.config.servers.globalOne).toBeUndefined();
+      // In the new model, the project context still reads global catalog
+      expect(localContext.config.servers.globalOne).toBeDefined();
 
-      // Test save callback in project context
-      localContext.config.servers.localTwo = {
+      // save() writes to the global config
+      localContext.config.servers.addedGlobally = {
         transport: "http",
-        url: "https://local2.com",
+        url: "https://new.com",
         enabled: true
       };
       localContext.save();
 
-      const savedLocal = JSON.parse(fs.readFileSync(localConfigPath, "utf8"));
-      expect(savedLocal.servers.localTwo).toBeDefined();
+      const savedGlobal = JSON.parse(fs.readFileSync(configPath, "utf8"));
+      expect(savedGlobal.servers.addedGlobally).toBeDefined();
     } finally {
       process.cwd = originalCwd;
     }

@@ -21,7 +21,7 @@ export { syncAllClients, getGatewayUrl } from "./sync.js";
 export type { SyncSummary } from "./sync.js";
 
 // Registry (server add/remove)
-export { addServer, removeServer, updateServer, setServerEnabled, registerProject, unregisterProject, ensureGatewayToken, rotateGatewayToken } from "./registry.js";
+export { addServer, removeServer, updateServer, setServerEnabled, setProjectServerEnabled, registerProject, unregisterProject, ensureGatewayToken, rotateGatewayToken } from "./registry.js";
 
 // Skills
 export { listSkills, getSkill, saveSkill, deleteSkill } from "./skills.js";
@@ -91,5 +91,7 @@ export type {
   SyncImportConflictEntry,
   SyncImportErrorEntry,
   SyncResult,
-  ManagedGatewayEntry
+  ManagedGatewayEntry,
+  ProjectConfig,
+  ProjectScope
 } from "../types.js";

@@ -2,10 +2,84 @@ import fs from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "bun:test";
 import { defaultConfig } from "../src/core/config.js";
-import { ensureGatewayToken, getGatewayTokenSecretName, rotateGatewayToken } from "../src/core/registry.js";
+import { ensureGatewayToken, getGatewayTokenSecretName, rotateGatewayToken, setProjectServerEnabled, registerProject } from "../src/core/registry.js";
 import { getGatewayTokenPath } from "../src/core/paths.js";
 import { SecretsManager } from "../src/core/secrets.js";
 import { setupTempEnv } from "./helpers.js";
+
+describe("setProjectServerEnabled", () => {
+  it("disables a server for a project by adding to disabledServers", () => {
+    const config = defaultConfig();
+    config.servers.github = { transport: "http", url: "https://github.com/mcp", enabled: true };
+    config.projects = {
+      "/my/project": { name: "my-project", path: "/my/project", disabledServers: [] }
+    };
+
+    setProjectServerEnabled(config, "/my/project", "github", false);
+
+    expect(config.projects["/my/project"].disabledServers).toContain("github");
+    // Global flag unchanged
+    expect(config.servers.github.enabled).toBe(true);
+  });
+
+  it("enables a server for a project by removing from disabledServers", () => {
+    const config = defaultConfig();
+    config.servers.github = { transport: "http", url: "https://github.com/mcp", enabled: true };
+    config.projects = {
+      "/my/project": { name: "my-project", path: "/my/project", disabledServers: ["github"] }
+    };
+
+    setProjectServerEnabled(config, "/my/project", "github", true);
+
+    expect(config.projects["/my/project"].disabledServers).not.toContain("github");
+  });
+
+  it("does not duplicate entries when disabling an already-disabled server", () => {
+    const config = defaultConfig();
+    config.servers.github = { transport: "http", url: "https://github.com/mcp", enabled: true };
+    config.projects = {
+      "/my/project": { name: "my-project", path: "/my/project", disabledServers: ["github"] }
+    };
+
+    setProjectServerEnabled(config, "/my/project", "github", false);
+
+    expect(config.projects["/my/project"].disabledServers?.filter((s) => s === "github").length).toBe(1);
+  });
+
+  it("enabling a globally-disabled server also flips its global flag ON (vice-versa rule)", () => {
+    const config = defaultConfig();
+    config.servers.github = { transport: "http", url: "https://github.com/mcp", enabled: false };
+    config.projects = {
+      "/my/project": { name: "my-project", path: "/my/project", disabledServers: ["github"] }
+    };
+
+    setProjectServerEnabled(config, "/my/project", "github", true);
+
+    // Globally enabled now
+    expect(config.servers.github.enabled).toBe(true);
+    expect(config.projects["/my/project"].disabledServers).not.toContain("github");
+  });
+
+  it("resolves path with path.resolve so keys are consistent", () => {
+    const config = defaultConfig();
+    config.servers.github = { transport: "http", url: "https://github.com/mcp", enabled: true };
+    // Register the project with a resolved path
+    registerProject(config, "/my/project");
+
+    setProjectServerEnabled(config, "/my/project", "github", false);
+
+    const key = Object.keys(config.projects ?? {}).find((k) => k.includes("project"));
+    expect(key).toBeDefined();
+    expect(config.projects![key!].disabledServers).toContain("github");
+  });
+
+  it("throws when the project path is not registered", () => {
+    const config = defaultConfig();
+    config.servers.github = { transport: "http", url: "https://github.com/mcp", enabled: true };
+
+    expect(() => setProjectServerEnabled(config, "/not/registered", "github", false)).toThrow();
+  });
+});
 
 describe("gateway token management", () => {
   const cleanups: Array<() => void> = [];

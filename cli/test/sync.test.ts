@@ -211,7 +211,7 @@ describe("sync engine", () => {
     expect(synced.servers["unmanaged (mcpx)"]).toBeDefined();
   });
 
-  it("syncs Claude only at root mcpServers and leaves project mcpServers untouched", () => {
+  it("syncs Claude only at root mcpServers and leaves unregistered project mcpServers untouched", () => {
     const env = setupTempEnv("mcpx-sync-claude-root-only-");
     cleanups.push(env.restore);
 
@@ -245,15 +245,121 @@ describe("sync engine", () => {
 
     const syncedClaude = JSON.parse(fs.readFileSync(claudePath, "utf8")) as {
       mcpServers: Record<string, { type: string; url?: string }>;
-      projects?: Record<string, { mcpServers?: Record<string, { type: string; command?: string }> }>;
+      projects?: Record<string, { mcpServers?: Record<string, { type: string; command?: string }>; disabledMcpServers?: string[] }>;
     };
 
+    // Globally-enabled vercel is at root
     expect(syncedClaude.mcpServers["vercel (mcpx)"]?.type).toBe("http");
     expect(syncedClaude.mcpServers["vercel (mcpx)"]?.url).toContain("127.0.0.1");
 
+    // Unregistered project mcpServers block is untouched
     const projectServers = syncedClaude.projects?.["/tmp/project-a"]?.mcpServers ?? {};
     expect(projectServers.project_only?.type).toBe("stdio");
     expect(projectServers["vercel (mcpx)"]).toBeUndefined();
+
+    // Unregistered project does NOT get managed names in its disabledMcpServers
+    expect(syncedClaude.projects?.["/tmp/project-a"]?.disabledMcpServers).toBeUndefined();
+  });
+
+  it("writes per-project disabledMcpServers for registered projects", () => {
+    const env = setupTempEnv("mcpx-sync-claude-project-scope-");
+    cleanups.push(env.restore);
+
+    const config = defaultConfig();
+    config.servers.vercel = { transport: "http", url: "https://mcp.vercel.com", enabled: true };
+    config.servers.context7 = { transport: "http", url: "https://context7.com/mcp", enabled: true };
+    // Register a project with context7 disabled for it
+    config.projects = {
+      "/tmp/my-project": {
+        name: "my-project",
+        path: "/tmp/my-project",
+        disabledServers: ["context7"]
+      }
+    };
+    saveConfig(config);
+
+    const claudePath = path.join(env.root, ".claude.json");
+    fs.writeFileSync(claudePath, JSON.stringify({ mcpServers: {} }, null, 2));
+
+    const summary = syncAllClients(config, new SecretsManager());
+    expect(summary.hasErrors).toBe(false);
+
+    const syncedClaude = JSON.parse(fs.readFileSync(claudePath, "utf8")) as {
+      mcpServers: Record<string, unknown>;
+      projects?: Record<string, { disabledMcpServers?: string[] }>;
+    };
+
+    // Both servers at root (global profile)
+    expect(syncedClaude.mcpServers["vercel (mcpx)"]).toBeDefined();
+    expect(syncedClaude.mcpServers["context7 (mcpx)"]).toBeDefined();
+
+    // Registered project has context7 in its disabled list but NOT vercel
+    const projectEntry = syncedClaude.projects?.["/tmp/my-project"];
+    expect(projectEntry?.disabledMcpServers).toContain("context7 (mcpx)");
+    expect(projectEntry?.disabledMcpServers).not.toContain("vercel (mcpx)");
+  });
+
+  it("strips stale managed names from previously-synced project entries", () => {
+    const env = setupTempEnv("mcpx-sync-claude-project-stale-");
+    cleanups.push(env.restore);
+
+    const config = defaultConfig();
+    config.servers.vercel = { transport: "http", url: "https://mcp.vercel.com", enabled: true };
+    // No registered projects (previously had one; now unregistered)
+    saveConfig(config);
+
+    const claudePath = path.join(env.root, ".claude.json");
+    // Pre-existing Claude project entry with a stale managed disabled name from before
+    fs.writeFileSync(claudePath, JSON.stringify({
+      mcpServers: {},
+      projects: {
+        "/tmp/old-project": {
+          disabledMcpServers: ["vercel (mcpx)", "my-non-managed-entry"]
+        }
+      }
+    }, null, 2));
+
+    syncAllClients(config, new SecretsManager());
+
+    const syncedClaude = JSON.parse(fs.readFileSync(claudePath, "utf8")) as {
+      projects?: Record<string, { disabledMcpServers?: string[] }>;
+    };
+
+    // The managed name is stripped since project is no longer registered
+    expect(syncedClaude.projects?.["/tmp/old-project"]?.disabledMcpServers).not.toContain("vercel (mcpx)");
+    // Non-managed names are preserved
+    expect(syncedClaude.projects?.["/tmp/old-project"]?.disabledMcpServers).toContain("my-non-managed-entry");
+  });
+
+  it("managed index only tracks root enabled entries, not per-project disabled names", () => {
+    const env = setupTempEnv("mcpx-sync-claude-managed-index-");
+    cleanups.push(env.restore);
+
+    const config = defaultConfig();
+    config.servers.vercel = { transport: "http", url: "https://mcp.vercel.com", enabled: true };
+    config.servers.context7 = { transport: "http", url: "https://context7.com/mcp", enabled: true };
+    config.projects = {
+      "/tmp/proj": {
+        name: "proj",
+        path: "/tmp/proj",
+        disabledServers: ["context7"]
+      }
+    };
+    saveConfig(config);
+
+    const claudePath = path.join(env.root, ".claude.json");
+    fs.writeFileSync(claudePath, JSON.stringify({ mcpServers: {} }, null, 2));
+
+    syncAllClients(config, new SecretsManager());
+
+    const managedIndex = loadManagedIndex(getManagedIndexPath());
+    const claudeEntries = Object.keys(managedIndex.managed.claude?.entries ?? {});
+    // Index contains both enabled root entries
+    expect(claudeEntries).toContain("vercel (mcpx)");
+    expect(claudeEntries).toContain("context7 (mcpx)");
+    // No project-scoped entries leaked into index
+    expect(claudeEntries.every((name) => name.endsWith(" (mcpx)"))).toBe(true);
+    expect(claudeEntries.length).toBe(2);
   });
 
   it("syncs Claude Desktop config successfully", () => {

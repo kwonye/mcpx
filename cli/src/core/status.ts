@@ -157,11 +157,12 @@ export async function buildStatusReport(
     };
 
     if (serverEntry.enabled && tokenCount) {
-      const matchingProject = projectEntries.find((p) => name.startsWith(`${p.name}.`));
-      if (matchingProject) {
-        totalProjectTokens[matchingProject.path] = (totalProjectTokens[matchingProject.path] ?? 0) + tokenCount.total;
-      } else {
-        totalGlobalTokens += tokenCount.total;
+      totalGlobalTokens += tokenCount.total;
+      // For each registered project, accumulate tokens for servers effectively enabled there.
+      for (const projectEntry of projectEntries) {
+        if (!(projectEntry.disabledServers ?? []).includes(name)) {
+          totalProjectTokens[projectEntry.path] = (totalProjectTokens[projectEntry.path] ?? 0) + tokenCount.total;
+        }
       }
     }
 

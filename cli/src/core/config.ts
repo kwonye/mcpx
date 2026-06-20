@@ -1,7 +1,7 @@
 import { z } from "zod";
 import path from "node:path";
 import fs from "node:fs";
-import { normalizeServerSpecEnabled, type ClientId, type McpxConfig, type UpstreamServerSpec } from "../types.js";
+import { normalizeServerSpecEnabled, type ClientId, type McpxConfig, type StdioServerSpec, type UpstreamServerSpec } from "../types.js";
 import { getConfigPath, findProjectConfigPath } from "./paths.js";
 import { readJsonFile, writeJsonAtomic } from "../util/fs.js";
 import { repairConfig } from "./config-repair.js";
@@ -33,7 +33,8 @@ const serverSchema = z.discriminatedUnion("transport", [httpServerSchema, stdioS
 
 const projectEntrySchema = z.object({
   name: z.string(),
-  path: z.string()
+  path: z.string(),
+  disabledServers: z.array(z.string()).default([])
 });
 
 const configSchema = z.object({
@@ -104,34 +105,11 @@ export function loadConfig(configPath = getConfigPath()): McpxConfig {
 }
 
 export function saveConfig(config: McpxConfig, configPath = getConfigPath()): void {
+  // Normalize in-place so callers see the resolved enabled flags after saving.
   config.servers = Object.fromEntries(
     Object.entries(config.servers).map(([name, spec]) => [name, normalizeServerSpecEnabled(spec)])
   );
-
-  let serversToSave = { ...config.servers };
-  if (configPath === getConfigPath() && config.projects) {
-    for (const [projectPath, projectEntry] of Object.entries(config.projects)) {
-      const localPath = path.join(projectPath, ".mcpx.json");
-      if (fs.existsSync(localPath)) {
-        try {
-          const localConfig = loadProjectConfig(localPath);
-          const projectName = localConfig.name || projectEntry.name || path.basename(projectPath);
-          for (const serverName of Object.keys(localConfig.servers)) {
-            const namespacedName = `${projectName}.${serverName}`;
-            delete serversToSave[namespacedName];
-          }
-        } catch {
-          // Ignore
-        }
-      }
-    }
-  }
-
-  const cleanedConfig = {
-    ...config,
-    servers: serversToSave
-  };
-  writeJsonAtomic(configPath, cleanedConfig);
+  writeJsonAtomic(configPath, config);
 }
 
 export function loadProjectConfig(projectConfigPath: string): ProjectLocalConfig {
@@ -152,36 +130,34 @@ export function saveProjectConfig(config: ProjectLocalConfig, projectConfigPath:
 
 export function loadMergedConfig(configPath = getConfigPath()): McpxConfig {
   const config = loadConfig(configPath);
-  
+
   if (!config.projects) {
     config.projects = {};
   }
-  
-  for (const [projectPath, projectEntry] of Object.entries(config.projects)) {
+
+  // Migrate legacy per-project .mcpx.json servers into the global catalog.
+  // Servers are folded in under their plain name (no namespace prefix).
+  // Skip any name that already exists in the catalog so the migration is idempotent.
+  for (const [projectPath] of Object.entries(config.projects)) {
     const localPath = path.join(projectPath, ".mcpx.json");
     if (!fs.existsSync(localPath)) {
       continue;
     }
     try {
       const localConfig = loadProjectConfig(localPath);
-      const projectName = localConfig.name || projectEntry.name || path.basename(projectPath);
-      
       for (const [serverName, spec] of Object.entries(localConfig.servers)) {
-        const namespacedName = `${projectName}.${serverName}`;
+        if (config.servers[serverName]) continue; // already in catalog
         const normalized = normalizeServerSpecEnabled(spec);
-        
-        // If it's stdio and no CWD is defined, default to the project path!
-        if (normalized.transport === "stdio" && !normalized.cwd) {
-          normalized.cwd = projectPath;
+        if (normalized.transport === "stdio" && !(normalized as StdioServerSpec).cwd) {
+          (normalized as StdioServerSpec & { enabled: boolean }).cwd = projectPath;
         }
-        
-        config.servers[namespacedName] = normalized;
+        config.servers[serverName] = normalized;
       }
     } catch {
-      // Ignore errors when loading a project config so a bad local config doesn't crash the gateway.
+      // Ignore errors loading a project config so a bad local file doesn't crash the gateway.
     }
   }
-  
+
   return config;
 }
 
@@ -194,51 +170,24 @@ export interface ActiveConfigContext {
 }
 
 export function resolveActiveConfig(options: { global?: boolean; local?: boolean } = {}): ActiveConfigContext {
-  if (options.global) {
-    const globalPath = getConfigPath();
-    const config = loadConfig(globalPath);
-    return {
-      type: "global",
-      configPath: globalPath,
-      config,
-      save: () => saveConfig(config, globalPath)
-    };
-  }
-
-  const projectConfigPath = findProjectConfigPath();
-  if (options.local || projectConfigPath) {
-    const targetPath = projectConfigPath || path.join(process.cwd(), ".mcpx.json");
-    const projectPath = path.dirname(targetPath);
-    const projectConfig = loadProjectConfig(targetPath);
-    
-    // Create a dummy McpxConfig that redirects servers to projectConfig.servers
-    const dummyConfig: McpxConfig = {
-      schemaVersion: 1,
-      name: projectConfig.name,
-      gateway: {
-        port: 37373,
-        tokenRef: "secret://local_gateway_token",
-        autoStart: true
-      },
-      servers: projectConfig.servers,
-      clients: {}
-    };
-
-    return {
-      type: "project",
-      configPath: targetPath,
-      projectPath,
-      config: dummyConfig,
-      save: () => {
-        projectConfig.servers = dummyConfig.servers;
-        saveProjectConfig(projectConfig, targetPath);
-      }
-    };
-  }
-
-  // Fallback to global if not local and no .mcpx.json is found
   const globalPath = getConfigPath();
   const config = loadConfig(globalPath);
+
+  // Detect project context (informational — all writes still go to the global catalog)
+  if (!options.global) {
+    const projectConfigPath = findProjectConfigPath();
+    if (options.local || projectConfigPath) {
+      const projectPath = projectConfigPath ? path.dirname(projectConfigPath) : process.cwd();
+      return {
+        type: "project",
+        configPath: globalPath,
+        projectPath,
+        config,
+        save: () => saveConfig(config, globalPath)
+      };
+    }
+  }
+
   return {
     type: "global",
     configPath: globalPath,
