@@ -1,6 +1,7 @@
+import { useState } from "react";
 import { Toggle } from "./ui";
 import { useServerEnabled } from "../hooks/useServerEnabled";
-import { formatTokenApprox } from "../utils/tokenHelper";
+import { describeTokenError, formatTokenApprox } from "../utils/tokenHelper";
 
 interface ServerCardProps {
   name: string;
@@ -8,6 +9,7 @@ interface ServerCardProps {
   transport: string;
   target: string;
   authConfigured: boolean;
+  isOAuth: boolean;
   syncedCount: number;
   errorCount: number;
   tokenCount?: { tools: number; resources: number; prompts: number; total: number; error?: string };
@@ -17,9 +19,25 @@ interface ServerCardProps {
 }
 
 export function ServerCard(props: ServerCardProps) {
+  const [reauthing, setReauthing] = useState(false);
   const isHealthy = props.enabled && props.errorCount === 0 && props.syncedCount > 0;
   const isWarning = props.enabled && props.errorCount > 0;
   const { isToggling, handleEnabledChange } = useServerEnabled(props.name, props.onRefresh);
+
+  async function handleReauth(event: React.MouseEvent) {
+    event.stopPropagation();
+    if (props.isOAuth) {
+      setReauthing(true);
+      try {
+        await window.mcpx.startOauth(props.name);
+      } finally {
+        setReauthing(false);
+        props.onRefresh();
+      }
+    } else {
+      props.onAuthClick?.();
+    }
+  }
 
   return (
     <div className="glass-card server-card" data-disabled={!props.enabled} onClick={props.onClick}>
@@ -42,11 +60,23 @@ export function ServerCard(props: ServerCardProps) {
                   {formatTokenApprox(props.tokenCount.total)} tokens
                 </span>
               )}
-              {props.enabled && props.tokenCount?.error && (
-                <span className="token-badge token-badge--error" title={props.tokenCount.error}>
-                  token error
-                </span>
-              )}
+              {props.enabled && props.tokenCount?.error && (() => {
+                const { label, authLike } = describeTokenError(props.tokenCount.error);
+                const buttonLabel = (authLike || props.isOAuth)
+                  ? (reauthing ? "Signing in…" : `${label} — re-authenticate`)
+                  : label;
+                return (
+                  <button
+                    type="button"
+                    className="token-badge token-badge--error token-badge--clickable"
+                    title={props.tokenCount.error}
+                    disabled={reauthing}
+                    onClick={handleReauth}
+                  >
+                    {buttonLabel}
+                  </button>
+                );
+              })()}
             </div>
           </div>
         </div>

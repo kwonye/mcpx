@@ -2094,6 +2094,27 @@ select {
     color: var(--danger, #dc2626);
 }
 
+.token-badge--clickable {
+    cursor: pointer;
+    font: inherit;
+    transition: background 0.15s, border-color 0.15s;
+}
+
+.token-badge--clickable:hover:not(:disabled) {
+    background: rgba(220, 38, 38, 0.15);
+    border-color: rgba(220, 38, 38, 0.3);
+}
+
+.token-badge--clickable:focus-visible {
+    outline: 2px solid rgba(220, 38, 38, 0.5);
+    outline-offset: 2px;
+}
+
+.token-badge--clickable:disabled {
+    opacity: 0.6;
+    cursor: default;
+}
+
 .dashboard-token-summary {
     display: flex;
     justify-content: space-between;

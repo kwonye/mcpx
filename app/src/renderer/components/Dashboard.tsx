@@ -255,12 +255,16 @@ export function Dashboard() {
                         transport={server.transport}
                         target={server.target}
                         authConfigured={server.authBindings.length > 0}
+                        isOAuth={server.authBindings.some((b) => b.value.startsWith("oauth://"))}
                         syncedCount={server.clients.filter((c) => c.managed && c.status === "SYNCED").length}
                         errorCount={server.clients.filter((c) => c.managed && c.status === "ERROR").length}
                         tokenCount={server.tokenCount}
                         onRefresh={refresh}
                         onClick={() => setSelectedServer(server.name)}
-                        onAuthClick={() => setPendingAuth({ serverName: server.name, oauthLikely: true })}
+                        onAuthClick={() => setPendingAuth({
+                          serverName: server.name,
+                          oauthLikely: server.authBindings.some((b) => b.value.startsWith("oauth://"))
+                        })}
                       />
                     ))}
                   </div>
