@@ -97,7 +97,7 @@ export class ClaudeAdapter implements ClientAdapter {
 
       const entry = parsed.data;
       const isDisabled = entry.disabled === true || disabledMcpServers.has(name);
-      if ((entry.type === undefined || entry.type === "http") && entry.url && !entry.command) {
+      if ((entry.type === undefined || entry.type === "http" || entry.type === "streamable-http") && entry.url && !entry.command) {
         result.candidates.push({
           clientId: this.id,
           configPath,

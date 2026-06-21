@@ -25,9 +25,10 @@ const openCodeEntrySchema = z.object({
   type: z.string().optional(),
   url: z.string().min(1).optional(),
   headers: stringMapSchema.optional(),
-  command: z.string().min(1).optional(),
+  command: z.union([z.string().min(1), z.array(z.string())]).optional(),
   args: z.array(z.string()).optional(),
   env: stringMapSchema.optional(),
+  environment: stringMapSchema.optional(),
   cwd: z.string().min(1).optional(),
   enabled: z.boolean().optional()
 }).passthrough();
@@ -67,7 +68,7 @@ export class OpenCodeAdapter implements ClientAdapter {
       }
 
       const entry = parsed.data;
-      if ((entry.type === undefined || entry.type === "remote" || entry.type === "http") && entry.url && !entry.command) {
+      if ((entry.type === undefined || entry.type === "remote" || entry.type === "http" || entry.type === "streamable-http") && entry.url && !entry.command) {
         result.candidates.push({
           clientId: this.id,
           configPath,
@@ -83,7 +84,14 @@ export class OpenCodeAdapter implements ClientAdapter {
         continue;
       }
 
-      if ((entry.type === undefined || entry.type === "stdio") && entry.command && !entry.url) {
+      if ((entry.type === undefined || entry.type === "local" || entry.type === "stdio") && entry.command && !entry.url) {
+        // OpenCode local servers use type: "local" with command as an array
+        // (e.g. ["npx", "-y", "server"]) and "environment" for env vars.
+        const commandParts = Array.isArray(entry.command) ? entry.command : [entry.command, ...(entry.args ?? [])];
+        if (commandParts.length === 0) {
+          result.skipped.push(buildImportSkip(this.id, name, "Entry could not be mapped to an mcpx server.", configPath));
+          continue;
+        }
         result.candidates.push({
           clientId: this.id,
           configPath,
@@ -91,9 +99,9 @@ export class OpenCodeAdapter implements ClientAdapter {
           serverName: name,
           spec: {
             transport: "stdio",
-            command: entry.command,
-            args: entry.args,
-            env: entry.env,
+            command: commandParts[0],
+            args: commandParts.slice(1),
+            env: entry.environment ?? entry.env,
             cwd: entry.cwd,
             enabled: entry.enabled !== false
           }

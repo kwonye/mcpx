@@ -968,10 +968,10 @@ describe("sync engine", () => {
     };
     saveConfig(config);
 
-    const cursorPath = path.join(env.root, "Library", "Application Support", "Cursor", "User", "mcp.json");
+    const cursorPath = path.join(env.root, ".cursor", "mcp.json");
     fs.mkdirSync(path.dirname(cursorPath), { recursive: true });
     fs.writeFileSync(cursorPath, JSON.stringify({
-      servers: {
+      mcpServers: {
         existingServer: { url: "https://example.com/mcp" }
       }
     }, null, 2));
@@ -980,14 +980,14 @@ describe("sync engine", () => {
     expect(summary.hasErrors).toBe(false);
 
     const synced = JSON.parse(fs.readFileSync(cursorPath, "utf8")) as {
-      servers: Record<string, { type?: string; url?: string; disabled?: boolean }>;
+      mcpServers: Record<string, { type?: string; url?: string; disabled?: boolean }>;
     };
 
-    expect(synced.servers["context7 (mcpx)"]?.type).toBe("http");
-    expect(synced.servers["context7 (mcpx)"]?.disabled).toBeUndefined();
-    expect(synced.servers["vercel (mcpx)"]).toBeUndefined();
-    expect(synced.servers["existingServer"]).toBeUndefined();
-    expect(synced.servers["existingServer (mcpx)"]).toBeDefined();
+    expect(synced.mcpServers["context7 (mcpx)"]?.type).toBe("http");
+    expect(synced.mcpServers["context7 (mcpx)"]?.disabled).toBeUndefined();
+    expect(synced.mcpServers["vercel (mcpx)"]).toBeUndefined();
+    expect(synced.mcpServers["existingServer"]).toBeUndefined();
+    expect(synced.mcpServers["existingServer (mcpx)"]).toBeDefined();
   });
 
   it("omits disabled managed servers from VS Code config instead of writing disabled field", () => {
@@ -1073,5 +1073,525 @@ describe("sync engine", () => {
     expect(synced.mcp?.excluded).toContain("vercel (mcpx)");
     expect(synced.mcp?.excluded).not.toContain("context7 (mcpx)");
     expect(synced.mcp?.excluded).toContain("existing_disabled");
+  });
+
+  it("syncs Cursor config to ~/.cursor/mcp.json with mcpServers key", () => {
+    const env = setupTempEnv("mcpx-sync-cursor-path-");
+    cleanups.push(env.restore);
+
+    const config = defaultConfig();
+    config.servers.vercel = {
+      transport: "http",
+      url: "https://mcp.vercel.com"
+    };
+    saveConfig(config);
+
+    const summary = syncAllClients(config, new SecretsManager());
+    expect(summary.hasErrors).toBe(false);
+    expect(summary.results.some((result) => result.clientId === "cursor" && result.status === "SYNCED")).toBe(true);
+
+    // Cursor moved global MCP config to ~/.cursor/mcp.json and uses the mcpServers key.
+    const cursorPath = path.join(env.root, ".cursor", "mcp.json");
+    const synced = JSON.parse(fs.readFileSync(cursorPath, "utf8")) as {
+      mcpServers: Record<string, { type?: string; url?: string; headers?: Record<string, string> }>;
+    };
+
+    expect(synced.mcpServers["vercel (mcpx)"]?.type).toBe("http");
+    expect(synced.mcpServers["vercel (mcpx)"]?.url).toContain("127.0.0.1");
+    expect(synced.mcpServers["vercel (mcpx)"]?.url).toContain("upstream=vercel");
+    expect(typeof synced.mcpServers["vercel (mcpx)"]?.headers?.["Authorization"]).toBe("string");
+
+    // The legacy VS Code-style Application Support path must no longer be used.
+    const legacyPath = path.join(env.root, "Library", "Application Support", "Cursor", "User", "mcp.json");
+    expect(fs.existsSync(legacyPath)).toBe(false);
+  });
+
+  it("imports Claude Code streamable-http entries as HTTP servers", () => {
+    const env = setupTempEnv("mcpx-sync-claude-streamable-");
+    cleanups.push(env.restore);
+
+    const config = defaultConfig();
+    saveConfig(config);
+
+    const claudePath = path.join(env.root, ".claude.json");
+    fs.writeFileSync(claudePath, JSON.stringify({
+      mcpServers: {
+        streamable_server: {
+          type: "streamable-http",
+          url: "https://streamable.example.com/mcp"
+        }
+      }
+    }, null, 2));
+
+    const summary = syncAllClients(config, new SecretsManager());
+
+    expect(summary.hasErrors).toBe(false);
+    expect(summary.imports.imported).toEqual([
+      expect.objectContaining({
+        clientId: "claude",
+        sourceEntryName: "streamable_server",
+        serverName: "streamable_server"
+      })
+    ]);
+    expect(config.servers.streamable_server).toEqual({
+      transport: "http",
+      url: "https://streamable.example.com/mcp",
+      headers: undefined,
+      enabled: true
+    });
+  });
+
+  it("imports OpenCode local servers with array command and environment key", () => {
+    const env = setupTempEnv("mcpx-sync-opencode-local-");
+    cleanups.push(env.restore);
+
+    const config = defaultConfig();
+    saveConfig(config);
+
+    const opencodePath = path.join(env.root, ".config", "opencode", "opencode.json");
+    fs.mkdirSync(path.dirname(opencodePath), { recursive: true });
+    fs.writeFileSync(opencodePath, JSON.stringify({
+      mcp: {
+        local_server: {
+          type: "local",
+          command: ["npx", "-y", "@example/local-server"],
+          environment: {
+            API_KEY: "secret"
+          }
+        }
+      }
+    }, null, 2));
+
+    const summary = syncAllClients(config, new SecretsManager());
+
+    expect(summary.hasErrors).toBe(false);
+    expect(summary.imports.imported).toEqual([
+      expect.objectContaining({
+        clientId: "opencode",
+        sourceEntryName: "local_server",
+        serverName: "local_server"
+      })
+    ]);
+    expect(config.servers.local_server).toEqual({
+      transport: "stdio",
+      command: "npx",
+      args: ["-y", "@example/local-server"],
+      env: {
+        API_KEY: "secret"
+      },
+      cwd: undefined,
+      enabled: true
+    });
+  });
+
+  it("syncs Cline CLI config at ~/.cline/settings/cline_mcp_settings.json when no IDE extension config exists", () => {
+    const env = setupTempEnv("mcpx-sync-cline-cli-");
+    cleanups.push(env.restore);
+
+    const config = defaultConfig();
+    config.servers.vercel = {
+      transport: "http",
+      url: "https://mcp.vercel.com"
+    };
+    saveConfig(config);
+
+    const clineCliPath = path.join(env.root, ".cline", "settings", "cline_mcp_settings.json");
+    fs.mkdirSync(path.dirname(clineCliPath), { recursive: true });
+    fs.writeFileSync(clineCliPath, JSON.stringify({
+      mcpServers: {
+        existing_cli: {
+          command: "npx",
+          args: ["-y", "@example/cli-server"]
+        }
+      }
+    }, null, 2));
+
+    const summary = syncAllClients(config, new SecretsManager());
+    expect(summary.hasErrors).toBe(false);
+    expect(summary.results.some((result) => result.clientId === "cline" && result.status === "SYNCED")).toBe(true);
+
+    const synced = JSON.parse(fs.readFileSync(clineCliPath, "utf8")) as {
+      mcpServers: Record<string, { type?: string; url?: string }>;
+    };
+
+    expect(synced.mcpServers["vercel (mcpx)"]?.type).toBe("streamableHttp");
+    expect(synced.mcpServers["vercel (mcpx)"]?.url).toContain("upstream=vercel");
+    expect(synced.mcpServers["existing_cli"]).toBeUndefined();
+    expect(synced.mcpServers["existing_cli (mcpx)"]).toBeDefined();
+  });
+
+  it("imports Cline stdio entries into mcpx and replaces the source entry", () => {
+    const env = setupTempEnv("mcpx-sync-cline-import-");
+    cleanups.push(env.restore);
+
+    const config = defaultConfig();
+    saveConfig(config);
+
+    const clinePath = path.join(
+      env.root,
+      "Library",
+      "Application Support",
+      "Code",
+      "User",
+      "globalStorage",
+      "saoudrizwan.claude-dev",
+      "settings",
+      "cline_mcp_settings.json"
+    );
+    fs.mkdirSync(path.dirname(clinePath), { recursive: true });
+    fs.writeFileSync(clinePath, JSON.stringify({
+      mcpServers: {
+        some_tool: {
+          transportType: "stdio",
+          command: "npx",
+          args: ["-y", "@example/some-tool"]
+        }
+      }
+    }, null, 2));
+
+    const summary = syncAllClients(config, new SecretsManager());
+
+    expect(summary.hasErrors).toBe(false);
+    expect(summary.imports.imported).toEqual([
+      expect.objectContaining({
+        clientId: "cline",
+        sourceEntryName: "some_tool",
+        serverName: "some_tool"
+      })
+    ]);
+    expect(config.servers.some_tool).toEqual({
+      transport: "stdio",
+      command: "npx",
+      args: ["-y", "@example/some-tool"],
+      env: undefined,
+      cwd: undefined,
+      enabled: true
+    });
+
+    const synced = JSON.parse(fs.readFileSync(clinePath, "utf8")) as {
+      mcpServers: Record<string, { type?: string; url?: string }>;
+    };
+    expect(synced.mcpServers.some_tool).toBeUndefined();
+    expect(synced.mcpServers["some_tool (mcpx)"]?.type).toBe("streamableHttp");
+  });
+
+  it("imports Cline HTTP entries declared with type: streamableHttp (new format)", () => {
+    const env = setupTempEnv("mcpx-sync-cline-import-type-");
+    cleanups.push(env.restore);
+
+    const config = defaultConfig();
+    saveConfig(config);
+
+    const clinePath = path.join(
+      env.root,
+      "Library",
+      "Application Support",
+      "Code",
+      "User",
+      "globalStorage",
+      "saoudrizwan.claude-dev",
+      "settings",
+      "cline_mcp_settings.json"
+    );
+    fs.mkdirSync(path.dirname(clinePath), { recursive: true });
+    fs.writeFileSync(clinePath, JSON.stringify({
+      mcpServers: {
+        remote_api: {
+          type: "streamableHttp",
+          url: "https://api.example.com/mcp",
+          headers: { Authorization: "Bearer token123" }
+        }
+      }
+    }, null, 2));
+
+    const summary = syncAllClients(config, new SecretsManager());
+
+    expect(summary.hasErrors).toBe(false);
+    expect(summary.imports.imported).toEqual([
+      expect.objectContaining({
+        clientId: "cline",
+        sourceEntryName: "remote_api",
+        serverName: "remote_api"
+      })
+    ]);
+    expect(config.servers.remote_api).toEqual({
+      transport: "http",
+      url: "https://api.example.com/mcp",
+      headers: { Authorization: "Bearer token123" },
+      enabled: true
+    });
+
+    const synced = JSON.parse(fs.readFileSync(clinePath, "utf8")) as {
+      mcpServers: Record<string, { type?: string; url?: string }>;
+    };
+    expect(synced.mcpServers.remote_api).toBeUndefined();
+    expect(synced.mcpServers["remote_api (mcpx)"]?.type).toBe("streamableHttp");
+  });
+
+  it("imports Cline HTTP entries with legacy transportType: http", () => {
+    const env = setupTempEnv("mcpx-sync-cline-import-legacy-");
+    cleanups.push(env.restore);
+
+    const config = defaultConfig();
+    saveConfig(config);
+
+    const clinePath = path.join(
+      env.root,
+      "Library",
+      "Application Support",
+      "Code",
+      "User",
+      "globalStorage",
+      "saoudrizwan.claude-dev",
+      "settings",
+      "cline_mcp_settings.json"
+    );
+    fs.mkdirSync(path.dirname(clinePath), { recursive: true });
+    fs.writeFileSync(clinePath, JSON.stringify({
+      mcpServers: {
+        legacy_http: {
+          transportType: "http",
+          url: "https://legacy.example.com/mcp"
+        }
+      }
+    }, null, 2));
+
+    const summary = syncAllClients(config, new SecretsManager());
+
+    expect(summary.hasErrors).toBe(false);
+    expect(summary.imports.imported).toEqual([
+      expect.objectContaining({
+        clientId: "cline",
+        sourceEntryName: "legacy_http",
+        serverName: "legacy_http"
+      })
+    ]);
+    expect(config.servers.legacy_http).toEqual({
+      transport: "http",
+      url: "https://legacy.example.com/mcp",
+      enabled: true
+    });
+  });
+
+  it("prunes removed Cline managed entries from the VS Code extension config", () => {
+    const env = setupTempEnv("mcpx-sync-cline-prune-");
+    cleanups.push(env.restore);
+
+    const config = defaultConfig();
+    config.servers.vercel = {
+      transport: "http",
+      url: "https://mcp.vercel.com"
+    };
+    config.servers.context7 = {
+      transport: "http",
+      url: "https://context7.com/mcp"
+    };
+    saveConfig(config);
+
+    const clinePath = path.join(
+      env.root,
+      "Library",
+      "Application Support",
+      "Code",
+      "User",
+      "globalStorage",
+      "saoudrizwan.claude-dev",
+      "settings",
+      "cline_mcp_settings.json"
+    );
+
+    const first = syncAllClients(config, new SecretsManager());
+    expect(first.hasErrors).toBe(false);
+
+    const firstDoc = JSON.parse(fs.readFileSync(clinePath, "utf8")) as {
+      mcpServers: Record<string, { type?: string }>;
+    };
+    expect(firstDoc.mcpServers["vercel (mcpx)"]?.type).toBe("streamableHttp");
+    expect(firstDoc.mcpServers["context7 (mcpx)"]?.type).toBe("streamableHttp");
+
+    delete config.servers.context7;
+    saveConfig(config);
+
+    const second = syncAllClients(config, new SecretsManager());
+    expect(second.hasErrors).toBe(false);
+
+    const secondDoc = JSON.parse(fs.readFileSync(clinePath, "utf8")) as {
+      mcpServers: Record<string, { type?: string }>;
+    };
+    expect(secondDoc.mcpServers["vercel (mcpx)"]?.type).toBe("streamableHttp");
+    expect(secondDoc.mcpServers["context7 (mcpx)"]).toBeUndefined();
+
+    const managed = loadManagedIndex(getManagedIndexPath());
+    expect(Object.keys(managed.managed.cline?.entries ?? {})).toEqual(["vercel (mcpx)"]);
+  });
+
+  it("syncs Kiro config successfully", () => {
+    const env = setupTempEnv("mcpx-sync-kiro-");
+    cleanups.push(env.restore);
+
+    const config = defaultConfig();
+    config.servers.vercel = {
+      transport: "http",
+      url: "https://mcp.vercel.com"
+    };
+    saveConfig(config);
+
+    const kiroDir = path.join(env.root, ".kiro", "settings");
+    fs.mkdirSync(kiroDir, { recursive: true });
+    const kiroPath = path.join(kiroDir, "mcp.json");
+    const initialKiro = {
+      mcpServers: {
+        existing_kiro: {
+          command: "npx",
+          args: ["-y", "@example/kiro-server"]
+        }
+      }
+    };
+    fs.writeFileSync(kiroPath, JSON.stringify(initialKiro, null, 2));
+
+    const summary = syncAllClients(config, new SecretsManager());
+    expect(summary.hasErrors).toBe(false);
+    expect(summary.results.some((result) => result.clientId === "kiro" && result.status === "SYNCED")).toBe(true);
+
+    const synced = JSON.parse(fs.readFileSync(kiroPath, "utf8")) as {
+      mcpServers: Record<string, { url?: string; headers?: Record<string, string>; disabled?: boolean }>;
+    };
+
+    expect(synced.mcpServers["vercel (mcpx)"]?.url).toContain("127.0.0.1");
+    expect(synced.mcpServers["vercel (mcpx)"]?.url).toContain("upstream=vercel");
+    expect(typeof synced.mcpServers["vercel (mcpx)"]?.headers?.["Authorization"]).toBe("string");
+    expect(synced.mcpServers["existing_kiro"]).toBeUndefined();
+    expect(synced.mcpServers["existing_kiro (mcpx)"]?.url).toContain("upstream=existing_kiro");
+    expect(config.servers.existing_kiro).toEqual({
+      transport: "stdio",
+      command: "npx",
+      args: ["-y", "@example/kiro-server"],
+      env: undefined,
+      cwd: undefined,
+      enabled: true
+    });
+  });
+
+  it("syncs OpenCode gateway config successfully", () => {
+    const env = setupTempEnv("mcpx-sync-opencode-");
+    cleanups.push(env.restore);
+
+    const config = defaultConfig();
+    config.servers.vercel = {
+      transport: "http",
+      url: "https://mcp.vercel.com"
+    };
+    saveConfig(config);
+
+    const opencodeDir = path.join(env.root, ".config", "opencode");
+    fs.mkdirSync(opencodeDir, { recursive: true });
+    const opencodePath = path.join(opencodeDir, "opencode.json");
+
+    const summary = syncAllClients(config, new SecretsManager());
+    expect(summary.hasErrors).toBe(false);
+    expect(summary.results.some((result) => result.clientId === "opencode" && result.status === "SYNCED")).toBe(true);
+
+    const synced = JSON.parse(fs.readFileSync(opencodePath, "utf8")) as {
+      mcp: Record<string, { type?: string; url?: string; headers?: Record<string, string>; enabled?: boolean }>;
+    };
+
+    expect(synced.mcp["vercel (mcpx)"]?.type).toBe("remote");
+    expect(synced.mcp["vercel (mcpx)"]?.url).toContain("127.0.0.1");
+    expect(synced.mcp["vercel (mcpx)"]?.url).toContain("upstream=vercel");
+    expect(typeof synced.mcp["vercel (mcpx)"]?.headers?.["Authorization"]).toBe("string");
+  });
+
+  it("writes disabled managed servers with disabled/disabled field in Cline, OpenCode, and Kiro", () => {
+    const env = setupTempEnv("mcpx-sync-disabled-others-");
+    cleanups.push(env.restore);
+
+    const config = defaultConfig();
+    config.servers.vercel = {
+      transport: "http",
+      url: "https://mcp.vercel.com",
+      enabled: false
+    };
+    config.servers.context7 = {
+      transport: "http",
+      url: "https://context7.com/mcp",
+      enabled: true
+    };
+    saveConfig(config);
+
+    // Pre-create ~/.cline/settings/cline_mcp_settings.json so detectConfigPath
+    // picks the Cline CLI path (not the VSCode extension path).
+    const clinePrePath = path.join(env.root, ".cline", "settings", "cline_mcp_settings.json");
+    fs.mkdirSync(path.dirname(clinePrePath), { recursive: true });
+    fs.writeFileSync(clinePrePath, JSON.stringify({ mcpServers: {} }, null, 2));
+
+    const summary = syncAllClients(config, new SecretsManager());
+    expect(summary.hasErrors).toBe(false);
+
+    // Cline: disabled entries written with disabled: true
+    const clineDoc = JSON.parse(fs.readFileSync(clinePrePath, "utf8")) as {
+      mcpServers: Record<string, { type?: string; disabled?: boolean }>;
+    };
+    expect(clineDoc.mcpServers["vercel (mcpx)"]?.type).toBe("streamableHttp");
+    expect(clineDoc.mcpServers["vercel (mcpx)"]?.disabled).toBe(true);
+    expect(clineDoc.mcpServers["context7 (mcpx)"]?.disabled).toBe(false);
+
+    // OpenCode: disabled entries written with enabled: false
+    const opencodePath = path.join(env.root, ".config", "opencode", "opencode.json");
+    const opencodeDoc = JSON.parse(fs.readFileSync(opencodePath, "utf8")) as {
+      mcp: Record<string, { type?: string; enabled?: boolean }>;
+    };
+    expect(opencodeDoc.mcp["vercel (mcpx)"]?.type).toBe("remote");
+    expect(opencodeDoc.mcp["vercel (mcpx)"]?.enabled).toBe(false);
+    expect(opencodeDoc.mcp["context7 (mcpx)"]?.enabled).toBe(true);
+
+    // Kiro: disabled entries written with disabled: true
+    const kiroPath = path.join(env.root, ".kiro", "settings", "mcp.json");
+    const kiroDoc = JSON.parse(fs.readFileSync(kiroPath, "utf8")) as {
+      mcpServers: Record<string, { url?: string; disabled?: boolean }>;
+    };
+    expect(kiroDoc.mcpServers["vercel (mcpx)"]?.url).toBeDefined();
+    expect(kiroDoc.mcpServers["vercel (mcpx)"]?.disabled).toBe(true);
+    expect(kiroDoc.mcpServers["context7 (mcpx)"]?.disabled).toBe(false);
+  });
+
+  it("imports Kiro HTTP entries into mcpx", () => {
+    const env = setupTempEnv("mcpx-sync-kiro-import-");
+    cleanups.push(env.restore);
+
+    const config = defaultConfig();
+    saveConfig(config);
+
+    const kiroDir = path.join(env.root, ".kiro", "settings");
+    fs.mkdirSync(kiroDir, { recursive: true });
+    const kiroPath = path.join(kiroDir, "mcp.json");
+    fs.writeFileSync(kiroPath, JSON.stringify({
+      mcpServers: {
+        kiro_remote: {
+          url: "https://kiro.example.com/mcp",
+          headers: {
+            Authorization: "Bearer secret"
+          }
+        }
+      }
+    }, null, 2));
+
+    const summary = syncAllClients(config, new SecretsManager());
+
+    expect(summary.hasErrors).toBe(false);
+    expect(summary.imports.imported).toEqual([
+      expect.objectContaining({
+        clientId: "kiro",
+        sourceEntryName: "kiro_remote",
+        serverName: "kiro_remote"
+      })
+    ]);
+    expect(config.servers.kiro_remote).toEqual({
+      transport: "http",
+      url: "https://kiro.example.com/mcp",
+      headers: {
+        Authorization: "Bearer secret"
+      },
+      enabled: true
+    });
   });
 });

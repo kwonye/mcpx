@@ -24,6 +24,10 @@ const stringMapSchema = z.preprocess((value) => {
 
   return Object.fromEntries(Object.entries(value));
 }, z.record(z.string(), z.string()));
+// Codex does not use a `type` field for MCP server entries. Transport is
+// inferred from the presence of `command` (stdio) vs `url` (streamable HTTP).
+// Reference: https://developers.openai.com/codex/config-reference
+//   "Set either command (stdio) or url (streamable HTTP)."
 const codexEntrySchema = z.object({
   enabled: z.boolean().optional(),
   url: z.string().min(1).optional(),

@@ -21,8 +21,13 @@ interface ClineConfig {
   mcpServers?: Record<string, unknown>;
 }
 
+const HTTP_TRANSPORT_TYPES = new Set(["http", "sse", "streamableHttp"]);
+
 const stringMapSchema = z.record(z.string(), z.string());
 const clineEntrySchema = z.object({
+  // Cline now supports the standard MCP `type` field (camelCase values like
+  // "streamableHttp") in addition to the legacy `transportType` field.
+  type: z.string().optional(),
   transportType: z.string().optional(),
   url: z.string().min(1).optional(),
   headers: stringMapSchema.optional(),
@@ -37,18 +42,23 @@ function getCandidatePaths(): string[] {
     if (process.platform === "linux") {
       return [
         path.join(homeDir(), ".config", "Code", "User", "globalStorage", "saoudrizwan.claude-dev", "settings", "cline_mcp_settings.json"),
-        path.join(homeDir(), ".config", "Cursor", "User", "globalStorage", "saoudrizwan.claude-dev", "settings", "cline_mcp_settings.json")
+        path.join(homeDir(), ".config", "Cursor", "User", "globalStorage", "saoudrizwan.claude-dev", "settings", "cline_mcp_settings.json"),
+        path.join(homeDir(), ".cline", "settings", "cline_mcp_settings.json")
       ];
     }
     if (process.platform === "win32") {
       return [
         path.join(process.env.APPDATA ?? "", "Code", "User", "globalStorage", "saoudrizwan.claude-dev", "settings", "cline_mcp_settings.json"),
-        path.join(process.env.APPDATA ?? "", "Cursor", "User", "globalStorage", "saoudrizwan.claude-dev", "settings", "cline_mcp_settings.json")
+        path.join(process.env.APPDATA ?? "", "Cursor", "User", "globalStorage", "saoudrizwan.claude-dev", "settings", "cline_mcp_settings.json"),
+        path.join(homeDir(), ".cline", "settings", "cline_mcp_settings.json")
       ];
     }
     return [
       path.join(homeDir(), "Library", "Application Support", "Code", "User", "globalStorage", "saoudrizwan.claude-dev", "settings", "cline_mcp_settings.json"),
-      path.join(homeDir(), "Library", "Application Support", "Cursor", "User", "globalStorage", "saoudrizwan.claude-dev", "settings", "cline_mcp_settings.json")
+      path.join(homeDir(), "Library", "Application Support", "Cursor", "User", "globalStorage", "saoudrizwan.claude-dev", "settings", "cline_mcp_settings.json"),
+      // Cline CLI stores MCP config at ~/.cline/settings/cline_mcp_settings.json
+      // (resolveMcpSettingsPath in @cline/shared/storage).
+      path.join(homeDir(), ".cline", "settings", "cline_mcp_settings.json")
     ];
   }
 
@@ -94,7 +104,10 @@ export class ClineAdapter implements ClientAdapter {
       }
 
       const entry = parsed.data;
-      if ((entry.transportType === undefined || entry.transportType === "http") && entry.url && !entry.command) {
+      // Cline uses both `type` (newer standard field) and `transportType` (legacy).
+      // Prefer `type` when present; fall back to `transportType`.
+      const transport = entry.type ?? entry.transportType;
+      if ((transport === undefined || HTTP_TRANSPORT_TYPES.has(transport)) && entry.url && !entry.command) {
         result.candidates.push({
           clientId: this.id,
           configPath,
@@ -110,7 +123,7 @@ export class ClineAdapter implements ClientAdapter {
         continue;
       }
 
-      if ((entry.transportType === undefined || entry.transportType === "stdio") && entry.command && !entry.url) {
+      if ((transport === undefined || transport === "stdio") && entry.command && !entry.url) {
         result.candidates.push({
           clientId: this.id,
           configPath,
@@ -152,7 +165,13 @@ export class ClineAdapter implements ClientAdapter {
       const managedNames = options.managedEntries.map((entry) => entry.name);
       const serverEntries = Object.fromEntries(
         options.managedEntries.map((entry) => [entry.name, {
-          transportType: "http",
+          // Use the standard `type: "streamableHttp"` field rather than the
+          // legacy `transportType: "http"`. Cline's VS Code extension schema
+          // lists the SSE branch before streamableHttp, so an entry with only
+          // `transportType` + `url` (no `type`) is classified as SSE. An
+          // explicit `type: "streamableHttp"` is unambiguous for both the
+          // extension and the Cline CLI config loader.
+          type: "streamableHttp",
           url: entry.url,
           headers: entry.headers,
           disabled: !entry.enabled

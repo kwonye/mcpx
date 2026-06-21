@@ -30,6 +30,10 @@ const qwenEntrySchema = z.object({
   disabled: z.boolean().optional()
 }).passthrough();
 
+// Qwen/Tongyi MCP config at ~/.qwen/settings.json. Qwen does NOT use a `type` field;
+// transport is inferred from field presence: `httpUrl` → HTTP, `url` → SSE,
+// `command` → stdio. If multiple are specified, precedence is httpUrl > url > command.
+// Disabled servers are tracked via `mcp.excluded` array, not a per-entry `disabled` property.
 export class QwenAdapter implements ClientAdapter {
   readonly id = "qwen" as const;
 

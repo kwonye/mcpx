@@ -17,7 +17,7 @@ import {
 } from "./utils/index.js";
 
 interface CursorMcpConfig {
-  servers?: Record<string, unknown>;
+  mcpServers?: Record<string, unknown>;
 }
 
 const stringMapSchema = z.record(z.string(), z.string());
@@ -36,13 +36,9 @@ export class CursorAdapter implements ClientAdapter {
   readonly id = "cursor" as const;
 
   detectConfigPath(): string | null {
-    if (process.platform === "linux") {
-      return path.join(homeDir(), ".config", "Cursor", "User", "mcp.json");
-    }
-    if (process.platform === "win32") {
-      return path.join(process.env.APPDATA ?? "", "Cursor", "User", "mcp.json");
-    }
-    return path.join(homeDir(), "Library", "Application Support", "Cursor", "User", "mcp.json");
+    // Cursor moved global MCP config to ~/.cursor/mcp.json (was the VS Code-style
+    // Application Support path). See https://cursor.com/docs/mcp
+    return path.join(homeDir(), ".cursor", "mcp.json");
   }
 
   supportsHttp(): boolean {
@@ -58,7 +54,7 @@ export class CursorAdapter implements ClientAdapter {
 
     const raw = readJsonFile<CursorMcpConfig>(configPath, {});
     const servers = {
-      ...(raw.servers ?? {})
+      ...(raw.mcpServers ?? {})
     };
 
     for (const [name, rawEntry] of Object.entries(servers)) {
@@ -73,7 +69,7 @@ export class CursorAdapter implements ClientAdapter {
       }
 
       const entry = parsed.data;
-      if ((entry.type === undefined || entry.type === "http") && entry.url && !entry.command) {
+      if ((entry.type === undefined || entry.type === "http" || entry.type === "streamable-http") && entry.url && !entry.command) {
         result.candidates.push({
           clientId: this.id,
           configPath,
@@ -122,7 +118,7 @@ export class CursorAdapter implements ClientAdapter {
     try {
       const raw = readJsonFile<CursorMcpConfig>(configPath, {});
       const servers = {
-        ...(raw.servers ?? {})
+        ...(raw.mcpServers ?? {})
       };
       removeSourceEntries(servers, options.sourceEntriesToRemove);
       const enabledEntries = options.managedEntries.filter((entry) => entry.enabled);
@@ -153,7 +149,7 @@ export class CursorAdapter implements ClientAdapter {
 
       const next: CursorMcpConfig = {
         ...raw,
-        servers
+        mcpServers: servers
       };
 
       writeJsonAtomic(configPath, next);
