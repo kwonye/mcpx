@@ -53,7 +53,14 @@ export function CompactCliInput({ onServerAdded }: CompactCliInputProps) {
             className="compact-cli-input__btn"
             disabled={loading || !command.trim()}
           >
-            {loading ? "Adding..." : "+ Add"}
+            {loading ? (
+              "Adding..."
+            ) : (
+              <>
+                <span className="material-symbols-outlined">add</span>
+                Add
+              </>
+            )}
           </button>
         </div>
         {error && <div className="compact-cli-input__feedback error">{error}</div>}

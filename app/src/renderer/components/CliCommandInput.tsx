@@ -52,7 +52,6 @@ export function CliCommandInput({ onServerAdded }: CliCommandInputProps) {
                 onChange={(e) => setCommand(e.target.value)}
                 placeholder="Paste your mcpx add command here..."
                 disabled={loading}
-                autoFocus
               />
             </div>
             <button type="submit" className="btn btn-primary" disabled={loading || !command.trim()}>

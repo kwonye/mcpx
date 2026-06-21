@@ -43,8 +43,8 @@ export function ServerDetail({ server, onBack, onRefresh }: ServerDetailProps) {
     return (
       <div className="server-detail">
         <div className="server-detail-header">
-          <button className="server-detail-back" onClick={handleEditCancel} title="Back">
-            ←
+          <button className="server-detail-back" onClick={handleEditCancel} title="Back" aria-label="Back">
+            <span className="material-symbols-outlined">chevron_left</span>
           </button>
           <h2 className="server-detail-title">Edit {server.name}</h2>
         </div>
@@ -62,8 +62,8 @@ export function ServerDetail({ server, onBack, onRefresh }: ServerDetailProps) {
   return (
     <div className="server-detail">
       <div className="server-detail-header">
-        <button className="server-detail-back" onClick={onBack} title="Back">
-          ←
+        <button className="server-detail-back" onClick={onBack} title="Back" aria-label="Back">
+          <span className="material-symbols-outlined">chevron_left</span>
         </button>
         <h2 className="server-detail-title">{server.name}</h2>
       </div>
@@ -141,10 +141,11 @@ export function ServerDetail({ server, onBack, onRefresh }: ServerDetailProps) {
 
       <div className="detail-section detail-section--accent">
         <div className="detail-section__header">
-          <h3>Configuration</h3>
+          <h3>Edit Server</h3>
           <p className="detail-section__description">Update server connection settings and authentication.</p>
         </div>
         <button className="btn btn-primary" onClick={handleEdit}>
+          <span className="material-symbols-outlined font-icon-sm">edit</span>
           Edit Configuration
         </button>
       </div>
@@ -155,6 +156,7 @@ export function ServerDetail({ server, onBack, onRefresh }: ServerDetailProps) {
           <p className="detail-section__description">Removing this server will disconnect it from all synced clients.</p>
         </div>
         <button className="btn btn-danger" onClick={() => window.mcpx.removeServer(server.name).then(onRefresh)}>
+          <span className="material-symbols-outlined font-icon-sm">delete</span>
           Remove Server
         </button>
       </div>

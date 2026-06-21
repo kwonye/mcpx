@@ -29,7 +29,8 @@ describe("ServerDetail", () => {
   it("renders structured detail sections", () => {
     render(<ServerDetail server={baseServer} onBack={() => {}} onRefresh={() => {}} />);
 
-    expect(screen.getAllByText("Configuration")).toHaveLength(2);
+    expect(screen.getByText("Configuration")).toBeDefined();
+    expect(screen.getByText("Edit Server")).toBeDefined();
     expect(screen.getByText("Auth Bindings")).toBeDefined();
     expect(screen.getByText("Client Sync Status")).toBeDefined();
     expect(screen.getByText("Danger Zone")).toBeDefined();
