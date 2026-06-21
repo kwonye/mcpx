@@ -33,10 +33,12 @@ const kiroEntrySchema = z.object({
   disabled: z.boolean().optional()
 }).passthrough();
 
-// Kiro MCP config at ~/.kiro/settings/mcp.json. The `type` field is optional (typically
-// omitted for simple HTTP servers, set to "http" for OAuth servers). The `url` field
-// determines HTTP transport; Kiro also supports type: "streamable-http" in remote
-// registry definitions but it's not commonly used in mcpServers entries.
+// Kiro MCP config at ~/.kiro/settings/mcp.json. The `type` field is optional (omitted
+// for simple HTTP servers where Kiro auto-detects transport from the `url` field; set to
+// "http" for OAuth servers, "stdio" for local servers). Kiro supports `type:
+// "streamable-http"` for remote streamable HTTP servers in mcpServers entries. Sync
+// omits `type` for managed entries so Kiro auto-detects the gateway's streamable-http
+// transport, matching the documented pattern for simple HTTP servers.
 export class KiroAdapter implements ClientAdapter {
   readonly id = "kiro" as const;
 
@@ -72,7 +74,7 @@ export class KiroAdapter implements ClientAdapter {
       }
 
       const entry = parsed.data;
-      if ((entry.type === undefined || entry.type === "http" || entry.type === "streamable-http") && entry.url && !entry.command) {
+      if ((entry.type === undefined || entry.type === "http" || entry.type === "streamable-http" || entry.type === "sse") && entry.url && !entry.command) {
         result.candidates.push({
           clientId: this.id,
           configPath,

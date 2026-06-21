@@ -1399,6 +1399,11 @@ describe("sync engine", () => {
       "settings",
       "cline_mcp_settings.json"
     );
+    // Cline's adapter skips sync when the config file doesn't exist (it won't
+    // create a config for an uninstalled IDE), so pre-create it like every
+    // other Cline test.
+    fs.mkdirSync(path.dirname(clinePath), { recursive: true });
+    fs.writeFileSync(clinePath, JSON.stringify({ mcpServers: {} }, null, 2));
 
     const first = syncAllClients(config, new SecretsManager());
     expect(first.hasErrors).toBe(false);
@@ -1588,6 +1593,47 @@ describe("sync engine", () => {
     expect(config.servers.kiro_remote).toEqual({
       transport: "http",
       url: "https://kiro.example.com/mcp",
+      headers: {
+        Authorization: "Bearer secret"
+      },
+      enabled: true
+    });
+  });
+
+  it("imports Qwen SSE (url) entries into mcpx", () => {
+    const env = setupTempEnv("mcpx-sync-qwen-import-");
+    cleanups.push(env.restore);
+
+    const config = defaultConfig();
+    saveConfig(config);
+
+    const qwenDir = path.join(env.root, ".qwen");
+    fs.mkdirSync(qwenDir, { recursive: true });
+    const qwenPath = path.join(qwenDir, "settings.json");
+    fs.writeFileSync(qwenPath, JSON.stringify({
+      mcpServers: {
+        qwen_sse: {
+          url: "https://events.example.com/mcp",
+          headers: {
+            Authorization: "Bearer secret"
+          }
+        }
+      }
+    }, null, 2));
+
+    const summary = syncAllClients(config, new SecretsManager());
+
+    expect(summary.hasErrors).toBe(false);
+    expect(summary.imports.imported).toEqual([
+      expect.objectContaining({
+        clientId: "qwen",
+        sourceEntryName: "qwen_sse",
+        serverName: "qwen_sse"
+      })
+    ]);
+    expect(config.servers.qwen_sse).toEqual({
+      transport: "http",
+      url: "https://events.example.com/mcp",
       headers: {
         Authorization: "Bearer secret"
       },

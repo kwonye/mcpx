@@ -29,6 +29,13 @@ const claudeDesktopEntrySchema = z.object({
   disabled: z.boolean().optional()
 }).passthrough();
 
+// Claude Desktop's claude_desktop_config.json does not natively support
+// HTTP/streamable-http transports — only stdio. mcpx therefore installs a
+// stdio proxy bridge (`mcpx proxy <name>`) per managed server, mirroring the
+// community mcp-remote pattern. supportsHttp() stays true because mcpx can
+// still wire its gateway in via this bridge (returning false would make
+// sync.ts skip the client as UNSUPPORTED_HTTP).
+// See https://modelcontextprotocol.io/quickstart/user
 function buildProxyEntry(entry: ManagedGatewayEntry): { command: string; args: string[] } {
   const upstreamName = entry.name.replace(/ \(mcpx\)$/, "");
   try {

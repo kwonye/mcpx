@@ -22,6 +22,7 @@ type JsonObject = Record<string, unknown>;
 const stringMapSchema = z.record(z.string(), z.string());
 const qwenEntrySchema = z.object({
   httpUrl: z.string().min(1).optional(),
+  url: z.string().min(1).optional(),
   headers: stringMapSchema.optional(),
   command: z.string().min(1).optional(),
   args: z.array(z.string()).optional(),
@@ -78,6 +79,22 @@ export class QwenAdapter implements ClientAdapter {
           spec: {
             transport: "http",
             url: entry.httpUrl,
+            headers: entry.headers,
+            enabled: !(entry.disabled === true || excludedSet.has(name))
+          }
+        });
+        continue;
+      }
+
+      if (entry.url && !entry.httpUrl && !entry.command) {
+        result.candidates.push({
+          clientId: this.id,
+          configPath,
+          sourceEntryName: name,
+          serverName: name,
+          spec: {
+            transport: "http",
+            url: entry.url,
             headers: entry.headers,
             enabled: !(entry.disabled === true || excludedSet.has(name))
           }
