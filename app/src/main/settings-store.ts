@@ -30,6 +30,9 @@ function normalizeSettings(value: unknown): DesktopSettings {
     startOnLoginEnabled: typeof partial.startOnLoginEnabled === "boolean"
       ? partial.startOnLoginEnabled
       : DEFAULT_DESKTOP_SETTINGS.startOnLoginEnabled,
+    errorNotificationsEnabled: typeof partial.errorNotificationsEnabled === "boolean"
+      ? partial.errorNotificationsEnabled
+      : DEFAULT_DESKTOP_SETTINGS.errorNotificationsEnabled,
     activeTab
   };
 }

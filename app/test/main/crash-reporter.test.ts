@@ -46,6 +46,7 @@ describe("crashReporter initialization", () => {
         setApplicationMenu: vi.fn(),
         buildFromTemplate: vi.fn().mockReturnValue({}),
       },
+      Notification: { isSupported: () => false },
     }));
 
     vi.doMock("@mcpx/core", () => ({
@@ -137,6 +138,7 @@ describe("crashReporter initialization", () => {
         setApplicationMenu: vi.fn(),
         buildFromTemplate: vi.fn().mockReturnValue({}),
       },
+      Notification: { isSupported: () => false },
     }));
 
     vi.doMock("@mcpx/core", () => ({

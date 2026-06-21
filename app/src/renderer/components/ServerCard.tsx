@@ -12,7 +12,7 @@ interface ServerCardProps {
   isOAuth: boolean;
   syncedCount: number;
   errorCount: number;
-  tokenCount?: { tools: number; resources: number; prompts: number; total: number; error?: string };
+  tokenCount?: { tools: number; resources: number; prompts: number; total: number; error?: string; runtimeError?: string };
   onRefresh: () => void;
   onClick: () => void;
   onAuthClick?: () => void;
@@ -75,6 +75,17 @@ export function ServerCard(props: ServerCardProps) {
                   >
                     {buttonLabel}
                   </button>
+                );
+              })()}
+              {props.enabled && props.tokenCount?.runtimeError && !props.tokenCount?.error && (() => {
+                const { authLike } = describeTokenError(props.tokenCount.runtimeError!);
+                return (
+                  <span
+                    className="token-badge token-badge--error"
+                    title={props.tokenCount.runtimeError}
+                  >
+                    {authLike ? "Sign-in expired" : "call error"}
+                  </span>
                 );
               })()}
             </div>

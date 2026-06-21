@@ -88,7 +88,7 @@ export function Dashboard() {
       target: string;
       authBindings: Array<{ kind: string; key: string; value: string }>;
       clients: Array<{ clientId: string; status: string; managed: boolean }>;
-      tokenCount?: { tools: number; resources: number; prompts: number; total: number; error?: string };
+      tokenCount?: { tools: number; resources: number; prompts: number; total: number; error?: string; runtimeError?: string };
     }>;
     projects?: Record<string, { name: string; path: string }>;
     totalGlobalTokens?: number;

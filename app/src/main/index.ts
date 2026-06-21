@@ -17,6 +17,7 @@ import { showPopover } from "./popover";
 import { loadDesktopSettings } from "./settings-store";
 import { applyStartOnLoginSetting, wasOpenedAtLogin } from "./login-item";
 import { setAutoUpdateEnabled } from "./update-manager";
+import { startErrorNotifier } from "./error-notifier";
 import { getDesktopProductName, isDevDesktopApp } from "./app-flavor";
 import { resolveLoginShellPath } from "./shell-env";
 import { hideDashboard } from "./app-control";
@@ -157,6 +158,9 @@ async function startMainProcessImpl(): Promise<void> {
 
   // Register IPC handlers
   registerIpcHandlers();
+
+  // Surface upstream call-time / re-auth errors as macOS notifications.
+  startErrorNotifier();
 
   // Set up daemon start/stop handlers from tray
   setStartDaemonHandler(() => {

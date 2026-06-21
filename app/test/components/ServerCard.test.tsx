@@ -222,6 +222,73 @@ describe("ServerCard", () => {
     );
     expect(screen.queryByText(/re-authenticate/i)).toBeNull();
   });
+
+  it("shows an informational runtimeError badge for a stdio call-time failure", () => {
+    const runtimeError = "MCP error -32603: Not authenticated. Run 'railway login' first. Unauthorized";
+    render(
+      <ServerCard
+        name="Railway"
+        enabled={true}
+        transport="stdio"
+        target="npx -y @railway/mcp-server"
+        authConfigured={false}
+        isOAuth={false}
+        syncedCount={3}
+        errorCount={0}
+        tokenCount={{ tools: 120, resources: 0, prompts: 0, total: 120, runtimeError }}
+        onRefresh={() => {}}
+        onClick={() => {}}
+      />
+    );
+
+    const badge = screen.getByText("Sign-in expired");
+    expect(badge.tagName.toLowerCase()).toBe("span");
+    expect(badge.getAttribute("title")).toBe(runtimeError);
+    expect(screen.queryByText(/re-authenticate/i)).toBeNull();
+  });
+
+  it("labels a non-auth runtimeError as 'call error'", () => {
+    render(
+      <ServerCard
+        name="db"
+        enabled={true}
+        transport="stdio"
+        target="npx db-mcp"
+        authConfigured={false}
+        isOAuth={false}
+        syncedCount={1}
+        errorCount={0}
+        tokenCount={{ tools: 50, resources: 0, prompts: 0, total: 50, runtimeError: "Connection refused" }}
+        onRefresh={() => {}}
+        onClick={() => {}}
+      />
+    );
+
+    const badge = screen.getByText("call error");
+    expect(badge.tagName.toLowerCase()).toBe("span");
+    expect(badge.getAttribute("title")).toBe("Connection refused");
+  });
+
+  it("does not show a runtimeError badge when there is no runtimeError", () => {
+    render(
+      <ServerCard
+        name="ok"
+        enabled={true}
+        transport="stdio"
+        target="npx ok-mcp"
+        authConfigured={false}
+        isOAuth={false}
+        syncedCount={1}
+        errorCount={0}
+        tokenCount={{ tools: 80, resources: 0, prompts: 0, total: 80 }}
+        onRefresh={() => {}}
+        onClick={() => {}}
+      />
+    );
+
+    expect(screen.queryByText("call error")).toBeNull();
+    expect(screen.queryByText("Sign-in expired")).toBeNull();
+  });
 });
 
 describe("describeTokenError", () => {

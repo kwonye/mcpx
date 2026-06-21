@@ -98,6 +98,22 @@ export function SettingsPanel() {
         </div>
       </div>
 
+      <div className="setting-card">
+        <div className="setting-card__item">
+          <div>
+            <span className="setting-card__label">Error notifications</span>
+            <p className="setting-card__description">Show a macOS notification when an MCP server starts failing or needs re-authentication.</p>
+          </div>
+          <Toggle
+            id="toggle-errorNotifications"
+            checked={settings.errorNotificationsEnabled}
+            onChange={(checked) => onToggle("errorNotificationsEnabled", checked)}
+            disabled={busy}
+            label="Error notifications"
+          />
+        </div>
+      </div>
+
       <div className="setting-card setting-card--grouped">
         <h3 className="setting-card__group-title">Updates</h3>
         <div className="setting-card__item">

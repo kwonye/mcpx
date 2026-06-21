@@ -1,4 +1,6 @@
 import http from "node:http";
+import fs from "node:fs";
+import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "bun:test";
 import { createGatewayServer } from "../src/gateway/server.js";
@@ -1016,5 +1018,111 @@ describe("gateway passthrough", () => {
     expect(payload.result.tools.map((t: { name: string }) => t.name)).toEqual(["echo"]);
     expect(tokenRequests).toBe(1);
     expect(JSON.parse(secrets.getSecret("oauth_vercel_tokens") ?? "{}").tokens.access_token).toBe("new-token");
+  });
+
+  it("surfaces stdio call-time upstream errors as runtimeError in custom/tokenCounts", async () => {
+    const env = setupTempEnv("mcpx-gateway-runtime-error-");
+    cleanups.push(env.restore);
+
+    const flagPath = path.join(env.root, "fail-flag");
+    fs.writeFileSync(flagPath, "1", "utf8");
+
+    const fixturePath = fileURLToPath(new URL("./fixtures/mock-stdio-call-error-server.cjs", import.meta.url));
+
+    const config = defaultConfig();
+    config.servers.Railway = {
+      transport: "stdio",
+      command: process.execPath,
+      args: [fixturePath],
+      env: { MOCK_CALL_FAIL_FLAG: flagPath }
+    };
+    saveConfig(config);
+
+    const gateway = createGatewayServer({
+      port: 0,
+      expectedToken: "test-local-token",
+      secrets: new SecretsManager()
+    });
+    await waitForListening(gateway);
+    cleanups.push(() => closeServer(gateway));
+
+    const gatewayAddress = gateway.address();
+    if (!gatewayAddress || typeof gatewayAddress === "string") {
+      throw new Error("Failed to resolve gateway address.");
+    }
+
+    const baseUrl = `http://127.0.0.1:${gatewayAddress.port}/mcp`;
+    const authHeader = { "content-type": "application/json", Authorization: "Bearer test-local-token" };
+
+    // tools/list succeeds (listing needs no auth).
+    const listResponse = await fetch(baseUrl, {
+      method: "POST",
+      headers: authHeader,
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} })
+    });
+    expect(listResponse.status).toBe(200);
+    const listPayload = (await listResponse.json()) as { result: { tools: Array<{ name: string }> } };
+    expect(listPayload.result.tools.map((tool) => tool.name)).toContain("whoami");
+
+    // tools/call fails with the upstream's auth error.
+    const failCallResponse = await fetch(baseUrl, {
+      method: "POST",
+      headers: authHeader,
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 2,
+        method: "tools/call",
+        params: { name: "whoami", arguments: {} }
+      })
+    });
+    expect(failCallResponse.status).toBe(200);
+    const failCallPayload = (await failCallResponse.json()) as { error: { code: number; message: string } };
+    expect(failCallPayload.error.code).toBe(-32000);
+    expect(failCallPayload.error.message).toContain("Not authenticated");
+
+    // custom/tokenCounts reflects the call-time error as runtimeError while the
+    // list still succeeds (total > 0, no method-level error).
+    const failTokensResponse = await fetch(baseUrl, {
+      method: "POST",
+      headers: authHeader,
+      body: JSON.stringify({ jsonrpc: "2.0", id: 3, method: "custom/tokenCounts", params: {} })
+    });
+    expect(failTokensResponse.status).toBe(200);
+    const failTokensPayload = (await failTokensResponse.json()) as {
+      result: Record<string, { total: number; error?: string; runtimeError?: string }>;
+    };
+    expect(failTokensPayload.result.Railway).toBeDefined();
+    expect(failTokensPayload.result.Railway.total).toBeGreaterThan(0);
+    expect(failTokensPayload.result.Railway.error).toBeUndefined();
+    expect(failTokensPayload.result.Railway.runtimeError).toBeDefined();
+    expect(failTokensPayload.result.Railway.runtimeError).toContain("Not authenticated");
+
+    // Clear the flag so the next call succeeds, clearing the recorded runtime error.
+    fs.writeFileSync(flagPath, "0", "utf8");
+
+    const okCallResponse = await fetch(baseUrl, {
+      method: "POST",
+      headers: authHeader,
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 4,
+        method: "tools/call",
+        params: { name: "whoami", arguments: {} }
+      })
+    });
+    expect(okCallResponse.status).toBe(200);
+    const okCallPayload = (await okCallResponse.json()) as { result?: unknown; error?: { code: number } };
+    expect(okCallPayload.error).toBeUndefined();
+
+    const okTokensResponse = await fetch(baseUrl, {
+      method: "POST",
+      headers: authHeader,
+      body: JSON.stringify({ jsonrpc: "2.0", id: 5, method: "custom/tokenCounts", params: {} })
+    });
+    expect(okTokensResponse.status).toBe(200);
+    const okTokensPayload = (await okTokensResponse.json()) as {
+      result: Record<string, { total: number; error?: string; runtimeError?: string }>;
+    };
+    expect(okTokensPayload.result.Railway.runtimeError).toBeUndefined();
   });
 });

@@ -292,7 +292,8 @@ export async function getUpstreamTokenCounts(
     const fingerprint = specFingerprint(upstream.spec);
     const cached = runtime.tokenCache.get(upstream.name);
     if (cached?.fingerprint === fingerprint) {
-      results[upstream.name] = cached.count;
+      const runtimeError = runtime.upstreamErrors?.get(upstream.name);
+      results[upstream.name] = runtimeError ? { ...cached.count, runtimeError } : cached.count;
       continue;
     }
 
@@ -340,7 +341,8 @@ export async function getUpstreamTokenCounts(
     if (errors.length === 0) {
       runtime.tokenCache.set(upstream.name, { fingerprint, count: countObj });
     }
-    results[upstream.name] = countObj;
+    const runtimeError = runtime.upstreamErrors?.get(upstream.name);
+    results[upstream.name] = runtimeError ? { ...countObj, runtimeError } : countObj;
   }
 
   return results;
@@ -843,11 +845,13 @@ async function routeNamespacedCall(
 
     try {
       const result = await callUpstream(upstream, method, upstreamParams, id, secrets, runtime, clientAuthorizationHeader);
+      runtime.upstreamErrors?.delete(upstream.name);
       return makeResult(id, result);
     } catch (error) {
       if (isAuthChallenge(error)) {
         throw error;
       }
+      runtime.upstreamErrors?.set(upstream.name, (error as Error).message);
       return makeError(id, -32000, (error as Error).message);
     }
   }
@@ -878,11 +882,13 @@ async function routeNamespacedCall(
 
     try {
       const result = await callUpstream(upstream, method, upstreamParams, id, secrets, runtime, clientAuthorizationHeader);
+      runtime.upstreamErrors?.delete(upstream.name);
       return makeResult(id, result);
     } catch (error) {
       if (isAuthChallenge(error)) {
         throw error;
       }
+      runtime.upstreamErrors?.set(upstream.name, (error as Error).message);
       return makeError(id, -32000, (error as Error).message);
     }
   }
@@ -912,11 +918,13 @@ async function routeNamespacedCall(
 
   try {
     const result = await callUpstream(upstream, method, upstreamParams, id, secrets, runtime, clientAuthorizationHeader);
+    runtime.upstreamErrors?.delete(upstream.name);
     return makeResult(id, result);
   } catch (error) {
     if (isAuthChallenge(error)) {
       throw error;
     }
+    runtime.upstreamErrors?.set(upstream.name, (error as Error).message);
     return makeError(id, -32000, (error as Error).message);
   }
 }

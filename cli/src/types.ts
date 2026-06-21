@@ -203,4 +203,5 @@ export interface UpstreamTokenCount {
   prompts: number;
   total: number;
   error?: string;
+  runtimeError?: string;
 }
