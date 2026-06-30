@@ -1,7 +1,7 @@
 import { z } from "zod";
 import path from "node:path";
 import fs from "node:fs";
-import { normalizeServerSpecEnabled, type ClientId, type McpxConfig, type StdioServerSpec, type UpstreamServerSpec } from "../types.js";
+import { normalizeServerSpecEnabled, type ClientId, type McpxConfig, type StdioServerSpec, type UpstreamServerSpec, type ManagedPlugin, type PluginComponent, type DiscoveredComponents } from "../types.js";
 import { getConfigPath, findProjectConfigPath } from "./paths.js";
 import { readJsonFile, writeJsonAtomic } from "../util/fs.js";
 import { repairConfig } from "./config-repair.js";
@@ -37,6 +37,62 @@ const projectEntrySchema = z.object({
   disabledServers: z.array(z.string()).default([])
 });
 
+const pluginComponentSchema = z.enum(["mcpServers", "skills", "hooks", "agents", "commands"]);
+
+const discoveredComponentSchema = z.object({
+  id: z.string(),
+  type: pluginComponentSchema,
+  path: z.string(),
+  description: z.string().optional(),
+});
+
+const discoveredMcpServerSchema = z.object({
+  id: z.string(),
+  command: z.string(),
+  args: z.array(z.string()).optional(),
+  env: z.record(z.string(), z.string()).optional(),
+  cwd: z.string().optional(),
+});
+
+const discoveredComponentsSchema = z.object({
+  skills: z.array(discoveredComponentSchema).default([]),
+  commands: z.array(discoveredComponentSchema).default([]),
+  agents: z.array(discoveredComponentSchema).default([]),
+  hooks: z.array(discoveredComponentSchema).default([]),
+  mcpServers: z.array(discoveredMcpServerSchema).default([]),
+});
+
+const managedPluginSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  source: z.string(),
+  version: z.string(),
+  ref: z.string(),
+  resolvedSha: z.string(),
+  installedAt: z.string(),
+  root: z.string(),
+  dataDir: z.string(),
+  components: z.record(pluginComponentSchema, z.boolean()).default({} as Record<string, boolean>),
+  discovered: discoveredComponentsSchema.default({} as unknown as DiscoveredComponents),
+  enabled: z.boolean().default(true),
+  status: z.enum(["healthy", "unhealthy", "preparing", "updating", "error"]).default("healthy"),
+  error: z.string().optional(),
+  serverNames: z.array(z.string()).default([]),
+  projectedClients: z.array(z.string()).default([]),
+  approvals: z.object({
+    mcpServers: z.boolean().optional(),
+    skills: z.boolean().optional(),
+    hooks: z.boolean().optional(),
+    agents: z.boolean().optional(),
+    commands: z.boolean().optional(),
+  }).optional(),
+  projectOverrides: z.record(z.string(), z.object({
+    enabled: z.boolean().optional(),
+    components: z.record(pluginComponentSchema, z.boolean()).optional(),
+    config: z.record(z.string(), z.unknown()).optional(),
+  })).optional(),
+});
+
 const configSchema = z.object({
   schemaVersion: z.literal(1).default(1),
   gateway: z.object({
@@ -50,7 +106,8 @@ const configSchema = z.object({
   }),
   servers: z.record(z.string(), serverSchema).default({}),
   clients: z.record(z.string(), clientStateSchema).default({}),
-  projects: z.record(z.string(), projectEntrySchema).default({})
+  projects: z.record(z.string(), projectEntrySchema).default({}),
+  plugins: z.record(z.string(), managedPluginSchema).default({})
 });
 
 export interface ProjectLocalConfig {
@@ -73,7 +130,8 @@ export function defaultConfig(): McpxConfig {
     },
     servers: {},
     clients: {},
-    projects: {}
+    projects: {},
+    plugins: {}
   };
 }
 
@@ -100,7 +158,8 @@ export function loadConfig(configPath = getConfigPath()): McpxConfig {
     gateway: parsed.data.gateway,
     servers,
     clients: clientEntries,
-    projects: parsed.data.projects
+    projects: parsed.data.projects,
+    plugins: parsed.data.plugins
   });
 }
 

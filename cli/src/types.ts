@@ -1,5 +1,7 @@
 export type ClientId = "claude" | "claude-desktop" | "codex" | "cursor" | "cline" | "opencode" | "kiro" | "vscode" | "qwen";
 
+export type PluginComponent = "mcpServers" | "skills" | "hooks" | "agents" | "commands";
+
 export interface HttpServerSpec {
   transport: "http";
   url: string;
@@ -51,6 +53,7 @@ export interface McpxConfig {
   servers: Record<string, UpstreamServerSpec>;
   clients: Partial<Record<ClientId, ClientSyncState>>;
   projects?: Record<string, ProjectConfig>;
+  plugins?: Record<string, ManagedPlugin>;
 }
 
 export interface ManagedEntry {
@@ -139,6 +142,28 @@ export interface Skill {
   content: string;
 }
 
+export interface PluginSyncInput {
+  pluginId: string;
+  pluginName: string;
+  pluginRoot: string;
+  components: Record<PluginComponent, boolean>;
+  approvals: Partial<Record<PluginComponent, boolean>>;
+  enabled: boolean;
+  serverNames: string[];
+  skills: DiscoveredComponent[];
+  commands: DiscoveredComponent[];
+  agents: DiscoveredComponent[];
+  hooks: DiscoveredComponent[];
+}
+
+export interface PluginSyncResult {
+  clientId: ClientId;
+  status: "SYNCED" | "ERROR" | "SKIPPED";
+  projectedDirs: string[];
+  unsupported: PluginComponent[];
+  error?: string;
+}
+
 export interface ClientAdapter {
   id: ClientId;
   detectConfigPath(): string | null;
@@ -146,6 +171,7 @@ export interface ClientAdapter {
   scanForImports(config: McpxConfig, managedIndex: ManagedIndex): ClientImportScanResult;
   syncGateway(config: McpxConfig, options: SyncClientOptions): SyncResult;
   syncSkills?(skills: Skill[]): void;
+  syncPlugins?(plugins: PluginSyncInput[]): PluginSyncResult;
 }
 
 export interface SyncClientOptions {
@@ -204,4 +230,71 @@ export interface UpstreamTokenCount {
   total: number;
   error?: string;
   runtimeError?: string;
+}
+
+export type PluginSourceType = "github" | "git" | "git-subdir" | "local" | "npm" | "marketplace";
+
+export interface PluginSource {
+  type: PluginSourceType;
+  original: string;
+  ref?: string;
+  resolvedSha?: string;
+}
+
+export interface DiscoveredComponent {
+  id: string;
+  type: PluginComponent;
+  path: string;
+  description?: string;
+}
+
+export interface DiscoveredMcpServer {
+  id: string;
+  command: string;
+  args?: string[];
+  env?: Record<string, string>;
+  cwd?: string;
+}
+
+export interface DiscoveredComponents {
+  skills: DiscoveredComponent[];
+  commands: DiscoveredComponent[];
+  agents: DiscoveredComponent[];
+  hooks: DiscoveredComponent[];
+  mcpServers: DiscoveredMcpServer[];
+}
+
+export interface PluginManifest {
+  name: string;
+  version: string;
+  description?: string;
+  source?: string;
+  icon?: string;
+  assets?: string[];
+  entry?: string;
+}
+
+export interface ManagedPlugin {
+  id: string;
+  name: string;
+  source: string;
+  version: string;
+  ref: string;
+  resolvedSha: string;
+  installedAt: string;
+  root: string;
+  dataDir: string;
+  components: Record<PluginComponent, boolean>;
+  discovered: DiscoveredComponents;
+  enabled: boolean;
+  status: "healthy" | "unhealthy" | "preparing" | "updating" | "error";
+  error?: string;
+  serverNames: string[];
+  projectedClients: string[];
+  approvals?: Partial<Record<PluginComponent, boolean>>;
+  projectOverrides?: Record<string, {
+    enabled?: boolean;
+    components?: Partial<Record<PluginComponent, boolean>>;
+    config?: Record<string, unknown>;
+  }>;
 }

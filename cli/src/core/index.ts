@@ -52,6 +52,18 @@ export type { HttpAuthProbeResult } from "./auth-probe.js";
 // Managed Index
 export { loadManagedIndex } from "./managed-index.js";
 
+// Plugin Management
+export { PluginManager } from "./plugin-manager.js";
+export { PluginCache } from "./plugin-cache.js";
+export { PluginDataManager } from "./plugin-data.js";
+export { syncPluginsToClient, prunePluginProjections, pruneAllPluginProjections } from "./plugin-projections.js";
+export { PluginLifecycle } from "./plugin-lifecycle.js";
+export { parseSource } from "./plugin-source.js";
+export { readManifest, discoverComponents, hasManifest } from "./plugin-parse.js";
+
+// Plugin management functions
+export { inspectPlugin, installPlugin, preparePlugin, updatePlugin, uninstallPlugin, enablePlugin, disablePlugin, approvePluginComponent, getPluginStatus, listPlugins } from "./plugin-manager.js";
+
 // Paths
 export { getConfigPath, getManagedIndexPath } from "./paths.js";
 
@@ -93,5 +105,13 @@ export type {
   SyncResult,
   ManagedGatewayEntry,
   ProjectConfig,
-  ProjectScope
+  ProjectScope,
+  ManagedPlugin,
+  PluginManifest,
+  PluginComponent,
+  PluginSource,
+  DiscoveredComponents,
+  DiscoveredComponent,
+  PluginSyncInput,
+  PluginSyncResult
 } from "../types.js";

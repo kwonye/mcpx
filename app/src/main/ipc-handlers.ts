@@ -31,7 +31,8 @@ import {
   toSecretRef,
   parseCliAddCommand,
   tokenizeCommandLine,
-  runOAuthLogin
+  runOAuthLogin,
+  PluginManager
 } from "@mcpx/core";
 import type { HttpServerSpec, StdioServerSpec, UpstreamServerSpec } from "@mcpx/core";
 import { IPC } from "../shared/ipc-channels";
@@ -404,5 +405,61 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(IPC.DELETE_SKILL, (_event, id: string) => {
     deleteSkill(id);
     return { id, success: true };
+  });
+
+  // Plugin Management
+  ipcMain.handle(IPC.PLUGIN_INSPECT, async (_event, source: string) => {
+    const { inspectPlugin } = await import("@mcpx/core");
+    return inspectPlugin(source);
+  });
+
+  ipcMain.handle(IPC.PLUGIN_INSTALL, async (_event, source: string, options?: unknown) => {
+    const { installPlugin } = await import("@mcpx/core");
+    return installPlugin(source, options as any);
+  });
+
+  ipcMain.handle(IPC.PLUGIN_PREPARE, async (_event, name: string) => {
+    const { preparePlugin } = await import("@mcpx/core");
+    await preparePlugin(name);
+    return { name, success: true };
+  });
+
+  ipcMain.handle(IPC.PLUGIN_UPDATE, async (_event, name: string) => {
+    const { updatePlugin } = await import("@mcpx/core");
+    return updatePlugin(name);
+  });
+
+  ipcMain.handle(IPC.PLUGIN_UNINSTALL, async (_event, name: string, options?: unknown) => {
+    const { uninstallPlugin } = await import("@mcpx/core");
+    await uninstallPlugin(name, options as any);
+    return { name, success: true };
+  });
+
+  ipcMain.handle(IPC.PLUGIN_ENABLE, async (_event, name: string) => {
+    const { enablePlugin } = await import("@mcpx/core");
+    await enablePlugin(name);
+    return { name, success: true };
+  });
+
+  ipcMain.handle(IPC.PLUGIN_DISABLE, async (_event, name: string) => {
+    const { disablePlugin } = await import("@mcpx/core");
+    await disablePlugin(name);
+    return { name, success: true };
+  });
+
+  ipcMain.handle(IPC.PLUGIN_APPROVE, async (_event, name: string, component: string) => {
+    const { approvePluginComponent } = await import("@mcpx/core");
+    await approvePluginComponent(name, component);
+    return { name, component, success: true };
+  });
+
+  ipcMain.handle(IPC.PLUGIN_STATUS, async (_event, name?: string) => {
+    const { getPluginStatus } = await import("@mcpx/core");
+    return getPluginStatus(name);
+  });
+
+  ipcMain.handle(IPC.PLUGIN_LIST, async () => {
+    const { listPlugins } = await import("@mcpx/core");
+    return listPlugins();
   });
 }

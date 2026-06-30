@@ -31,5 +31,19 @@ export const IPC = {
   PROJECT_INIT: "mcpx:project-init",
   PROJECT_REMOVE: "mcpx:project-remove",
   PROJECT_SET_SERVER_ENABLED: "mcpx:project-set-server-enabled",
-  SELECT_DIRECTORY: "mcpx:select-directory"
+  SELECT_DIRECTORY: "mcpx:select-directory",
+
+  // Plugins
+  PLUGIN_INSPECT: "mcpx:plugin-inspect",
+  PLUGIN_INSTALL: "mcpx:plugin-install",
+  PLUGIN_PREPARE: "mcpx:plugin-prepare",
+  PLUGIN_UPDATE: "mcpx:plugin-update",
+  PLUGIN_UNINSTALL: "mcpx:plugin-uninstall",
+  PLUGIN_ENABLE: "mcpx:plugin-enable",
+  PLUGIN_DISABLE: "mcpx:plugin-disable",
+  PLUGIN_APPROVE: "mcpx:plugin-approve",
+  PLUGIN_CONFIG_SET: "mcpx:plugin-config-set",
+  PLUGIN_SYNC: "mcpx:plugin-sync",
+  PLUGIN_STATUS: "mcpx:plugin-status",
+  PLUGIN_LIST: "mcpx:plugin-list"
 } as const;

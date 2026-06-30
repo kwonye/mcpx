@@ -4,7 +4,8 @@ import path from "node:path";
 import fs from "node:fs";
 import { parse, stringify } from "@iarna/toml";
 import { z } from "zod";
-import type { ClientAdapter, ManagedIndex, McpxConfig, SyncClientOptions, SyncResult } from "../types.js";
+import type { ClientAdapter, ManagedIndex, McpxConfig, SyncClientOptions, SyncResult, PluginSyncInput, PluginSyncResult } from "../types.js";
+import { syncPluginsToClient } from "../core/plugin-projections.js";
 import {
   buildImportSkip,
   emptyImportScan,
@@ -48,6 +49,10 @@ export class CodexAdapter implements ClientAdapter {
 
   supportsHttp(): boolean {
     return true;
+  }
+
+  syncPlugins(plugins: PluginSyncInput[]): PluginSyncResult {
+    return syncPluginsToClient(this.id, plugins);
   }
 
   scanForImports(_config: McpxConfig, managedIndex: ManagedIndex) {

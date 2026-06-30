@@ -17,7 +17,7 @@ import { probeHttpAuthRequirement } from "./core/auth-probe.js";
 import { fetchRegistryServerDetail, selectBestPackage, extractRequiredInputs, mapRegistryToSpec } from "./core/registry-client.js";
 import type { RequiredInput } from "./core/registry-client.js";
 import { syncAllClients } from "./core/sync.js";
-import { isServerEnabled, type ClientId, type ClientStatus, type HttpServerSpec, type McpxConfig, type StdioServerSpec, type UpstreamServerSpec } from "./types.js";
+import { isServerEnabled, type ClientId, type ClientStatus, type HttpServerSpec, type McpxConfig, type StdioServerSpec, type UpstreamServerSpec, type PluginComponent } from "./types.js";
 import { parseCompatibilityArgs } from "./compat/index.js";
 import {
   applyAuthReference,
@@ -1849,6 +1849,152 @@ function registerProjectCommands(program: Command, cliPath: string): void {
     });
 }
 
+const PLUGIN_COMPONENTS = ["mcpServers", "skills", "hooks", "agents", "commands"] as const;
+
+function registerPluginCommands(program: Command, _cliPath: string): void {
+  const plugin = program.command("plugin").description("Manage plugins");
+
+  plugin
+    .command("inspect <source>")
+    .description("Inspect plugin manifest and components")
+    .action(async (source: string) => {
+      const { inspectPlugin } = await import("./core/plugin-manager.js");
+      try {
+        const info = await inspectPlugin(source);
+        process.stdout.write(JSON.stringify(info, null, 2) + "\n");
+      } catch (e: any) {
+        process.stderr.write(`Error: ${e.message}\n`);
+        process.exit(1);
+      }
+    });
+
+  plugin
+    .command("install <source>")
+    .option("--name <name>", "Plugin name")
+    .option("--no-enable", "Don't enable plugin after install")
+    .description("Install plugin")
+    .action(async (source: string, options: { name?: string; noEnable?: boolean }) => {
+      const { installPlugin } = await import("./core/plugin-manager.js");
+      try {
+        const p = await installPlugin(source, {
+          name: options.name,
+          enabled: !options.noEnable,
+        });
+        process.stdout.write(`Plugin installed: ${p.id}\n`);
+      } catch (e: any) {
+        process.stderr.write(`Error: ${e.message}\n`);
+        process.exit(1);
+      }
+    });
+
+  plugin
+    .command("approve <name> <component>")
+    .description("Approve a plugin component (hooks, mcpServers)")
+    .action(async (name: string, component: string) => {
+      const { approvePluginComponent } = await import("./core/plugin-manager.js");
+      try {
+        await approvePluginComponent(name, component);
+        process.stdout.write(`Approved ${component} for plugin ${name}\n`);
+      } catch (e: any) {
+        process.stderr.write(`Error: ${e.message}\n`);
+        process.exit(1);
+      }
+    });
+
+  plugin
+    .command("prepare <name>")
+    .description("Install plugin dependencies")
+    .action(async (name: string) => {
+      const { preparePlugin } = await import("./core/plugin-manager.js");
+      try {
+        await preparePlugin(name);
+        process.stdout.write(`Plugin ${name} prepared\n`);
+      } catch (e: any) {
+        process.stderr.write(`Error: ${e.message}\n`);
+        process.exit(1);
+      }
+    });
+
+  plugin
+    .command("update <name>")
+    .description("Update plugin to latest version")
+    .action(async (name: string) => {
+      const { updatePlugin } = await import("./core/plugin-manager.js");
+      try {
+        const p = await updatePlugin(name);
+        process.stdout.write(`Plugin ${name} updated to ${p.version}\n`);
+      } catch (e: any) {
+        process.stderr.write(`Error: ${e.message}\n`);
+        process.exit(1);
+      }
+    });
+
+  plugin
+    .command("uninstall <name>")
+    .option("--keep-data", "Keep plugin data after uninstall")
+    .description("Uninstall plugin")
+    .action(async (name: string, options: { keepData?: boolean }) => {
+      const { uninstallPlugin } = await import("./core/plugin-manager.js");
+      try {
+        await uninstallPlugin(name, options.keepData || false);
+        process.stdout.write(`Plugin ${name} uninstalled\n`);
+      } catch (e: any) {
+        process.stderr.write(`Error: ${e.message}\n`);
+        process.exit(1);
+      }
+    });
+
+  plugin
+    .command("enable <name>")
+    .description("Enable plugin")
+    .action(async (name: string) => {
+      const { enablePlugin } = await import("./core/plugin-manager.js");
+      try {
+        await enablePlugin(name);
+        process.stdout.write(`Plugin ${name} enabled\n`);
+      } catch (e: any) {
+        process.stderr.write(`Error: ${e.message}\n`);
+        process.exit(1);
+      }
+    });
+
+  plugin
+    .command("disable <name>")
+    .description("Disable plugin")
+    .action(async (name: string) => {
+      const { disablePlugin } = await import("./core/plugin-manager.js");
+      try {
+        await disablePlugin(name);
+        process.stdout.write(`Plugin ${name} disabled\n`);
+      } catch (e: any) {
+        process.stderr.write(`Error: ${e.message}\n`);
+        process.exit(1);
+      }
+    });
+
+  plugin
+    .command("status [name]")
+    .description("Show plugin status")
+    .action(async (name?: string) => {
+      const { getPluginStatus, listPlugins } = await import("./core/plugin-manager.js");
+      try {
+        if (name) {
+          const p = await getPluginStatus(name);
+          if (!p) {
+            process.stderr.write(`Error: Plugin ${name} not found\n`);
+            process.exit(1);
+          }
+          process.stdout.write(JSON.stringify(p, null, 2) + "\n");
+        } else {
+          const plugins = await listPlugins();
+          process.stdout.write(JSON.stringify(plugins, null, 2) + "\n");
+        }
+      } catch (e: any) {
+        process.stderr.write(`Error: ${e.message}\n`);
+        process.exit(1);
+      }
+    });
+}
 
 function registerProxyCommand(program: Command): void {
   program
@@ -1933,6 +2079,7 @@ export async function runCli(argv = process.argv): Promise<void> {
   registerMcpCompat(program, cliPath);
   registerUpdateCommand(program);
   registerProjectCommands(program, cliPath);
+  registerPluginCommands(program, cliPath);
 
   await program.parseAsync(argv);
 }

@@ -79,6 +79,22 @@ export function getUpdateLockPath(): string {
   return path.join(getUpdatesDir(), ".update.lock");
 }
 
+export function getPluginCacheRoot(): string {
+  return path.join(getDataRoot(), "mcpx", "plugins", "cache");
+}
+
+export function getPluginDataRoot(): string {
+  return path.join(getDataRoot(), "mcpx", "plugins", "data");
+}
+
+export function getPluginProjectionsRoot(): string {
+  return path.join(getDataRoot(), "mcpx", "plugins", "projections");
+}
+
+export function getPluginLogsRoot(): string {
+  return path.join(getStateRoot(), "mcpx", "plugins", "logs");
+}
+
 export function ensureDir(dirPath: string): void {
   fs.mkdirSync(dirPath, { recursive: true });
 }

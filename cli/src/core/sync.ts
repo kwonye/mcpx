@@ -4,7 +4,8 @@ import type {
   McpxConfig,
   ProjectScope,
   SyncImportReport,
-  SyncResult
+  SyncResult,
+  PluginSyncInput
 } from "../types.js";
 import { isServerEnabled } from "../types.js";
 import { managedGatewayEntryName } from "../adapters/utils/index.js";
@@ -147,12 +148,36 @@ export function syncAllClients(config: McpxConfig, secrets: SecretsManager, targ
 
   const results: SyncResult[] = [];
 
+  // Build plugin sync inputs
+  const pluginInputs: PluginSyncInput[] = Object.values(config.plugins ?? {}).map((p) => ({
+    pluginId: p.id,
+    pluginName: p.name,
+    pluginRoot: p.root,
+    components: p.components,
+    approvals: p.approvals ?? {},
+    enabled: p.enabled,
+    serverNames: p.serverNames,
+    skills: p.discovered.skills,
+    commands: p.discovered.commands,
+    agents: p.discovered.agents,
+    hooks: p.discovered.hooks,
+  }));
+
   for (const adapter of filteredAdapters) {
     if (adapter.syncSkills) {
       try {
         adapter.syncSkills(skills);
       } catch (error) {
         // Log or handle skill sync error if needed, for now we continue
+      }
+    }
+
+    // Dispatch plugin sync to adapters that support it
+    if (adapter.syncPlugins && pluginInputs.length > 0) {
+      try {
+        adapter.syncPlugins(pluginInputs);
+      } catch (error) {
+        // Plugin sync error; continue
       }
     }
 

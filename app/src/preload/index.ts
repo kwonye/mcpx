@@ -33,6 +33,21 @@ const api = {
     save: (id: string, content: string) => ipcRenderer.invoke(IPC.SAVE_SKILL, id, content),
     delete: (id: string) => ipcRenderer.invoke(IPC.DELETE_SKILL, id)
   },
+  plugins: {
+    inspect: (source: string) => ipcRenderer.invoke(IPC.PLUGIN_INSPECT, source),
+    install: (source: string, options?: unknown) => ipcRenderer.invoke(IPC.PLUGIN_INSTALL, source, options),
+    prepare: (name: string) => ipcRenderer.invoke(IPC.PLUGIN_PREPARE, name),
+    update: (name: string) => ipcRenderer.invoke(IPC.PLUGIN_UPDATE, name),
+    uninstall: (name: string, options?: unknown) => ipcRenderer.invoke(IPC.PLUGIN_UNINSTALL, name, options),
+    enable: (name: string) => ipcRenderer.invoke(IPC.PLUGIN_ENABLE, name),
+    disable: (name: string) => ipcRenderer.invoke(IPC.PLUGIN_DISABLE, name),
+    approve: (name: string, component: string) => ipcRenderer.invoke(IPC.PLUGIN_APPROVE, name, component),
+    configSet: (name: string, key: string, value: string, options?: unknown) =>
+      ipcRenderer.invoke(IPC.PLUGIN_CONFIG_SET, name, key, value, options),
+    sync: (name?: string, options?: unknown) => ipcRenderer.invoke(IPC.PLUGIN_SYNC, name, options),
+    status: (name?: string) => ipcRenderer.invoke(IPC.PLUGIN_STATUS, name),
+    list: () => ipcRenderer.invoke(IPC.PLUGIN_LIST)
+  },
   projectInit: (projectPath: string, name: string) => ipcRenderer.invoke(IPC.PROJECT_INIT, projectPath, name),
   projectRemove: (projectPath: string) => ipcRenderer.invoke(IPC.PROJECT_REMOVE, projectPath),
   setProjectServerEnabled: (projectPath: string, serverName: string, enabled: boolean) =>

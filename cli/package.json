@@ -48,7 +48,8 @@
     "build": "bun build src/cli.ts src/core/index.ts src/types.ts --outdir dist --target node --format esm --splitting --external commander --external hono --external zod --external \"@modelcontextprotocol/sdk\" --external \"@iarna/toml\" && tsc -p tsconfig.json --emitDeclarationOnly --declaration --declarationMap",
     "prepublishOnly": "bun run build",
     "test": "bun test",
-    "test:watch": "bun test --watch"
+    "test:watch": "bun test --watch",
+    "test:plugin": "bun test test/plugin.test.ts"
   },
   "dependencies": {
     "@iarna/toml": "^2.2.5",
