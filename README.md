@@ -181,7 +181,7 @@ After manual edits, run `mcpx sync` to propagate changes.
 ## What it does
 
 - Stores upstream servers in a central config (`~/.config/mcpx/config.json`)
-- Stores upstream auth in one consolidated secure store (macOS Keychain) so each MCP auth flow is done once and reused across all synced clients
+- Stores upstream auth in one consolidated secure store (AES-256-GCM encrypted file) so each MCP auth flow is done once and reused across all synced clients
 - Runs a local MCP gateway daemon (`http://127.0.0.1:<port>/mcp`)
 - Syncs managed gateway entries into supported clients:
   - Claude / Claude Code
@@ -192,9 +192,11 @@ After manual edits, run `mcpx sync` to propagate changes.
   - Kiro
   - VS Code / VS Code Insiders
   - Qwen CLI
+  - OpenClaw
+  - Hermes
 - Gives each upstream a top-level client entry (`/vercel`, `/next-devtools`, etc.) while routing through one local daemon
 - Uses local gateway-token auth for client → gateway (`x-mcpx-local-token`)
-- Supports keychain-backed secret references for upstream headers
+- Supports encrypted-file backed secret references for upstream headers (AES-256-GCM, no Keychain)
 - Passes upstream OAuth challenges through to compatible clients
 - Proxies OAuth well-known metadata endpoints in single-upstream mode
 

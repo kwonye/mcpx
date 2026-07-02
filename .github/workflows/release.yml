@@ -134,32 +134,8 @@ jobs:
           bun run sync-version
         working-directory: cli
 
-      - name: Sync desktop version
-        run: bun -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync('package.json','utf8'));p.version='${{ needs.orchestrate.outputs.version }}';fs.writeFileSync('package.json',JSON.stringify(p,null,2)+'\n')"
-        working-directory: app
-
-      - name: Commit and tag release
-        env:
-          RELEASE_VERSION: ${{ needs.orchestrate.outputs.version }}
-          RELEASE_TAG: ${{ needs.orchestrate.outputs.tag }}
-          SOURCE_SHA: ${{ github.sha }}
-          INCLUDE_CLI: ${{ needs.orchestrate.outputs.include_cli }}
-          INCLUDE_DESKTOP: ${{ needs.orchestrate.outputs.include_desktop }}
-        run: |
-          git add cli/package.json cli/bun.lock cli/src/version.ts
-          git add app/package.json app/bun.lock
-          git commit -m "chore(release): v${RELEASE_VERSION} [skip ci]"
-          TAG_BODY=$(bun .github/scripts/release-coordinator.mjs tag-body --source-sha "$SOURCE_SHA" --include-cli "$INCLUDE_CLI" --include-desktop "$INCLUDE_DESKTOP" --version "$RELEASE_VERSION")
-          git tag -a "$RELEASE_TAG" -m "$TAG_BODY"
-          git push origin "$RELEASE_TAG"
-
-      - name: Set up Node.js for publish
-        uses: actions/setup-node@v6
-        with:
-          node-version: '24'
-
-      - name: Publish to npm
-        run: npm publish --provenance --access public
+      - name: Pack CLI tarball
+        run: npm pack
         working-directory: cli
 
       - name: Upload CLI artifacts
@@ -167,6 +143,12 @@ jobs:
         with:
           name: cli-dist
           path: cli/dist/
+
+      - name: Upload CLI tarball
+        uses: actions/upload-artifact@v6
+        with:
+          name: cli-tarball
+          path: cli/*.tgz
 
   build-desktop-macos:
     needs: orchestrate
@@ -346,6 +328,71 @@ jobs:
     if: always() && needs.orchestrate.result == 'success' && (needs.build-cli.result == 'success' || needs.build-cli.result == 'skipped') && (needs.build-desktop-macos.result == 'success' || needs.build-desktop-macos.result == 'skipped') && (needs.build-desktop-linux.result == 'success' || needs.build-desktop-linux.result == 'skipped') && (needs.build-desktop-windows.result == 'success' || needs.build-desktop-windows.result == 'skipped')
     runs-on: ubuntu-latest
     steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install CLI dependencies
+        run: bun install --frozen-lockfile
+        working-directory: cli
+
+      - name: Set release versions
+        if: needs.orchestrate.outputs.include_cli == 'true'
+        run: |
+          bun -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync('package.json','utf8'));p.version='${{ needs.orchestrate.outputs.version }}';fs.writeFileSync('package.json',JSON.stringify(p,null,2)+'\n')"
+          bun run sync-version
+        working-directory: cli
+
+      - name: Sync desktop version
+        if: needs.orchestrate.outputs.include_desktop == 'true'
+        run: bun -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync('package.json','utf8'));p.version='${{ needs.orchestrate.outputs.version }}';fs.writeFileSync('package.json',JSON.stringify(p,null,2)+'\n')"
+        working-directory: app
+
+      - name: Configure git
+        if: needs.orchestrate.outputs.include_cli == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Commit and tag release
+        if: needs.orchestrate.outputs.include_cli == 'true'
+        env:
+          RELEASE_VERSION: ${{ needs.orchestrate.outputs.version }}
+          RELEASE_TAG: ${{ needs.orchestrate.outputs.tag }}
+          SOURCE_SHA: ${{ github.sha }}
+          INCLUDE_CLI: ${{ needs.orchestrate.outputs.include_cli }}
+          INCLUDE_DESKTOP: ${{ needs.orchestrate.outputs.include_desktop }}
+        run: |
+          git add cli/package.json cli/bun.lock cli/src/version.ts
+          if [ "$INCLUDE_DESKTOP" = "true" ]; then git add app/package.json app/bun.lock; fi
+          git commit -m "chore(release): v${RELEASE_VERSION} [skip ci]"
+          TAG_BODY=$(bun .github/scripts/release-coordinator.mjs tag-body --source-sha "$SOURCE_SHA" --include-cli "$INCLUDE_CLI" --include-desktop "$INCLUDE_DESKTOP" --version "$RELEASE_VERSION")
+          git tag -a "$RELEASE_TAG" -m "$TAG_BODY"
+          git push origin "$RELEASE_TAG"
+
+      - name: Set up Node.js for publish
+        if: needs.orchestrate.outputs.include_cli == 'true'
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
+      - name: Download CLI tarball
+        if: needs.orchestrate.outputs.include_cli == 'true'
+        uses: actions/download-artifact@v6
+        with:
+          name: cli-tarball
+          path: cli-tarball/
+
+      - name: Publish to npm
+        if: needs.orchestrate.outputs.include_cli == 'true'
+        run: npm publish ./cli-tarball/*.tgz --provenance --access public
+
       - name: Download CLI artifacts
         if: needs.orchestrate.outputs.include_cli == 'true'
         uses: actions/download-artifact@v6
