@@ -187,30 +187,34 @@ export function removeSourceEntries(entries: Record<string, unknown>, names: str
   }
 }
 
-export function syncDisabledMcpServersArray(
+/**
+ * Purge managed entry names from the native disabledMcpServers array.
+ * Disabled managed servers are simply absent from the client config (no entry written).
+ */
+export function purgeManagedFromDisabledArray(
   raw: Record<string, unknown>,
-  managedNames: string[],
-  managedEntries: ManagedGatewayEntry[]
+  managedNames: string[]
 ): void {
-  const existingDisabled = ((raw.disabledMcpServers as string[] | undefined) ?? [])
-    .filter((name) => !managedNames.includes(name));
-  const disabledManaged = managedEntries
-    .filter((entry) => !entry.enabled)
-    .map((entry) => entry.name);
-  raw.disabledMcpServers = [...existingDisabled, ...disabledManaged];
+  const existingDisabled = (raw.disabledMcpServers as string[] | undefined) ?? [];
+  raw.disabledMcpServers = existingDisabled.filter((name) => !managedNames.includes(name));
+  if (Array.isArray(raw.disabledMcpServers) && raw.disabledMcpServers.length === 0) {
+    delete raw.disabledMcpServers;
+  }
 }
 
-export function syncMcpExcludedArray(
+/**
+ * Purge managed entry names from the mcp.excluded array.
+ * Disabled managed servers are simply absent from the client config (no entry written).
+ */
+export function purgeManagedFromExcludedArray(
   raw: Record<string, unknown>,
-  managedNames: string[],
-  managedEntries: ManagedGatewayEntry[]
+  managedNames: string[]
 ): void {
   const mcp = ((raw.mcp as Record<string, unknown> | undefined) ?? {}) as Record<string, unknown>;
-  const existingExcluded = ((mcp.excluded as string[] | undefined) ?? [])
-    .filter((name) => !managedNames.includes(name));
-  const disabledManaged = managedEntries
-    .filter((entry) => !entry.enabled)
-    .map((entry) => entry.name);
-  mcp.excluded = [...existingExcluded, ...disabledManaged];
-  raw.mcp = mcp;
+  const existingExcluded = (mcp.excluded as string[] | undefined) ?? [];
+  mcp.excluded = existingExcluded.filter((name) => !managedNames.includes(name));
+  if (Array.isArray(mcp.excluded) && mcp.excluded.length === 0) {
+    delete mcp.excluded;
+  }
+  raw.mcp = Object.keys(mcp).length > 0 ? mcp : undefined;
 }

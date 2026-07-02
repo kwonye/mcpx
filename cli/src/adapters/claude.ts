@@ -16,7 +16,7 @@ import {
   pruneStaleManagedEntries,
   removeSourceEntries,
   setManagedEntries,
-  syncDisabledMcpServersArray
+  purgeManagedFromDisabledArray
 } from "./utils/index.js";
 
 type JsonObject = Record<string, unknown>;
@@ -181,7 +181,7 @@ export class ClaudeAdapter implements ClientAdapter {
       }
       raw.mcpServers = topLevelServers;
 
-      syncDisabledMcpServersArray(raw, managedNames, options.managedEntries);
+      purgeManagedFromDisabledArray(raw, managedNames);
 
       // Per-directory scoping: reconcile each Claude project entry against registered
       // mcpx project scopes. Unregistered project entries get their managed disabled

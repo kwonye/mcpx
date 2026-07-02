@@ -16,7 +16,7 @@ import {
   pruneStaleManagedEntries,
   removeSourceEntries,
   setManagedEntries,
-  syncMcpExcludedArray
+  purgeManagedFromExcludedArray
 } from "./utils/index.js";
 
 type JsonObject = Record<string, unknown>;
@@ -166,7 +166,7 @@ export class QwenAdapter implements ClientAdapter {
         topLevelServers[name] = entry;
       }
       raw.mcpServers = topLevelServers;
-      syncMcpExcludedArray(raw, managedNames, options.managedEntries);
+      purgeManagedFromExcludedArray(raw, managedNames);
 
       writeJsonAtomic(configPath, raw);
       setManagedEntries(

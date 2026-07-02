@@ -129,12 +129,13 @@ export class OpenCodeAdapter implements ClientAdapter {
       removeSourceEntries(mcp, options.sourceEntriesToRemove);
       const managedNames = options.managedEntries.map((entry) => entry.name);
       const serverEntries = Object.fromEntries(
-        options.managedEntries.map((entry) => [entry.name, {
-          type: "remote",
-          url: entry.url,
-          headers: entry.headers,
-          enabled: entry.enabled
-        }])
+        options.managedEntries
+          .filter((entry) => entry.enabled)
+          .map((entry) => [entry.name, {
+            type: "remote",
+            url: entry.url,
+            headers: entry.headers,
+          }])
       ) as Record<string, unknown>;
 
       for (const name of managedNames) {

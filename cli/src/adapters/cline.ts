@@ -164,18 +164,13 @@ export class ClineAdapter implements ClientAdapter {
       removeSourceEntries(servers, options.sourceEntriesToRemove);
       const managedNames = options.managedEntries.map((entry) => entry.name);
       const serverEntries = Object.fromEntries(
-        options.managedEntries.map((entry) => [entry.name, {
-          // Use the standard `type: "streamableHttp"` field rather than the
-          // legacy `transportType: "http"`. Cline's VS Code extension schema
-          // lists the SSE branch before streamableHttp, so an entry with only
-          // `transportType` + `url` (no `type`) is classified as SSE. An
-          // explicit `type: "streamableHttp"` is unambiguous for both the
-          // extension and the Cline CLI config loader.
-          type: "streamableHttp",
-          url: entry.url,
-          headers: entry.headers,
-          disabled: !entry.enabled
-        }])
+        options.managedEntries
+          .filter((entry) => entry.enabled)
+          .map((entry) => [entry.name, {
+            type: "streamableHttp",
+            url: entry.url,
+            headers: entry.headers,
+          }])
       ) as Record<string, unknown>;
       for (const name of managedNames) {
         const conflict = ensureManagedEntryWritable(

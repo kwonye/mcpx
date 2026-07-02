@@ -133,11 +133,12 @@ export class KiroAdapter implements ClientAdapter {
       removeSourceEntries(servers, options.sourceEntriesToRemove);
       const managedNames = options.managedEntries.map((entry) => entry.name);
       const serverEntries = Object.fromEntries(
-        options.managedEntries.map((entry) => [entry.name, {
-          url: entry.url,
-          headers: entry.headers,
-          disabled: !entry.enabled
-        }])
+        options.managedEntries
+          .filter((entry) => entry.enabled)
+          .map((entry) => [entry.name, {
+            url: entry.url,
+            headers: entry.headers,
+          }])
       ) as Record<string, unknown>;
 
       for (const name of managedNames) {

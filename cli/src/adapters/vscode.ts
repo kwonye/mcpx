@@ -167,9 +167,9 @@ export class VsCodeAdapter implements ClientAdapter {
         this.id,
         configPath,
         Object.fromEntries(
-          options.managedEntries.map((entry) => [
+          enabledEntries.map((entry) => [
             entry.name,
-            JSON.stringify({ type: "http", url: entry.url, headers: entry.headers, enabled: entry.enabled })
+            JSON.stringify({ type: "http", url: entry.url, headers: entry.headers })
           ])
         )
       );

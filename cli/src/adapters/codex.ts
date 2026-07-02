@@ -132,11 +132,12 @@ export class CodexAdapter implements ClientAdapter {
       removeSourceEntries(mcpServers, options.sourceEntriesToRemove);
       const managedNames = options.managedEntries.map((entry) => entry.name);
       const serverEntries = Object.fromEntries(
-        options.managedEntries.map((entry) => [entry.name, {
-          enabled: entry.enabled,
-          url: entry.url,
-          http_headers: entry.headers
-        }])
+        options.managedEntries
+          .filter((entry) => entry.enabled)
+          .map((entry) => [entry.name, {
+            url: entry.url,
+            http_headers: entry.headers
+          }])
       ) as Record<string, unknown>;
 
       for (const name of managedNames) {
