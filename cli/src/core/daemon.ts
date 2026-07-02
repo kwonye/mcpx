@@ -1,12 +1,13 @@
 import fs from "node:fs";
 import net from "node:net";
-import { spawn } from "node:child_process";
+import { spawn, execFileSync } from "node:child_process";
 import { getLogPath, getPidPath, ensureParentDir } from "./paths.js";
 import { createGatewayServer } from "../gateway/server.js";
 import { SecretsManager } from "./secrets.js";
 import { ensureGatewayToken } from "./registry.js";
 import type { McpxConfig } from "../types.js";
 import { saveConfig } from "./config.js";
+import { syncAllClients, persistSyncState } from "./sync.js";
 import { startBackgroundUpdateCheck } from "./update-manager.js";
 
 export interface DaemonStatus {
@@ -67,7 +68,7 @@ async function isPortAvailable(port: number): Promise<boolean> {
   });
 }
 
-export async function resolveGatewayPort(config: McpxConfig): Promise<number> {
+export async function resolveGatewayPort(config: McpxConfig, secrets?: SecretsManager): Promise<number> {
   if (await isPortAvailable(config.gateway.port)) {
     return config.gateway.port;
   }
@@ -79,8 +80,21 @@ export async function resolveGatewayPort(config: McpxConfig): Promise<number> {
     }
 
     if (await isPortAvailable(candidate)) {
+      const oldPort = config.gateway.port;
       config.gateway.port = candidate;
       saveConfig(config);
+
+      // Sync clients so their URLs reflect the new port
+      if (secrets) {
+        try {
+          const summary = syncAllClients(config, secrets);
+          persistSyncState(summary, config);
+          saveConfig(config);
+        } catch {
+          // Best-effort sync after port change
+        }
+      }
+
       return candidate;
     }
   }
@@ -152,7 +166,7 @@ export async function startDaemon(config: McpxConfig, cliPath: string, secrets: 
     try { fs.unlinkSync(getPidPath()); } catch {}
   }
 
-  const port = await resolveGatewayPort(config);
+  const port = await resolveGatewayPort(config, secrets);
   const token = ensureGatewayToken(config, secrets);
 
   const pidPath = getPidPath();
@@ -193,6 +207,25 @@ export function stopDaemon(): { stopped: boolean; message: string } {
     return {
       stopped: false,
       message: "mcpx daemon is not running."
+    };
+  }
+
+  // PID safety: verify the process is actually a mcpx daemon before killing
+  try {
+    const cmd = execFileSync("ps", ["-p", String(pid), "-o", "command="], { encoding: "utf8", timeout: 2000 }).trim();
+    if (!cmd.includes("mcpx") && !cmd.includes("daemon") && !cmd.includes("cli.js")) {
+      fs.unlinkSync(pidPath);
+      return {
+        stopped: false,
+        message: `PID ${pid} is not a mcpx daemon (command: ${cmd.slice(0, 80)}). Pidfile cleaned up.`
+      };
+    }
+  } catch {
+    // Process doesn't exist or ps failed; clean up pidfile
+    try { fs.unlinkSync(pidPath); } catch {}
+    return {
+      stopped: false,
+      message: `PID ${pid} not found. Pidfile cleaned up.`
     };
   }
 

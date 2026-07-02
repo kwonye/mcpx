@@ -365,10 +365,19 @@ export function registerIpcHandlers(): void {
   });
 
   ipcMain.handle(IPC.DAEMON_START, async () => {
-    const config = loadConfig();
+    let config: ReturnType<typeof loadConfig>;
+    try {
+      config = loadConfig();
+    } catch (err) {
+      updateTrayForDaemonStatus(false);
+      throw new Error(`Cannot start daemon: ${(err as Error).message}`);
+    }
     const secrets = new SecretsManager();
     const result = await startDaemon(config, getCliDaemonPath(), secrets);
-    updateTrayForDaemonStatus(true);
+    updateTrayForDaemonStatus(result.started);
+    if (!result.started) {
+      throw new Error(result.message);
+    }
     return result;
   });
 
