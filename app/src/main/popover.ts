@@ -1,4 +1,4 @@
-import { BrowserWindow, screen, Tray } from "electron";
+import { BrowserWindow, Rectangle, screen, Tray } from "electron";
 import { fileURLToPath } from "node:url";
 
 function rendererEntryPath(): string {
@@ -6,6 +6,7 @@ function rendererEntryPath(): string {
 }
 
 let popover: BrowserWindow | null = null;
+let lastValidTrayBounds: Rectangle | null = null;
 
 function loadPopoverContent(window: BrowserWindow): void {
   window.webContents.on("did-fail-load", (_event, code, description, validatedUrl) => {
@@ -24,48 +25,68 @@ function loadPopoverContent(window: BrowserWindow): void {
   window.loadFile(rendererEntryPath(), { hash: "popover" });
 }
 
-function positionPopover(window: BrowserWindow, tray: Tray): void {
-  const trayBounds = tray.getBounds();
+function isValidRect(r: Rectangle): boolean {
+  return r.width > 0 && r.height > 0;
+}
+
+function positionPopover(window: BrowserWindow, tray: Tray, clickBounds?: Rectangle): void {
   const windowBounds = window.getBounds();
 
-  // macOS tray.getBounds() is unreliable and can return all zeros.
-  // Fall back to cursor position (the user just clicked the tray).
-  const hasValidBounds = trayBounds.width > 0 && trayBounds.height > 0;
-  if (!hasValidBounds) {
-    const cursor = screen.getCursorScreenPoint();
-    const display = screen.getDisplayNearestPoint(cursor);
+  // Resolve anchor bounds in order of reliability:
+  // 1. clickBounds from tray click event (most reliable on macOS)
+  // 2. tray.getBounds() (sometimes all-zeros on macOS)
+  // 3. cached last valid bounds
+  const trayBounds = clickBounds && isValidRect(clickBounds)
+    ? clickBounds
+    : tray.getBounds();
+
+  const anchorBounds = isValidRect(trayBounds)
+    ? trayBounds
+    : lastValidTrayBounds;
+
+  if (anchorBounds && isValidRect(anchorBounds)) {
+    lastValidTrayBounds = anchorBounds;
+    const display = screen.getDisplayMatching(anchorBounds);
     const workArea = display.workArea;
+
     const x = Math.round(
       Math.min(
-        Math.max(cursor.x - windowBounds.width / 2, workArea.x),
+        Math.max(anchorBounds.x + anchorBounds.width / 2 - windowBounds.width / 2, workArea.x),
         workArea.x + workArea.width - windowBounds.width
       )
     );
     const y = Math.round(
       Math.min(
-        Math.max(cursor.y + 8, workArea.y),
+        Math.max(anchorBounds.y + anchorBounds.height + 8, workArea.y),
         workArea.y + workArea.height - windowBounds.height
       )
     );
+
     window.setPosition(x, y, false);
     return;
   }
 
-  const display = screen.getDisplayMatching(trayBounds);
+  // No valid bounds at all — anchor to the top of the work area.
+  const cursor = screen.getCursorScreenPoint();
+  const display = screen.getDisplayNearestPoint(cursor);
   const workArea = display.workArea;
 
-  const x = Math.round(
-    Math.min(
-      Math.max(trayBounds.x + trayBounds.width / 2 - windowBounds.width / 2, workArea.x),
-      workArea.x + workArea.width - windowBounds.width
-    )
-  );
-  const y = Math.round(
-    Math.min(
-      Math.max(trayBounds.y + trayBounds.height + 8, workArea.y),
-      workArea.y + workArea.height - windowBounds.height
-    )
-  );
+  // If cursor is in the menubar band, the user just clicked the tray — center on cursor.
+  // Otherwise pin to top-right (e.g. auto-show at startup when cursor is mid-screen).
+  const cursorInMenubar = cursor.y <= workArea.y;
+  let x: number;
+  if (cursorInMenubar) {
+    x = Math.round(
+      Math.min(
+        Math.max(cursor.x - windowBounds.width / 2, workArea.x),
+        workArea.x + workArea.width - windowBounds.width
+      )
+    );
+  } else {
+    x = workArea.x + workArea.width - windowBounds.width - 12;
+  }
+
+  const y = workArea.y + 8;
 
   window.setPosition(x, y, false);
 }
@@ -111,17 +132,17 @@ function createPopoverWindow(): BrowserWindow {
   return popover;
 }
 
-export function showPopover(tray: Tray): BrowserWindow {
+export function showPopover(tray: Tray, clickBounds?: Rectangle): BrowserWindow {
   const window = popover && !popover.isDestroyed() ? popover : createPopoverWindow();
 
-  positionPopover(window, tray);
+  positionPopover(window, tray, clickBounds);
   window.show();
   window.focus();
 
   return window;
 }
 
-export function togglePopover(tray: Tray): BrowserWindow {
+export function togglePopover(tray: Tray, clickBounds?: Rectangle): BrowserWindow {
   const window = popover && !popover.isDestroyed() ? popover : createPopoverWindow();
 
   if (window.isVisible()) {
@@ -129,7 +150,7 @@ export function togglePopover(tray: Tray): BrowserWindow {
     return window;
   }
 
-  positionPopover(window, tray);
+  positionPopover(window, tray, clickBounds);
   window.show();
   window.focus();
 

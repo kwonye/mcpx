@@ -117,8 +117,8 @@ export function createTray(): Tray {
   tray = new Tray(icon);
   tray.setToolTip(productName);
 
-  tray.on("click", () => {
-    togglePopover(tray);
+  tray.on("click", (_event, bounds) => {
+    togglePopover(tray, bounds);
   });
 
   tray.on("right-click", () => {

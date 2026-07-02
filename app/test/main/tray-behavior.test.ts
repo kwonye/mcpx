@@ -66,7 +66,7 @@ describe("tray click behavior", () => {
     expect(tray.setContextMenu).not.toHaveBeenCalled();
 
     tray.handlers.click();
-    expect(togglePopoverMock).toHaveBeenCalledWith(tray);
+    expect(togglePopoverMock).toHaveBeenCalledWith(tray, undefined);
 
     tray.handlers["right-click"]();
     expect(hidePopoverMock).toHaveBeenCalledTimes(1);
