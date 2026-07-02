@@ -1,0 +1,49 @@
+#!/bin/sh
+# Pre-push hook: run CLI build and tests before allowing push to main.
+
+REMOTE="$1"
+URL="$2"
+
+# Only check on pushes to main
+if [ "$REMOTE" != "origin" ] && [ "$REMOTE" != "upstream" ]; then
+  exit 0
+fi
+
+# Detect which branch is being pushed
+ZERO_COMMIT="0000000000000000000000000000000000000000"
+while read LOCAL_REF LOCAL_SHA REMOTE_REF REMOTE_SHA; do
+  # Only check main branch pushes
+  case "$REMOTE_REF" in
+    refs/heads/main|refs/heads/master)
+      ;;
+    *)
+      continue
+      ;;
+  esac
+
+  echo "--- pre-push: checking CLI build and tests ---"
+
+  # Build
+  echo "  -> bun run build"
+  (cd cli && bun run build 2>&1)
+  BUILD_EXIT=$?
+  if [ $BUILD_EXIT -ne 0 ]; then
+    echo "FAIL: CLI build failed (exit $BUILD_EXIT). Push rejected."
+    exit 1
+  fi
+  echo "  -> build OK"
+
+  # Test
+  echo "  -> bun test"
+  (cd cli && bun test 2>&1)
+  TEST_EXIT=$?
+  if [ $TEST_EXIT -ne 0 ]; then
+    echo "FAIL: CLI tests failed (exit $TEST_EXIT). Push rejected."
+    exit 1
+  fi
+  echo "  -> tests OK"
+
+  echo "--- pre-push: all checks passed ---"
+done
+
+exit 0
