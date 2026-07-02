@@ -76,7 +76,7 @@ describe("Dashboard", () => {
     expect(await screen.findByRole("button", { name: /My Servers/i })).toBeDefined();
     expect(screen.queryByRole("button", { name: /Browse Registry/i })).toBeNull();
     expect(screen.getByRole("button", { name: /Projects/i })).toBeDefined();
-    expect(screen.getByRole("button", { name: /Skills/i })).toBeDefined();
+    expect(screen.getByRole("button", { name: /Plugins/i })).toBeDefined();
     expect(screen.getByRole("button", { name: /Settings/i })).toBeDefined();
   });
 

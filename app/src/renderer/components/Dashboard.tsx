@@ -5,6 +5,7 @@ import { ServerCard } from "./ServerCard";
 import { ServerDetail } from "./ServerDetail";
 import { AuthModal } from "./AuthModal";
 import { SkillsTab } from "./SkillsTab";
+import { PluginsTab } from "./PluginsTab";
 import { DaemonControls } from "./DaemonControls";
 import { SettingsPanel } from "./SettingsPanel";
 import { CliCommandInput } from "./CliCommandInput";
@@ -15,7 +16,7 @@ import { formatTokenApprox } from "../utils/tokenHelper";
 import { ContextBudgetCard } from "./ContextBudgetCard";
 
 type PendingAuthEntry = { serverName: string; oauthLikely?: boolean; status?: number };
-const VALID_TABS: DesktopTab[] = ["servers", "projects", "skills", "settings"];
+const VALID_TABS: DesktopTab[] = ["servers", "projects", "plugins", "settings"];
 
 export function Dashboard() {
   const { status, loading, refresh } = useStatus();
@@ -50,8 +51,9 @@ export function Dashboard() {
     async function loadSettings() {
       try {
         const settings = await window.mcpx.getDesktopSettings();
-        if (settings.activeTab && VALID_TABS.includes(settings.activeTab)) {
-          setTab(settings.activeTab);
+        const activeTab = settings.activeTab === "skills" ? "plugins" : settings.activeTab;
+        if (activeTab && VALID_TABS.includes(activeTab)) {
+          setTab(activeTab);
         }
       } catch {
         // Use defaults if settings fail to load
@@ -201,11 +203,11 @@ export function Dashboard() {
           )}
           <button
             className="nav-button"
-            data-active={tab === "skills"}
-            onClick={() => void handleTabChange("skills")}
+            data-active={tab === "plugins"}
+            onClick={() => void handleTabChange("plugins")}
           >
-            <span className="material-symbols-outlined">psychology</span>
-            <span className="nav-button__label">Skills</span>
+            <span className="material-symbols-outlined">extension</span>
+            <span className="nav-button__label">Plugins</span>
           </button>
           <div className="nav-spacer" />
           <button
@@ -285,8 +287,8 @@ export function Dashboard() {
                 </>
               )}
 
-              {tab === "skills" && (
-                <SkillsTab />
+              {tab === "plugins" && (
+                <PluginsTab />
               )}
 
               {tab === "settings" && (
