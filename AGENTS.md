@@ -222,11 +222,17 @@ The app has 2 CDP tabs: the dashboard (main window) and the popover (menubar tra
 
 ## Git Hooks
 
-The repo ships a pre-push hook at `.githooks/pre-push` that runs `cd cli && bun run build && bun test` before allowing pushes to `main`. Enable it:
+The repo ships a pre-push hook at `.githooks/pre-push` that runs CLI + desktop app build and tests before allowing pushes to `main`. Enable it:
 
 ```bash
 git config core.hooksPath .githooks
 ```
+
+Checks performed:
+- `cd cli && bun run build` — TypeScript compilation + bundling
+- `cd cli && bun test` — CLI unit + integration tests (223 tests)
+- `cd app && bun run build` — Electron app bundling
+- `cd app && bun run test` — Desktop unit + component tests
 
 This prevents broken builds or failing tests from reaching CI.
 

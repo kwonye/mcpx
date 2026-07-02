@@ -1,10 +1,11 @@
 #!/bin/sh
-# Pre-push hook: run CLI build and tests before allowing push to main.
+# Pre-push hook: run CLI + desktop app build and tests before allowing push to main.
+# Matches the checks in .github/workflows/release.yml.
 
 REMOTE="$1"
 URL="$2"
 
-# Only check on pushes to main
+# Only check on pushes to origin/upstream
 if [ "$REMOTE" != "origin" ] && [ "$REMOTE" != "upstream" ]; then
   exit 0
 fi
@@ -12,7 +13,7 @@ fi
 # Detect which branch is being pushed
 ZERO_COMMIT="0000000000000000000000000000000000000000"
 while read LOCAL_REF LOCAL_SHA REMOTE_REF REMOTE_SHA; do
-  # Only check main branch pushes
+  # Only check main/master branch pushes
   case "$REMOTE_REF" in
     refs/heads/main|refs/heads/master)
       ;;
@@ -21,29 +22,60 @@ while read LOCAL_REF LOCAL_SHA REMOTE_REF REMOTE_SHA; do
       ;;
   esac
 
-  echo "--- pre-push: checking CLI build and tests ---"
+  echo ""
+  echo "=========================================="
+  echo "  pre-push: CLI build + tests"
+  echo "=========================================="
 
-  # Build
   echo "  -> bun run build"
   (cd cli && bun run build 2>&1)
   BUILD_EXIT=$?
   if [ $BUILD_EXIT -ne 0 ]; then
+    echo ""
     echo "FAIL: CLI build failed (exit $BUILD_EXIT). Push rejected."
     exit 1
   fi
-  echo "  -> build OK"
+  echo "  -> CLI build OK"
 
-  # Test
   echo "  -> bun test"
   (cd cli && bun test 2>&1)
   TEST_EXIT=$?
   if [ $TEST_EXIT -ne 0 ]; then
+    echo ""
     echo "FAIL: CLI tests failed (exit $TEST_EXIT). Push rejected."
     exit 1
   fi
-  echo "  -> tests OK"
+  echo "  -> CLI tests OK"
 
-  echo "--- pre-push: all checks passed ---"
+  echo ""
+  echo "=========================================="
+  echo "  pre-push: desktop app build + tests"
+  echo "=========================================="
+
+  echo "  -> bun run build"
+  (cd app && bun run build 2>&1)
+  APP_BUILD_EXIT=$?
+  if [ $APP_BUILD_EXIT -ne 0 ]; then
+    echo ""
+    echo "FAIL: Desktop app build failed (exit $APP_BUILD_EXIT). Push rejected."
+    exit 1
+  fi
+  echo "  -> desktop build OK"
+
+  echo "  -> bun run test"
+  (cd app && bun run test 2>&1)
+  APP_TEST_EXIT=$?
+  if [ $APP_TEST_EXIT -ne 0 ]; then
+    echo ""
+    echo "FAIL: Desktop app tests failed (exit $APP_TEST_EXIT). Push rejected."
+    exit 1
+  fi
+  echo "  -> desktop tests OK"
+
+  echo ""
+  echo "=========================================="
+  echo "  pre-push: all checks passed"
+  echo "=========================================="
 done
 
 exit 0
