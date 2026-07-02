@@ -1,6 +1,7 @@
 import type {
   ClientAdapter,
   ClientId,
+  ClientStatus,
   ManagedGatewayEntry,
   McpxConfig,
   PluginSyncInput,

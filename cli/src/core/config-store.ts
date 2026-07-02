@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
-import { loadConfig, saveConfig, type McpxConfig } from "./config.js";
+import { loadConfig, saveConfig } from "./config.js";
+import type { McpxConfig } from "../types.js";
 import { getConfigPath } from "./paths.js";
 
 const LOCK_STALE_MS = 5000;

@@ -1258,7 +1258,7 @@ export function createGatewayServer(options: GatewayServerOptions): http.Server 
       }
     } catch (error) {
       if (isAuthChallenge(error)) {
-        response.statusCode = error.status;
+        response.statusCode = error.status ?? 401;
         response.setHeader("content-type", "application/json");
         if (error.wwwAuthenticate) {
           const localResourceMetadataUrl = appendUpstreamQuery(

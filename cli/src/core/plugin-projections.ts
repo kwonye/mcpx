@@ -353,7 +353,7 @@ function syncKiro(plugins: PluginSyncInput[]): PluginSyncResult {
   };
 }
 
-export function syncPluginsToClient(clientId: string, plugins: PluginSyncInput[]): PluginSyncResult | null {
+export function syncPluginsToClient(clientId: string, plugins: PluginSyncInput[]): PluginSyncResult {
   const syncMap: Record<string, (plugins: PluginSyncInput[]) => PluginSyncResult> = {
     claude: syncClaude,
     "claude-desktop": syncClaudeDesktop,
@@ -366,7 +366,9 @@ export function syncPluginsToClient(clientId: string, plugins: PluginSyncInput[]
   };
 
   const syncFn = syncMap[clientId];
-  if (!syncFn) return null;
+  if (!syncFn) {
+    return { clientId: clientId as ClientId, status: "SKIPPED", projectedDirs: [], unsupported: [] };
+  }
 
   // Prune unlisted plugins before projecting
   const targetBaseMap: Record<string, string> = {
