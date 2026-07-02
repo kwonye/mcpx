@@ -99,6 +99,14 @@ export function parseCliAddCommand(command: string): { name: string; spec: Upstr
     return parseVSCodeAdd(parts[2]);
   }
 
+  if (parts[0] === "openclaw" && parts[1] === "mcp" && parts[2] === "add") {
+    return parseOpenClawAdd(parts.slice(3));
+  }
+
+  if (parts[0] === "hermes" && parts[1] === "mcp" && parts[2] === "add") {
+    return parseHermesAdd(parts.slice(3));
+  }
+
   if (parts[0] === "add") {
     return parseStandardAdd(parts.slice(1));
   }
@@ -236,6 +244,54 @@ function parseVSCodeAdd(jsonPayload: string | undefined): { name: string; spec: 
   }
 
   throw new Error("JSON payload must include 'url' or 'command'");
+}
+
+function parseOpenClawAdd(args: string[]): { name: string; spec: UpstreamServerSpec } {
+  const header: string[] = [];
+  const env: string[] = [];
+  let cwd: string | undefined;
+  const values: string[] = [];
+
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === "--header") {
+      header.push(args[++i]);
+    } else if (arg === "--env") {
+      env.push(args[++i]);
+    } else if (arg === "--cwd" || arg === "--workingDirectory") {
+      cwd = args[++i];
+    } else if (arg === "--arg") {
+      values.push(args[++i]);
+    } else if (arg === "--transport" || arg === "--auth" || arg === "--scope") {
+      i++;
+    } else {
+      values.push(arg);
+    }
+  }
+
+  return buildServerSpec(values, { header, env, cwd });
+}
+
+function parseHermesAdd(args: string[]): { name: string; spec: UpstreamServerSpec } {
+  const env: string[] = [];
+  const values: string[] = [];
+
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === "--env") {
+      env.push(args[++i]);
+    } else if (arg === "--args") {
+      while (i + 1 < args.length && !args[i + 1].startsWith("--")) {
+        values.push(args[++i]);
+      }
+    } else if (arg === "--auth") {
+      i++;
+    } else {
+      values.push(arg);
+    }
+  }
+
+  return buildServerSpec(values, { header: [], env });
 }
 
 function buildServerSpec(

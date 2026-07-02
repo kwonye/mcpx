@@ -5,7 +5,7 @@ import { isServerEnabled, type ClientId, type ClientStatus, type ManagedIndex, t
 import { SecretsManager } from "./secrets.js";
 import { ensureGatewayToken } from "./registry.js";
 
-export const STATUS_CLIENTS: ClientId[] = ["claude", "claude-desktop", "codex", "cursor", "cline", "opencode", "kiro", "vscode", "qwen"];
+export const STATUS_CLIENTS: ClientId[] = ["claude", "claude-desktop", "codex", "cursor", "cline", "opencode", "kiro", "vscode", "qwen", "openclaw", "hermes"];
 
 export interface StatusAuthBinding {
   kind: "header" | "env";

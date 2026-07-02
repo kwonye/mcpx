@@ -1,4 +1,4 @@
-export type ClientId = "claude" | "claude-desktop" | "codex" | "cursor" | "cline" | "opencode" | "kiro" | "vscode" | "qwen";
+export type ClientId = "claude" | "claude-desktop" | "codex" | "cursor" | "cline" | "opencode" | "kiro" | "vscode" | "qwen" | "openclaw" | "hermes";
 
 export type PluginComponent = "mcpServers" | "skills" | "hooks" | "agents" | "commands";
 
