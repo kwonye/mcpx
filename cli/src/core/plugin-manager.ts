@@ -323,34 +323,48 @@ export async function installPlugin(
   return manager.installPlugin(source, options);
 }
 
-export async function updatePlugin(name: string): Promise<ManagedPlugin> {
+export async function updatePlugin(nameOrId: string): Promise<ManagedPlugin> {
   const manager = new PluginManager();
-  return manager.updatePlugin(name);
+  const config = loadConfig(manager["configPath"]);
+  const id = resolvePluginId(config, nameOrId);
+  return manager.updatePlugin(id);
 }
 
-export async function uninstallPlugin(name: string, keepData?: boolean): Promise<void> {
+export async function uninstallPlugin(nameOrId: string, keepData?: boolean): Promise<void> {
   const manager = new PluginManager();
-  await manager.uninstallPlugin(name, keepData);
+  const config = loadConfig(manager["configPath"]);
+  const id = resolvePluginId(config, nameOrId);
+  await manager.uninstallPlugin(id, keepData);
 }
 
-export async function enablePlugin(name: string): Promise<void> {
+export async function enablePlugin(nameOrId: string): Promise<void> {
   const manager = new PluginManager();
-  await manager.enablePlugin(name);
+  const config = loadConfig(manager["configPath"]);
+  const id = resolvePluginId(config, nameOrId);
+  await manager.enablePlugin(id);
 }
 
-export async function disablePlugin(name: string): Promise<void> {
+export async function disablePlugin(nameOrId: string): Promise<void> {
   const manager = new PluginManager();
-  await manager.disablePlugin(name);
+  const config = loadConfig(manager["configPath"]);
+  const id = resolvePluginId(config, nameOrId);
+  await manager.disablePlugin(id);
 }
 
-export async function approvePluginComponent(name: string, component: string): Promise<void> {
+export async function approvePluginComponent(nameOrId: string, component: string): Promise<void> {
   const manager = new PluginManager();
-  await manager.approveComponent(name, component);
+  const config = loadConfig(manager["configPath"]);
+  const id = resolvePluginId(config, nameOrId);
+  await manager.approveComponent(id, component);
 }
 
-export async function getPluginStatus(name?: string): Promise<ManagedPlugin | null> {
+export async function getPluginStatus(nameOrId?: string): Promise<ManagedPlugin | null> {
   const manager = new PluginManager();
-  if (name) return manager.getPluginStatus(name);
+  if (nameOrId) {
+    const config = loadConfig(manager["configPath"]);
+    const id = resolvePluginId(config, nameOrId);
+    return manager.getPluginStatus(id);
+  }
   const plugins = await manager.listPlugins();
   return plugins[0] || null;
 }
@@ -358,6 +372,47 @@ export async function getPluginStatus(name?: string): Promise<ManagedPlugin | nu
 export async function listPlugins(): Promise<ManagedPlugin[]> {
   const manager = new PluginManager();
   return manager.listPlugins();
+}
+
+/**
+ * Resolve a plugin identifier — accepts either the full id (`name@sha`) or the
+ * user-facing plugin name. Throws if ambiguous or not found.
+ */
+export function resolvePluginId(config: { plugins?: Record<string, ManagedPlugin> }, nameOrId: string): string {
+  const plugins = config.plugins ?? {};
+  if (plugins[nameOrId]) return nameOrId;
+  const matches = Object.keys(plugins).filter((id) => plugins[id].name === nameOrId);
+  if (matches.length === 1) return matches[0];
+  if (matches.length === 0) {
+    throw new Error(`Plugin "${nameOrId}" not found. Available: ${Object.values(plugins).map((p) => `${p.name} (${p.id})`).join(", ") || "none"}`);
+  }
+  throw new Error(`Multiple plugins match "${nameOrId}": ${matches.join(", ")}. Use the full id (<name>@<sha8>).`);
+}
+
+export async function pluginConfigSet(nameOrId: string, key: string, value: string, projectPath?: string): Promise<void> {
+  const manager = new PluginManager();
+  const config = loadConfig(manager["configPath"]);
+  const id = resolvePluginId(config, nameOrId);
+  const plugin = config.plugins?.[id];
+  if (!plugin) throw new Error(`Plugin ${id} not found`);
+  if (projectPath) {
+    if (!plugin.projectOverrides) plugin.projectOverrides = {};
+    if (!plugin.projectOverrides[projectPath]) plugin.projectOverrides[projectPath] = {};
+    if (!plugin.projectOverrides[projectPath].config) plugin.projectOverrides[projectPath].config = {};
+    (plugin.projectOverrides[projectPath].config as Record<string, unknown>)[key] = value;
+  } else {
+    if (!plugin.config) plugin.config = {};
+    (plugin.config as Record<string, unknown>)[key] = value;
+  }
+  saveConfig(config, manager["configPath"]);
+}
+
+export async function pluginSync(): Promise<void> {
+  const config = loadConfig();
+  const secrets = new SecretsManager();
+  const summary = syncAllClients(config, secrets);
+  persistSyncState(summary, config);
+  saveConfig(config);
 }
 
 export async function preparePlugin(name: string): Promise<void> {

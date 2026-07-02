@@ -293,6 +293,7 @@ export interface ManagedPlugin {
   error?: string;
   serverNames: string[];
   projectedClients: string[];
+  config?: Record<string, unknown>;
   approvals?: Partial<Record<PluginComponent, boolean>>;
   projectOverrides?: Record<string, {
     enabled?: boolean;

@@ -45,11 +45,39 @@ function buildProjectScopes(config: McpxConfig): ProjectScope[] {
       .filter(([, spec]) => isServerEnabled(spec))
       .map(([name]) => name)
   );
+
+  // Build a map of project path → set of plugin server names disabled for that project
+  const pluginDisabledByProject = new Map<string, Set<string>>();
+  for (const [, plugin] of Object.entries(config.plugins ?? {})) {
+    if (!plugin.projectOverrides) continue;
+    for (const [overridePath, override] of Object.entries(plugin.projectOverrides)) {
+      const disabled = override.enabled === false || override.components?.mcpServers === false;
+      if (!disabled) continue;
+      if (!pluginDisabledByProject.has(overridePath)) {
+        pluginDisabledByProject.set(overridePath, new Set());
+      }
+      for (const serverName of plugin.serverNames) {
+        pluginDisabledByProject.get(overridePath)!.add(managedGatewayEntryName(serverName));
+      }
+    }
+  }
+
   return Object.values(config.projects ?? {}).map((project) => {
+    const projectPath = project.path;
     const disabledServerNames = (project.disabledServers ?? [])
       .filter((name) => globallyEnabled.has(name))
       .map((name) => managedGatewayEntryName(name));
-    return { path: project.path, disabledServerNames };
+
+    const pluginDisabled = pluginDisabledByProject.get(projectPath);
+    if (pluginDisabled) {
+      for (const name of pluginDisabled) {
+        if (!disabledServerNames.includes(name)) {
+          disabledServerNames.push(name);
+        }
+      }
+    }
+
+    return { path: projectPath, disabledServerNames };
   });
 }
 

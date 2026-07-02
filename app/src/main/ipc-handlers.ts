@@ -499,4 +499,16 @@ export function registerIpcHandlers(): void {
     const { listPlugins } = await import("@mcpx/core");
     return listPlugins();
   });
+
+  ipcMain.handle(IPC.PLUGIN_CONFIG_SET, async (_event, name: string, key: string, value: string, projectPath?: string) => {
+    const { pluginConfigSet } = await import("@mcpx/core");
+    await pluginConfigSet(name, key, value, projectPath);
+    return { name, key, value, success: true };
+  });
+
+  ipcMain.handle(IPC.PLUGIN_SYNC, async () => {
+    const { pluginSync } = await import("@mcpx/core");
+    await pluginSync();
+    return { success: true };
+  });
 }

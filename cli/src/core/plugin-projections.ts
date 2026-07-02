@@ -22,6 +22,7 @@ function loadOwnership(targetDir: string): OwnershipManifest {
   try {
     return JSON.parse(fs.readFileSync(manifestPath, "utf8"));
   } catch {
+    console.error(`[mcpx] Warning: corrupt plugin ownership manifest at ${manifestPath}, resetting`);
     return { version: 1, plugins: {} };
   }
 }
@@ -190,11 +191,11 @@ function syncCursor(plugins: PluginSyncInput[]): PluginSyncResult {
   const projectedDirs: string[] = [];
   const unsupported: PluginComponent[] = ["hooks", "agents"];
 
-  const ownedSkills: string[] = [];
-  const ownedCommands: string[] = [];
-
   for (const plugin of plugins) {
     if (!plugin.enabled) continue;
+
+    const ownedSkills: string[] = [];
+    const ownedCommands: string[] = [];
 
     if (plugin.components.skills && isComponentApproved(plugin, "skills")) {
       ensureDir(skillsBase);
@@ -353,6 +354,17 @@ function syncKiro(plugins: PluginSyncInput[]): PluginSyncResult {
   };
 }
 
+// --- OpenCode: MCP only via gateway (no plugin projection needed) ---
+function syncOpenCode(plugins: PluginSyncInput[]): PluginSyncResult {
+  const unsupported: PluginComponent[] = ["skills", "hooks", "agents", "commands"];
+  return {
+    clientId: "opencode",
+    status: plugins.length > 0 ? "SYNCED" : "SKIPPED",
+    projectedDirs: [],
+    unsupported,
+  };
+}
+
 export function syncPluginsToClient(clientId: string, plugins: PluginSyncInput[]): PluginSyncResult {
   const syncMap: Record<string, (plugins: PluginSyncInput[]) => PluginSyncResult> = {
     claude: syncClaude,
@@ -363,6 +375,7 @@ export function syncPluginsToClient(clientId: string, plugins: PluginSyncInput[]
     qwen: syncQwen,
     cline: syncCline,
     kiro: syncKiro,
+    opencode: syncOpenCode,
   };
 
   const syncFn = syncMap[clientId];
@@ -380,6 +393,7 @@ export function syncPluginsToClient(clientId: string, plugins: PluginSyncInput[]
     qwen: path.join(homeDir(), ".qwen", "skills"),
     cline: path.join(homeDir(), ".config", "cline", "skills"),
     kiro: path.join(homeDir(), ".kiro", "skills"),
+    opencode: "",
   };
 
   const target = targetBaseMap[clientId];
@@ -392,7 +406,7 @@ export function syncPluginsToClient(clientId: string, plugins: PluginSyncInput[]
 }
 
 // --- File copy helpers ---
-function copyPluginDir(src: string, dest: string, exclude: string[] = []): void {
+function copyPluginDir(src: string, dest: string, exclude: string[] = [], errors?: string[]): void {
   const excludeSet = new Set(exclude);
   ensureDir(dest);
   const entries = fs.readdirSync(src, { withFileTypes: true });
@@ -401,26 +415,26 @@ function copyPluginDir(src: string, dest: string, exclude: string[] = []): void 
     const srcPath = path.join(src, entry.name);
     const destPath = path.join(dest, entry.name);
     if (entry.isDirectory()) {
-      copyPluginDir(srcPath, destPath, exclude);
+      copyPluginDir(srcPath, destPath, exclude, errors);
     } else if (entry.isFile()) {
       try {
         fs.copyFileSync(srcPath, destPath);
-      } catch {
-        // ignore
+      } catch (e) {
+        errors?.push(`Failed to copy ${srcPath}: ${(e as Error).message}`);
       }
     }
   }
 }
 
-function copyFileOrDir(src: string, dest: string): void {
+function copyFileOrDir(src: string, dest: string, errors?: string[]): void {
   try {
     ensureDir(path.dirname(dest));
     if (fs.statSync(src).isDirectory()) {
-      copyPluginDir(src, dest);
+      copyPluginDir(src, dest, [], errors);
     } else {
       fs.copyFileSync(src, dest);
     }
-  } catch {
-    // ignore
+  } catch (e) {
+    errors?.push(`Failed to copy ${src} -> ${dest}: ${(e as Error).message}`);
   }
 }
