@@ -54,11 +54,12 @@ describe("lifecycle handlers", () => {
     vi.clearAllMocks();
   });
 
-  it("starts the app hidden from the dock on macOS", async () => {
+  it("uses regular activation policy on macOS (Dock app + menubar)", async () => {
     const source = await readFile(join(__dirname, "../../src/main/index.ts"), "utf-8");
 
     expect(source).toContain('app.setActivationPolicy("regular")');
-    expect(source).toContain("app.dock?.hide()");
+    // Dock icon visible — no app.dock?.hide()
+    expect(source).not.toContain("app.dock?.hide()");
   });
 
   it("marks the packaged app as a UI element", async () => {

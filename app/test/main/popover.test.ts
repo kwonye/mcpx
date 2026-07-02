@@ -9,7 +9,9 @@ describe("popover window behavior", () => {
     webContents = {
       on: vi.fn((event: string, handler: () => void) => {
         this.handlers[event] = handler;
-      })
+      }),
+      isDevToolsOpened: vi.fn(() => false),
+      isDevToolsFocused: vi.fn(() => false),
     };
     visible = false;
     destroyed = false;

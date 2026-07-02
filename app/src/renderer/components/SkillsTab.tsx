@@ -62,7 +62,7 @@ export function SkillsTab() {
   }
 
   return (
-    <div className="skills-tab">
+    <><div className="skills-tab">
       <div className="page-header page-header--split">
         <h1 className="page-title">Shared Skills</h1>
         <button
@@ -147,6 +147,6 @@ export function SkillsTab() {
       destructive
       onConfirm={handleConfirmDelete}
       onCancel={() => setConfirmDeleteId(null)}
-    />
+    /></>
   );
 }

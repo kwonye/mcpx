@@ -41,6 +41,7 @@ export function ProjectsTab({ status, onRefresh, selectedProjectPath, onSelected
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState<{ path: string; name: string } | null>(null);
 
   const projects = Object.values(status.projects ?? {});
   const selectedProject = projects.find((p) => p.path === selectedProjectPath) ?? null;
@@ -133,7 +134,7 @@ export function ProjectsTab({ status, onRefresh, selectedProjectPath, onSelected
   };
 
   return (
-    <div className="projects-tab-container">
+    <><div className="projects-tab-container">
       {error && <div className="feedback-message error mb-4">{error}</div>}
       {success && <div className="feedback-message success mb-4">{success}</div>}
 
@@ -285,6 +286,6 @@ export function ProjectsTab({ status, onRefresh, selectedProjectPath, onSelected
       destructive
       onConfirm={handleConfirmRemove}
       onCancel={() => setConfirmDelete(null)}
-    />
+    /></>
   );
 }
