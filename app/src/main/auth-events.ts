@@ -11,7 +11,10 @@ let pendingAuth: PendingAuthEntry[] = [];
 
 function broadcastAuthRequired(entry: PendingAuthEntry): void {
   for (const window of BrowserWindow.getAllWindows()) {
-    window.webContents.send(IPC.AUTH_REQUIRED, entry);
+    // Only send to the main dashboard window, not the popover
+    if (window.webContents.getURL().includes("dashboard")) {
+      window.webContents.send(IPC.AUTH_REQUIRED, entry);
+    }
   }
 }
 

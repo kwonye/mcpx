@@ -28,6 +28,13 @@ const CHECK_INTERVAL_MS = 45_000;
 const FETCH_TIMEOUT_MS = 5000;
 
 function deriveKind(count: TokenCountEntry): ErrorKind | null {
+  // Prefer structured codes when available
+  if (count.runtimeErrorCode) {
+    return "call";
+  }
+  if (count.errorCode === "auth_expired" || count.errorCode === "auth_required") {
+    return "reauth";
+  }
   if (count.runtimeError) {
     return "call";
   }

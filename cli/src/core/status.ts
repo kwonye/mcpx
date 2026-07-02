@@ -31,6 +31,7 @@ export interface StatusServerEntry {
   authBindings: StatusAuthBinding[];
   clients: StatusClientMapping[];
   tokenCount?: UpstreamTokenCount;
+  health?: "ok" | "error" | "unknown";
 }
 
 export interface StatusReport {
@@ -146,6 +147,10 @@ export async function buildStatusReport(
       tokenCount = { ...tokenCount, error: undefined };
     }
 
+    const health: "ok" | "error" | "unknown" = tokenCount
+      ? (tokenCount.error || tokenCount.runtimeError ? "error" : "ok")
+      : "unknown";
+
     const serverEntry = {
       name,
       enabled: isServerEnabled(spec),
@@ -153,7 +158,8 @@ export async function buildStatusReport(
       target: describeServerTarget(spec),
       authBindings: buildAuthBindings(spec),
       clients: buildClientMappings(config, managedIndex, name),
-      tokenCount
+      tokenCount,
+      health
     };
 
     if (serverEntry.enabled && tokenCount) {
