@@ -131,10 +131,8 @@ export class PluginManager {
       const approved = plugin.approvals?.mcpServers !== false;
       config.servers[nsName] = {
         transport: "stdio",
-        command: mcp.command,
-        args: mcp.args,
-        env: mcp.env,
-        cwd: mcp.cwd || plugin.root,
+        command: "npx",
+        args: ["-y", "@kwonye/mcpx@latest", "plugin-host", pluginId, mcp.id],
         enabled: enabled && approved,
       };
     }
@@ -179,10 +177,8 @@ export class PluginManager {
       const nsName = `${pluginName}__${mcp.id}`;
       config.servers[nsName] = {
         transport: "stdio",
-        command: mcp.command,
-        args: mcp.args,
-        env: mcp.env,
-        cwd: mcp.cwd || current.root,
+        command: "npx",
+        args: ["-y", "@kwonye/mcpx@latest", "plugin-host", pluginId, mcp.id],
         enabled: current.enabled && approved,
       };
     }
