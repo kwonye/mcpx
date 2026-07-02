@@ -4,8 +4,9 @@ import path from "node:path";
 import fs from "node:fs";
 import { parse, stringify } from "@iarna/toml";
 import { z } from "zod";
-import type { ClientAdapter, ManagedIndex, McpxConfig, SyncClientOptions, SyncResult, PluginSyncInput, PluginSyncResult } from "../types.js";
+import type { ClientAdapter, ManagedIndex, McpxConfig, Skill, SyncClientOptions, SyncResult, PluginSyncInput, PluginSyncResult } from "../types.js";
 import { syncPluginsToClient } from "../core/plugin-projections.js";
+import { projectSkillsToDir } from "../core/skill-projections.js";
 import {
   buildImportSkip,
   emptyImportScan,
@@ -53,6 +54,10 @@ export class CodexAdapter implements ClientAdapter {
 
   syncPlugins(plugins: PluginSyncInput[]): PluginSyncResult {
     return syncPluginsToClient(this.id, plugins);
+  }
+
+  syncSkills(skills: Skill[]): void {
+    projectSkillsToDir(path.join(homeDir(), ".codex", "skills"), skills, "dir");
   }
 
   scanForImports(_config: McpxConfig, managedIndex: ManagedIndex) {
