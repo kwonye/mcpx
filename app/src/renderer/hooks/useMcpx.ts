@@ -1,24 +1,38 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+
+let inFlight: Promise<unknown> | null = null;
 
 export function useStatus() {
   const [status, setStatus] = useState<unknown>(null);
   const [loading, setLoading] = useState(true);
+  const hasStatus = useRef(false);
 
   const refresh = useCallback(async () => {
-    // Only show loading indicator if we don't have status yet
-    if (!status) setLoading(true);
-    try {
-      const result = await window.mcpx.getStatus();
+    // Dedupe concurrent calls
+    if (inFlight) return inFlight;
+    if (!hasStatus.current) setLoading(true);
+    const promise = window.mcpx.getStatus().then((result) => {
       setStatus(result);
-    } catch (e) {
+      hasStatus.current = true;
+      return result;
+    }).catch((e) => {
       console.error(e);
-    } finally {
+      return null;
+    }).finally(() => {
+      inFlight = null;
       setLoading(false);
-    }
-  }, [status]);
+    });
+    inFlight = promise;
+    return promise;
+  }, []);
 
   useEffect(() => {
     refresh();
+
+    // Refetch on window focus
+    const onFocus = () => { refresh(); };
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
   }, [refresh]);
 
   return { status, loading, refresh };

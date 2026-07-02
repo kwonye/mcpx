@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Toggle } from "./ui/Toggle";
 import { formatTokenApprox } from "../utils/tokenHelper";
 import { ContextBudgetCard } from "./ContextBudgetCard";
+import { ConfirmDialog } from "./ConfirmDialog";
 
 interface ServerEntry {
   name: string;
@@ -92,18 +93,21 @@ export function ProjectsTab({ status, onRefresh, selectedProjectPath, onSelected
 
   // Handle removing/unregistering a project
   const handleRemoveProject = async (projectPath: string, name: string) => {
-    if (!confirm(`Are you sure you want to unregister project "${name}"?\nThis won't delete any files, but it will remove it from mcpx.`)) {
-      return;
-    }
+    setConfirmDelete({ path: projectPath, name });
+  };
 
+  const handleConfirmRemove = async () => {
+    if (!confirmDelete) return;
+    const { path, name } = confirmDelete;
+    setConfirmDelete(null);
     setLoading(true);
     setError(null);
     setSuccess(null);
 
     try {
-      await window.mcpx.projectRemove(projectPath);
+      await window.mcpx.projectRemove(path);
       setSuccess(`Project "${name}" unregistered successfully.`);
-      if (selectedProjectPath === projectPath) {
+      if (selectedProjectPath === path) {
         onSelectedProjectPathChange(null);
       }
       onRefresh();
@@ -273,5 +277,14 @@ export function ProjectsTab({ status, onRefresh, selectedProjectPath, onSelected
         </div>
       </div>
     </div>
+    <ConfirmDialog
+      open={confirmDelete !== null}
+      title="Unregister project?"
+      message={confirmDelete ? `Are you sure you want to unregister project "${confirmDelete.name}"? This won't delete any files, but it will remove it from mcpx.` : ""}
+      confirmLabel="Unregister"
+      destructive
+      onConfirm={handleConfirmRemove}
+      onCancel={() => setConfirmDelete(null)}
+    />
   );
 }

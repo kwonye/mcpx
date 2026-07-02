@@ -19,19 +19,22 @@ interface ServerDetailProps {
 
 export function ServerDetail({ server, onBack, onRefresh }: ServerDetailProps) {
   const [isEditing, setIsEditing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const { isToggling, handleEnabledChange } = useServerEnabled(server.name, onRefresh);
 
   const handleEdit = () => {
     setIsEditing(true);
+    setError(null);
   };
 
   const handleEditSubmit = async (spec: UpstreamServerSpec, resolvedSecrets: Record<string, string>) => {
     try {
       await window.mcpx.updateServer(server.name, spec, resolvedSecrets);
       setIsEditing(false);
+      setError(null);
       onRefresh();
     } catch (error) {
-      alert(`Failed to update server: ${error instanceof Error ? error.message : String(error)}`);
+      setError(error instanceof Error ? error.message : String(error));
     }
   };
 
@@ -48,6 +51,7 @@ export function ServerDetail({ server, onBack, onRefresh }: ServerDetailProps) {
           </button>
           <h2 className="server-detail-title">Edit {server.name}</h2>
         </div>
+        {error && <div className="error-panel">{error}</div>}
         <EditServerForm
           serverName={server.name}
           transport={server.transport}

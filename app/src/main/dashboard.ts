@@ -1,4 +1,4 @@
-import { BrowserWindow } from "electron";
+import { BrowserWindow, nativeTheme } from "electron";
 import { fileURLToPath } from "node:url";
 import { hidePopover } from "./popover";
 import { getDashboardWindow, revealDashboard, setDashboardWindow, hideDashboard as hideDashboardWindow } from "./app-control";
@@ -16,15 +16,24 @@ export function openDashboard(): BrowserWindow {
     return existing;
   }
 
+  const bgColor = nativeTheme.shouldUseDarkColors ? "#1e1e1e" : "#ffffff";
   const dashboard = new BrowserWindow({
     width: 1100,
     height: 700,
     titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
     trafficLightPosition: { x: 16, y: 16 },
     show: false,
+    backgroundColor: bgColor,
     webPreferences: {
       preload: fileURLToPath(new URL("../preload/index.js", import.meta.url)),
       sandbox: false
+    }
+  });
+
+  // Update backgroundColor on theme change
+  nativeTheme.on("updated", () => {
+    if (!dashboard.isDestroyed()) {
+      dashboard.setBackgroundColor(nativeTheme.shouldUseDarkColors ? "#1e1e1e" : "#ffffff");
     }
   });
 

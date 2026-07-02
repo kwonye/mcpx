@@ -3392,3 +3392,83 @@ select {
 .server-card-status-disabled {
     line-height: 1;
 }
+
+/* Confirm Dialog */
+.dialog-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+}
+
+.dialog {
+    background: var(--bg-primary, #fff);
+    border-radius: 12px;
+    padding: 24px;
+    max-width: 400px;
+    width: 90%;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+}
+
+.dialog-title {
+    margin: 0 0 8px;
+    font-size: 16px;
+    font-weight: 600;
+}
+
+.dialog-message {
+    margin: 0 0 20px;
+    font-size: 14px;
+    color: #666;
+    line-height: 1.4;
+}
+
+.dialog-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+}
+
+.btn-danger {
+    background: #e53e3e;
+    color: #fff;
+    border: none;
+}
+
+.btn-danger:hover {
+    background: #c53030;
+}
+
+.error-panel {
+    background: #fff5f5;
+    border: 1px solid #fed7d7;
+    color: #c53030;
+    padding: 8px 12px;
+    border-radius: 8px;
+    margin: 8px 16px;
+    font-size: 13px;
+}
+
+@media (prefers-color-scheme: dark) {
+    .dialog-overlay {
+        background: rgba(0, 0, 0, 0.7);
+    }
+
+    .dialog {
+        background: #1e1e1e;
+        border: 1px solid #333;
+    }
+
+    .dialog-message {
+        color: #aaa;
+    }
+
+    .error-panel {
+        background: #2d1a1a;
+        border-color: #5a2a2a;
+        color: #fc8181;
+    }
+}

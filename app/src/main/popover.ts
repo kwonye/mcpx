@@ -83,7 +83,11 @@ function createPopoverWindow(): BrowserWindow {
     skipTaskbar: true,
     alwaysOnTop: true,
     hasShadow: true,
-    backgroundColor: "#0f1115",
+    fullscreenable: false,
+    type: "panel",
+    ...(process.platform === "darwin"
+      ? { vibrancy: "menu" as const, visualEffectState: "active" as const }
+      : {}),
     webPreferences: {
       preload: fileURLToPath(new URL("../preload/index.js", import.meta.url)),
       sandbox: false
@@ -92,7 +96,11 @@ function createPopoverWindow(): BrowserWindow {
 
   loadPopoverContent(popover);
 
-  popover.on("blur", () => {
+  popover.on("blur", (event) => {
+    // Skip hide while DevTools are focused
+    if (popover?.webContents.isDevToolsOpened() && popover?.webContents.isDevToolsFocused()) {
+      return;
+    }
     popover?.hide();
   });
 

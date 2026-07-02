@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
 import { useSkills } from "../hooks/useSkills";
+import { ConfirmDialog } from "./ConfirmDialog";
 
 export function SkillsTab() {
   const { skills, loading, saveSkill, deleteSkill } = useSkills();
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [selectedSkillId, setSelectedSkillId] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
   const [newSkillName, setNewSkillName] = useState("");
@@ -42,7 +44,13 @@ export function SkillsTab() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm(`Delete skill "${id}"?`)) return;
+    setConfirmDeleteId(id);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!confirmDeleteId) return;
+    const id = confirmDeleteId;
+    setConfirmDeleteId(null);
     const success = await deleteSkill(id);
     if (success && selectedSkillId === id) {
       setSelectedSkillId(null);
@@ -131,5 +139,14 @@ export function SkillsTab() {
         </div>
       </div>
     </div>
+    <ConfirmDialog
+      open={confirmDeleteId !== null}
+      title="Delete skill?"
+      message={confirmDeleteId ? `Delete skill "${confirmDeleteId}"?` : ""}
+      confirmLabel="Delete"
+      destructive
+      onConfirm={handleConfirmDelete}
+      onCancel={() => setConfirmDeleteId(null)}
+    />
   );
 }
