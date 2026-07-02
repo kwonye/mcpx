@@ -257,14 +257,14 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC.PROJECT_SET_SERVER_ENABLED, (_event, projectPath: string, serverName: string, enabled: boolean) => {
     const config = loadConfig();
-    setProjectServerEnabled(config, projectPath, serverName, enabled);
+    const result = setProjectServerEnabled(config, projectPath, serverName, enabled);
     saveConfig(config);
     const secrets = new SecretsManager();
     const summary = syncAllClients(config, secrets);
     persistSyncState(summary, config);
     saveConfig(config);
     queueTokenCountRefresh();
-    return { updated: serverName, projectPath, enabled, sync: summary };
+    return { updated: serverName, projectPath, enabled, sync: summary, effective: result.effective, reason: result.reason };
   });
 
   ipcMain.handle(IPC.UPDATE_SERVER, (_event, name: string, spec: UpstreamServerSpec, resolvedSecrets?: Record<string, string>) => {
