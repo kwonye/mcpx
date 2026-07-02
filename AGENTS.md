@@ -220,6 +220,16 @@ agent-browser --cdp 9222 click @e2            # Click by ref
 
 The app has 2 CDP tabs: the dashboard (main window) and the popover (menubar tray). Use `agent-browser --cdp 9222 tab` to list them, `agent-browser --cdp 9222 tab 0` to switch.
 
+## Git Hooks
+
+The repo ships a pre-push hook at `.githooks/pre-push` that runs `cd cli && bun run build && bun test` before allowing pushes to `main`. Enable it:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+This prevents broken builds or failing tests from reaching CI.
+
 ## CI/CD & Versioning
 
 The project uses a **single monotonic version stream** across both components. Every release increments a shared patch version.
