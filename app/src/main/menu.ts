@@ -1,7 +1,8 @@
 import { Menu } from "electron";
 import { shell } from "electron";
 import { getDesktopProductName } from "./app-flavor";
-import { hideDashboard, quitApp } from "./app-control";
+import { quitApp } from "./app-control";
+import { openDashboard } from "./dashboard";
 
 export function buildApplicationMenu(): Menu {
   const productName = getDesktopProductName();
@@ -10,6 +11,15 @@ export function buildApplicationMenu(): Menu {
       label: productName,
       submenu: [
         { role: "about" },
+        { type: "separator" },
+        {
+          label: "Settings…",
+          accelerator: "CmdOrCtrl+,",
+          click: () => {
+            const win = openDashboard();
+            win.webContents.send("navigate", "settings");
+          }
+        },
         { type: "separator" },
         { role: "hide" },
         { role: "hideOthers" },
@@ -50,11 +60,7 @@ export function buildApplicationMenu(): Menu {
     {
       label: "Window",
       submenu: [
-        {
-          label: "Close Window",
-          accelerator: "CommandOrControl+W",
-          click: hideDashboard
-        },
+        { role: "close" },
         { role: "minimize" },
         { role: "zoom" },
         { type: "separator" },

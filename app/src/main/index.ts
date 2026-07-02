@@ -116,7 +116,6 @@ async function startMainProcessImpl(): Promise<void> {
 
   if (process.platform === "darwin") {
     app.setActivationPolicy("regular");
-    app.dock?.hide();
   }
 
   const loginShellPath = await resolveLoginShellPath();
@@ -130,11 +129,8 @@ async function startMainProcessImpl(): Promise<void> {
     return;
   }
 
-  // Second-instance: on Linux/Windows, open the dashboard; on macOS, do nothing (tray already visible)
   app.on("second-instance", () => {
-    if (process.platform !== "darwin") {
-      openDashboard();
-    }
+    openDashboard();
   });
 
   await app.whenReady();

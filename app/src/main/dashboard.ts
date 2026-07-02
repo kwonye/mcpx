@@ -44,11 +44,6 @@ export function openDashboard(): BrowserWindow {
     }
   });
 
-  dashboard.on("close", (event) => {
-    event.preventDefault();
-    hideDashboardWindow();
-  });
-
   dashboard.on("closed", () => {
     setDashboardWindow(null);
   });
