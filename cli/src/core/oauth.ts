@@ -15,7 +15,7 @@ import type {
 import type { HttpServerSpec, McpxConfig } from "../types.js";
 import { loadConfig, saveConfig } from "./config.js";
 import { SecretsManager } from "./secrets.js";
-import { syncAllClients } from "./sync.js";
+import { syncAllClients, persistSyncState } from "./sync.js";
 
 interface StoredOAuthTokens {
   tokens: OAuthTokens;
@@ -335,7 +335,9 @@ export async function runOAuthLogin(
     const config = loadConfig(configPath);
     bindOAuthReference(config, serverName);
     saveConfig(config, configPath);
-    syncAllClients(config, secrets);
+    const summary = syncAllClients(config, secrets);
+    persistSyncState(summary, config);
+    saveConfig(config, configPath);
     return { serverName, authorized: true };
   } finally {
     if (callbackServer) {

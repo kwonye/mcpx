@@ -6,6 +6,19 @@ import { getConfigPath, findProjectConfigPath } from "./paths.js";
 import { readJsonFile, writeJsonAtomic } from "../util/fs.js";
 import { repairConfig } from "./config-repair.js";
 
+export class ConfigLoadError extends Error {
+  readonly configPath: string;
+  readonly backupPath?: string;
+  readonly issues?: string[];
+
+  constructor(configPath: string, message: string, issues?: string[]) {
+    super(message);
+    this.name = "ConfigLoadError";
+    this.configPath = configPath;
+    this.issues = issues;
+  }
+}
+
 const clientStateSchema = z.object({
   status: z.enum(["SYNCED", "UNSUPPORTED_HTTP", "ERROR", "SKIPPED"]),
   lastSyncAt: z.string().optional(),
@@ -136,10 +149,41 @@ export function defaultConfig(): McpxConfig {
 }
 
 export function loadConfig(configPath = getConfigPath()): McpxConfig {
-  const raw = readJsonFile(configPath, defaultConfig());
+  // File missing → default (safe path: no data to lose)
+  if (!fs.existsSync(configPath)) {
+    return defaultConfig();
+  }
+
+  // Read with explicit fs.readFileSync + JSON.parse so ENOENT is distinguishable
+  // from corrupt JSON.
+  let raw: unknown;
+  try {
+    const content = fs.readFileSync(configPath, "utf8");
+    raw = JSON.parse(content);
+  } catch (err) {
+    // Corrupt JSON file — backup and throw
+    const backupPath = `${configPath}.invalid-${Date.now()}`;
+    try {
+      fs.copyFileSync(configPath, backupPath);
+    } catch {
+      // best-effort backup
+    }
+    const message = `Failed to parse config file at ${configPath}.`;
+    throw new ConfigLoadError(configPath, `${message} Backed up to ${backupPath}.`, [`JSON parse error: ${(err as Error).message}`]);
+  }
+
   const parsed = configSchema.safeParse(raw);
   if (!parsed.success) {
-    return defaultConfig();
+    // Schema-invalid — backup and throw
+    const backupPath = `${configPath}.invalid-${Date.now()}`;
+    try {
+      fs.copyFileSync(configPath, backupPath);
+    } catch {
+      // best-effort backup
+    }
+    const issues = parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`);
+    const message = `Config file at ${configPath} has validation errors.`;
+    throw new ConfigLoadError(configPath, `${message} Backed up to ${backupPath}.`, issues);
   }
 
   const clientEntries: Partial<Record<ClientId, McpxConfig["clients"][ClientId]>> = {};
@@ -171,7 +215,19 @@ export function saveConfig(config: McpxConfig, configPath = getConfigPath()): vo
   writeJsonAtomic(configPath, config);
 }
 
-export function loadProjectConfig(projectConfigPath: string): ProjectLocalConfig {
+export function loadProjectConfig(projectConfigPath: string, options?: { strict?: boolean }): ProjectLocalConfig {
+  if (options?.strict) {
+    const raw = readJsonFile(projectConfigPath, null);
+    if (raw === null) {
+      return { servers: {} };
+    }
+    const parsed = projectConfigSchema.safeParse(raw);
+    if (!parsed.success) {
+      throw new ConfigLoadError(projectConfigPath, `Project config at ${projectConfigPath} has validation errors.`, parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`));
+    }
+    return parsed.data;
+  }
+
   const raw = readJsonFile(projectConfigPath, { servers: {} });
   const parsed = projectConfigSchema.safeParse(raw);
   if (!parsed.success) {
@@ -226,6 +282,34 @@ export interface ActiveConfigContext {
   projectPath?: string;
   config: McpxConfig;
   save: () => void;
+}
+
+export function migrateProjectServers(config: McpxConfig, projectPath: string): { migrated: string[]; conflicts: string[] } {
+  const localConfigPath = path.join(projectPath, ".mcpx.json");
+  if (!fs.existsSync(localConfigPath)) {
+    return { migrated: [], conflicts: [] };
+  }
+
+  const migrated: string[] = [];
+  const conflicts: string[] = [];
+  try {
+    const localConfig = loadProjectConfig(localConfigPath);
+    for (const [serverName, spec] of Object.entries(localConfig.servers)) {
+      if (config.servers[serverName]) {
+        conflicts.push(serverName);
+        continue;
+      }
+      const normalized = normalizeServerSpecEnabled(spec);
+      if (normalized.transport === "stdio" && !(normalized as StdioServerSpec).cwd) {
+        (normalized as StdioServerSpec & { enabled: boolean }).cwd = projectPath;
+      }
+      config.servers[serverName] = normalized;
+      migrated.push(serverName);
+    }
+  } catch {
+    // ignore errors loading project config
+  }
+  return { migrated, conflicts };
 }
 
 export function resolveActiveConfig(options: { global?: boolean; local?: boolean } = {}): ActiveConfigContext {

@@ -6,8 +6,8 @@ import { PluginDataManager } from "./plugin-data.js";
 import { PluginLifecycle } from "./plugin-lifecycle.js";
 import { parseSource } from "./plugin-source.js";
 import { readManifest, discoverComponents, hasManifest } from "./plugin-parse.js";
-import { loadConfig, saveConfig, loadMergedConfig } from "./config.js";
-import { syncAllClients } from "./sync.js";
+import { loadConfig, saveConfig } from "./config.js";
+import { syncAllClients, persistSyncState } from "./sync.js";
 import { SecretsManager } from "./secrets.js";
 import type {
   ManagedPlugin, PluginComponent, PluginManifest,
@@ -135,8 +135,10 @@ export class PluginManager {
     this.lifecycle.initData(pluginId);
 
     // Sync projections
-    const mergedConfig = loadMergedConfig(this.configPath);
-    syncAllClients(mergedConfig, this.secrets);
+    const syncConfig = loadConfig(this.configPath);
+    const summary = syncAllClients(syncConfig, this.secrets);
+    persistSyncState(summary, syncConfig);
+    saveConfig(syncConfig, this.configPath);
 
     return plugin;
   }
@@ -182,8 +184,10 @@ export class PluginManager {
     config.plugins[pluginId] = current;
     saveConfig(config, this.configPath);
 
-    const mergedConfig = loadMergedConfig(this.configPath);
-    syncAllClients(mergedConfig, this.secrets);
+    const syncConfig = loadConfig(this.configPath);
+    const summary = syncAllClients(syncConfig, this.secrets);
+    persistSyncState(summary, syncConfig);
+    saveConfig(syncConfig, this.configPath);
 
     return current;
   }
@@ -207,8 +211,10 @@ export class PluginManager {
       await this.lifecycle.removeData(pluginId);
     }
 
-    const mergedConfig = loadMergedConfig(this.configPath);
-    syncAllClients(mergedConfig, this.secrets);
+    const syncConfig = loadConfig(this.configPath);
+    const summary = syncAllClients(syncConfig, this.secrets);
+    persistSyncState(summary, syncConfig);
+    saveConfig(syncConfig, this.configPath);
   }
 
   async enablePlugin(pluginId: string): Promise<void> {
@@ -219,8 +225,10 @@ export class PluginManager {
     plugin.enabled = true;
     saveConfig(config, this.configPath);
 
-    const mergedConfig = loadMergedConfig(this.configPath);
-    syncAllClients(mergedConfig, this.secrets);
+    const syncConfig = loadConfig(this.configPath);
+    const summary = syncAllClients(syncConfig, this.secrets);
+    persistSyncState(summary, syncConfig);
+    saveConfig(syncConfig, this.configPath);
   }
 
   async disablePlugin(pluginId: string): Promise<void> {
@@ -231,8 +239,10 @@ export class PluginManager {
     plugin.enabled = false;
     saveConfig(config, this.configPath);
 
-    const mergedConfig = loadMergedConfig(this.configPath);
-    syncAllClients(mergedConfig, this.secrets);
+    const syncConfig = loadConfig(this.configPath);
+    const summary = syncAllClients(syncConfig, this.secrets);
+    persistSyncState(summary, syncConfig);
+    saveConfig(syncConfig, this.configPath);
   }
 
   async approveComponent(pluginId: string, component: string): Promise<void> {
@@ -254,8 +264,10 @@ export class PluginManager {
     }
 
     saveConfig(config, this.configPath);
-    const mergedConfig = loadMergedConfig(this.configPath);
-    syncAllClients(mergedConfig, this.secrets);
+    const syncConfig = loadConfig(this.configPath);
+    const summary = syncAllClients(syncConfig, this.secrets);
+    persistSyncState(summary, syncConfig);
+    saveConfig(syncConfig, this.configPath);
   }
 
   async getPluginStatus(pluginId: string): Promise<ManagedPlugin | null> {

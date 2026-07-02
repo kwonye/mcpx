@@ -136,7 +136,7 @@ describe("gateway token management", () => {
     expect(token2).toBe(token);
   });
 
-  it("reads token from existing file", () => {
+  it("reads token from existing file without writing to store", () => {
     const env = setupTempEnv("mcpx-registry-");
     cleanups.push(env.restore);
 
@@ -155,6 +155,63 @@ describe("gateway token management", () => {
 
     const token = ensureGatewayToken(config, secrets);
     expect(token).toBe("known-test-token");
+
+    // Verify no store entry was created for the token
+    expect(secrets.getSecret(getGatewayTokenSecretName(config))).toBeNull();
+  });
+
+  it("migrates token from encrypted store to file", () => {
+    const env = setupTempEnv("mcpx-registry-");
+    cleanups.push(env.restore);
+
+    const originalEnv = process.env.MCPX_SECRET_local_gateway_token;
+    delete process.env.MCPX_SECRET_local_gateway_token;
+    cleanups.push(() => {
+      process.env.MCPX_SECRET_local_gateway_token = originalEnv;
+    });
+
+    const config = defaultConfig();
+    const secrets = new SecretsManager();
+    const secretName = getGatewayTokenSecretName(config);
+
+    // Pre-populate the store with a token (no file)
+    secrets.setSecret(secretName, "store-token-value");
+
+    const token = ensureGatewayToken(config, secrets);
+    expect(token).toBe("store-token-value");
+
+    // File should now exist with the same value
+    const tokenPath = getGatewayTokenPath(secretName);
+    expect(fs.existsSync(tokenPath)).toBe(true);
+    expect(fs.readFileSync(tokenPath, "utf8").trim()).toBe("store-token-value");
+  });
+
+  it("rotateGatewayToken removes the store entry", () => {
+    const env = setupTempEnv("mcpx-registry-");
+    cleanups.push(env.restore);
+
+    const originalEnv = process.env.MCPX_SECRET_local_gateway_token;
+    delete process.env.MCPX_SECRET_local_gateway_token;
+    cleanups.push(() => {
+      process.env.MCPX_SECRET_local_gateway_token = originalEnv;
+    });
+
+    const config = defaultConfig();
+    const secrets = new SecretsManager();
+    const secretName = getGatewayTokenSecretName(config);
+
+    // Pre-populate store to test removal
+    secrets.setSecret(secretName, "old-token");
+
+    const newToken = rotateGatewayToken(config, secrets);
+    expect(newToken).toBeTruthy();
+
+    // Store entry should be removed
+    expect(secrets.getSecret(secretName)).toBeNull();
+
+    // File should have the new token
+    const tokenPath = getGatewayTokenPath(secretName);
+    expect(fs.readFileSync(tokenPath, "utf8").trim()).toBe(newToken);
   });
 
   it("rotateGatewayToken changes the file value", () => {

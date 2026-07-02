@@ -1,5 +1,5 @@
 import { Notification } from "electron";
-import { loadConfig, getDaemonStatus, SecretsManager } from "@mcpx/core";
+import { loadConfig, getDaemonStatus, SecretsManager, ensureGatewayToken } from "@mcpx/core";
 import { describeTokenError } from "../shared/token-error";
 import { loadDesktopSettings } from "./settings-store";
 import { openDashboard } from "./dashboard";
@@ -104,13 +104,18 @@ async function pollOnce(): Promise<void> {
     return;
   }
 
-  const config = loadConfig();
+  let config: ReturnType<typeof loadConfig>;
+  try {
+    config = loadConfig();
+  } catch {
+    return;
+  }
   if (!getDaemonStatus(config).running) {
     return;
   }
 
   const secrets = new SecretsManager();
-  const token = secrets.resolveMaybeSecret(config.gateway.tokenRef);
+  const token = ensureGatewayToken(config, secrets);
   if (!token) {
     return;
   }

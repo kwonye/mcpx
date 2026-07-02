@@ -69,22 +69,28 @@ export function ensureGatewayToken(config: McpxConfig, secrets: SecretsManager):
     return envValue;
   }
 
-  // 2. Token file
+  // 2. Token file — single source of truth (no store write)
   try {
     const fileValue = fs.readFileSync(tokenPath, "utf8").trim();
     if (fileValue) {
-      secrets.setSecret(secretName, fileValue);
       return fileValue;
     }
   } catch {
     // File doesn't exist — fall through
   }
 
-  // 3. Generate new token
+  // 3. Migration fallback: if encrypted store has the token, re-create the file
+  const storeValue = secrets.getSecret(secretName);
+  if (storeValue) {
+    ensureParentDir(tokenPath);
+    fs.writeFileSync(tokenPath, storeValue, { mode: 0o600 });
+    return storeValue;
+  }
+
+  // 4. Generate new token — write to file only (never to encrypted store)
   const token = crypto.randomBytes(32).toString("base64url");
   ensureParentDir(tokenPath);
   fs.writeFileSync(tokenPath, token, { mode: 0o600 });
-  secrets.setSecret(secretName, token);
   return token;
 }
 
@@ -95,7 +101,8 @@ export function rotateGatewayToken(config: McpxConfig, secrets: SecretsManager):
 
   ensureParentDir(tokenPath);
   fs.writeFileSync(tokenPath, token, { mode: 0o600 });
-  secrets.setSecret(secretName, token);
+  // Remove the encrypted-store mirror so there's only one source of truth
+  secrets.removeSecret(secretName);
 
   return token;
 }

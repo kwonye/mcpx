@@ -14,7 +14,6 @@ import { serverSpecsEqual } from "../adapters/utils/index.js";
 import { loadManagedIndex, saveManagedIndex } from "./managed-index.js";
 import { getManagedIndexPath } from "./paths.js";
 import { ensureGatewayToken } from "./registry.js";
-import { saveConfig } from "./config.js";
 import { SecretsManager } from "./secrets.js";
 import { listSkills } from "./skills.js";
 
@@ -23,6 +22,9 @@ export interface SyncSummary {
   imports: SyncImportReport;
   results: SyncResult[];
   hasErrors: boolean;
+  clientStates?: Record<string, { status: ClientStatus; configPath?: string; message?: string; lastSyncAt: string }>;
+  phaseErrors?: Array<{ clientId: ClientId; phase: string; message: string }>;
+  pluginResults?: PluginSyncResult[];
 }
 
 export function getGatewayUrl(config: McpxConfig): string {
@@ -201,17 +203,17 @@ export function syncAllClients(config: McpxConfig, secrets: SecretsManager, targ
     results.push(result);
   }
 
+  saveManagedIndex(managedIndex, managedIndexPath);
+
+  const clientStates: Record<string, { status: ClientStatus; configPath?: string; message?: string; lastSyncAt: string }> = {};
   for (const result of results) {
-    config.clients[result.clientId] = {
+    clientStates[result.clientId] = {
       status: result.status,
       configPath: result.configPath,
       message: result.message,
       lastSyncAt: new Date().toISOString()
     };
   }
-
-  saveManagedIndex(managedIndex, managedIndexPath);
-  saveConfig(config);
 
   const hasErrors = results.some((result) => result.status === "ERROR")
     || imports.conflicts.length > 0
@@ -221,6 +223,14 @@ export function syncAllClients(config: McpxConfig, secrets: SecretsManager, targ
     gatewayUrl,
     imports,
     results,
-    hasErrors
+    hasErrors,
+    clientStates
   };
+}
+
+export function persistSyncState(summary: SyncSummary, config: McpxConfig): void {
+  if (!summary.clientStates) return;
+  for (const [clientId, state] of Object.entries(summary.clientStates)) {
+    config.clients[clientId as ClientId] = state;
+  }
 }

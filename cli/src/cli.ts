@@ -9,14 +9,14 @@ import { execFileSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { emitKeypressEvents } from "node:readline";
 import { createInterface, type Interface as ReadlineInterface } from "node:readline/promises";
-import { loadConfig, saveConfig, loadMergedConfig, resolveActiveConfig, loadProjectConfig, saveProjectConfig } from "./core/config.js";
+import { loadConfig, saveConfig, loadMergedConfig, resolveActiveConfig, loadProjectConfig, saveProjectConfig, ConfigLoadError } from "./core/config.js";
 import { addServer, removeServer, setServerEnabled, registerProject, unregisterProject, rotateGatewayToken } from "./core/registry.js";
 import { listSkills, getSkill, saveSkill, deleteSkill } from "./core/skills.js";
 import { SecretsManager, readSecretValueFromStdin } from "./core/secrets.js";
 import { probeHttpAuthRequirement } from "./core/auth-probe.js";
 import { fetchRegistryServerDetail, selectBestPackage, extractRequiredInputs, mapRegistryToSpec } from "./core/registry-client.js";
 import type { RequiredInput } from "./core/registry-client.js";
-import { syncAllClients } from "./core/sync.js";
+import { syncAllClients, persistSyncState } from "./core/sync.js";
 import { isServerEnabled, type ClientId, type ClientStatus, type HttpServerSpec, type McpxConfig, type StdioServerSpec, type UpstreamServerSpec, type PluginComponent } from "./types.js";
 import { parseCompatibilityArgs } from "./compat/index.js";
 import {
@@ -272,8 +272,9 @@ async function ensureDaemonIfEnabled(cliPath: string, secrets: SecretsManager): 
 async function autoSyncManagedEntries(config: McpxConfig, cliPath: string): Promise<void> {
   const secrets = new SecretsManager();
   await ensureDaemonIfEnabled(cliPath, secrets);
-  const mergedConfig = loadMergedConfig();
-  const summary = syncAllClients(mergedConfig, secrets);
+  const summary = syncAllClients(config, secrets);
+  persistSyncState(summary, config);
+  saveConfig(config);
   printSyncSummary(summary, false);
   ensureExitCodeForSyncFailures(summary.hasErrors);
 }
@@ -867,6 +868,8 @@ async function reconnectGatewayAndSync(cliPath: string): Promise<void> {
   const restart = await restartDaemon(config, cliPath, secrets);
   process.stdout.write(`${restart.message} pid=${restart.pid} port=${restart.port}\n`);
   const summary = syncAllClients(config, secrets);
+  persistSyncState(summary, config);
+  saveConfig(config);
   printSyncSummary(summary, false);
 }
 
@@ -1295,11 +1298,13 @@ function registerSyncCommand(program: Command, cliPath: string): void {
     .option("--json", "Output JSON")
     .description("Sync gateway configuration to supported clients (e.g. `mcpx sync claude`)")
     .action(async (clients: string[], options: { client: string[]; json?: boolean }) => {
-      const config = loadMergedConfig();
+      const config = loadConfig();
       const targetClients = parseClientList([...(clients ?? []), ...(options.client ?? [])]);
       const secrets = new SecretsManager();
       await ensureDaemonIfEnabled(cliPath, secrets);
       const summary = syncAllClients(config, secrets, targetClients);
+      persistSyncState(summary, config);
+      saveConfig(config);
       printSyncSummary(summary, options.json ?? false);
       ensureExitCodeForSyncFailures(summary.hasErrors);
     });
@@ -2086,7 +2091,20 @@ export async function runCli(argv = process.argv): Promise<void> {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(fs.realpathSync(process.argv[1])).href) {
   void runCli().catch((error) => {
-    process.stderr.write(`${(error as Error).message}\n`);
+    if (error instanceof ConfigLoadError) {
+      process.stderr.write(`Config error: ${error.message}\n`);
+      if (error.backupPath) {
+        process.stderr.write(`Backup saved to: ${error.backupPath}\n`);
+      }
+      if (error.issues && error.issues.length > 0) {
+        for (const issue of error.issues.slice(0, 5)) {
+          process.stderr.write(`  - ${issue}\n`);
+        }
+      }
+      process.stderr.write("Fix the config file or restore from backup.\n");
+    } else {
+      process.stderr.write(`${(error as Error).message}\n`);
+    }
     process.exit(1);
   });
 }

@@ -13,6 +13,7 @@ import {
   stopDaemon,
   restartDaemon,
   syncAllClients,
+  persistSyncState,
   addServer,
   removeServer,
   setServerEnabled,
@@ -32,7 +33,8 @@ import {
   parseCliAddCommand,
   tokenizeCommandLine,
   runOAuthLogin,
-  PluginManager
+  PluginManager,
+  ensureGatewayToken
 } from "@mcpx/core";
 import type { HttpServerSpec, StdioServerSpec, UpstreamServerSpec } from "@mcpx/core";
 import { IPC } from "../shared/ipc-channels";
@@ -46,9 +48,14 @@ import { dismissPendingAuth, getPendingAuth, queuePendingAuth } from "./auth-eve
 import { quitApp } from "./app-control";
 
 async function refreshTokenCountsSoon(): Promise<void> {
-  const config = loadConfig();
+  let config: ReturnType<typeof loadConfig>;
+  try {
+    config = loadConfig();
+  } catch {
+    return;
+  }
   const secrets = new SecretsManager();
-  const token = secrets.resolveMaybeSecret(config.gateway.tokenRef);
+  const token = ensureGatewayToken(config, secrets);
   if (!token) {
     return;
   }
@@ -150,6 +157,8 @@ export function registerIpcHandlers(): void {
     saveConfig(config);
     const secrets = new SecretsManager();
     const summary = syncAllClients(config, secrets);
+    persistSyncState(summary, config);
+    saveConfig(config);
     queueTokenCountRefresh();
 
     const result: { added: string; sync: typeof summary; authRequired?: boolean; authStatus?: number; oauthLikely?: boolean } = { added: name, sync: summary };
@@ -181,6 +190,8 @@ export function registerIpcHandlers(): void {
     saveConfig(config);
 
     const summary = syncAllClients(config, secrets);
+    persistSyncState(summary, config);
+    saveConfig(config);
     queueTokenCountRefresh();
 
     dismissPendingAuth(serverName);
@@ -223,7 +234,9 @@ export function registerIpcHandlers(): void {
     removeServer(config, name, false);
     saveConfig(config);
     const secrets = new SecretsManager();
-    const summary = syncAllClients(loadMergedConfig(), secrets);
+    const summary = syncAllClients(config, secrets);
+    persistSyncState(summary, config);
+    saveConfig(config);
     queueTokenCountRefresh();
     return { removed: name, sync: summary };
   });
@@ -233,7 +246,9 @@ export function registerIpcHandlers(): void {
     setServerEnabled(config, name, enabled);
     saveConfig(config);
     const secrets = new SecretsManager();
-    const summary = syncAllClients(loadMergedConfig(), secrets);
+    const summary = syncAllClients(config, secrets);
+    persistSyncState(summary, config);
+    saveConfig(config);
     queueTokenCountRefresh();
     return { updated: name, enabled, sync: summary };
   });
@@ -243,7 +258,9 @@ export function registerIpcHandlers(): void {
     setProjectServerEnabled(config, projectPath, serverName, enabled);
     saveConfig(config);
     const secrets = new SecretsManager();
-    const summary = syncAllClients(loadMergedConfig(), secrets);
+    const summary = syncAllClients(config, secrets);
+    persistSyncState(summary, config);
+    saveConfig(config);
     queueTokenCountRefresh();
     return { updated: serverName, projectPath, enabled, sync: summary };
   });
@@ -291,38 +308,45 @@ export function registerIpcHandlers(): void {
     const config = loadConfig();
     updateServer(config, name, spec);
     saveConfig(config);
-    const summary = syncAllClients(loadMergedConfig(), secrets);
+    const summary = syncAllClients(config, secrets);
+    persistSyncState(summary, config);
+    saveConfig(config);
     queueTokenCountRefresh();
     return { updated: name, sync: summary };
   });
 
   ipcMain.handle(IPC.SYNC_ALL, () => {
-    const config = loadMergedConfig();
+    const config = loadConfig();
     const secrets = new SecretsManager();
     const summary = syncAllClients(config, secrets);
+    persistSyncState(summary, config);
+    saveConfig(config);
     queueTokenCountRefresh();
     return summary;
   });
 
   ipcMain.handle(IPC.PROJECT_INIT, (_event, projectPath: string, name: string) => {
-    const globalConfig = loadConfig();
-    registerProject(globalConfig, projectPath, name);
-    saveConfig(globalConfig);
+    const config = loadConfig();
+    registerProject(config, projectPath, name);
+    saveConfig(config);
 
     const secrets = new SecretsManager();
-    const summary = syncAllClients(loadMergedConfig(), secrets);
+    const summary = syncAllClients(config, secrets);
+    persistSyncState(summary, config);
+    saveConfig(config);
     queueTokenCountRefresh();
     return { success: true, sync: summary };
   });
 
   ipcMain.handle(IPC.PROJECT_REMOVE, (_event, projectPath: string) => {
-    const globalConfig = loadConfig();
-    unregisterProject(globalConfig, projectPath);
-    saveConfig(globalConfig);
+    const config = loadConfig();
+    unregisterProject(config, projectPath);
+    saveConfig(config);
     
-    const mergedConfig = loadMergedConfig();
     const secrets = new SecretsManager();
-    const summary = syncAllClients(mergedConfig, secrets);
+    const summary = syncAllClients(config, secrets);
+    persistSyncState(summary, config);
+    saveConfig(config);
     queueTokenCountRefresh();
     return { success: true, sync: summary };
   });
@@ -368,6 +392,8 @@ export function registerIpcHandlers(): void {
       saveConfig(config);
       const secrets = new SecretsManager();
       const summary = syncAllClients(config, secrets);
+      persistSyncState(summary, config);
+      saveConfig(config);
       queueTokenCountRefresh();
 
       const result: { added: string; sync: typeof summary; authRequired?: boolean; authStatus?: number; oauthLikely?: boolean } = { added: name, sync: summary };

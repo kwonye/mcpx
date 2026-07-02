@@ -1,5 +1,6 @@
 // Config
-export { loadConfig, saveConfig, defaultConfig, loadMergedConfig, loadProjectConfig, saveProjectConfig } from "./config.js";
+export { loadConfig, saveConfig, defaultConfig, loadMergedConfig, loadProjectConfig, saveProjectConfig, ConfigLoadError, migrateProjectServers } from "./config.js";
+export { mutateConfig } from "./config-store.js";
 export { parseCliAddCommand, tokenizeCommandLine } from "./add-command.js";
 export { buildEnrichedPath } from "./spawn-env.js";
 export { runOAuthLogin, getOAuthAccessToken, isOAuthReference, oauthReferenceServerName } from "./oauth.js";
@@ -17,7 +18,7 @@ export {
 export type { DaemonStatus, DaemonStartResult } from "./daemon.js";
 
 // Sync
-export { syncAllClients, getGatewayUrl } from "./sync.js";
+export { syncAllClients, getGatewayUrl, persistSyncState } from "./sync.js";
 export type { SyncSummary } from "./sync.js";
 
 // Registry (server add/remove)

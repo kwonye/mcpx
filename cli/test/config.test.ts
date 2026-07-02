@@ -98,6 +98,59 @@ describe("config loading", () => {
     });
   });
 
+  it("throws ConfigLoadError on corrupt JSON", () => {
+    const env = setupTempEnv("mcpx-config-corrupt-json-");
+    cleanups.push(env.restore);
+
+    const configPath = getConfigPath();
+    fs.mkdirSync(path.dirname(configPath), { recursive: true });
+    fs.writeFileSync(configPath, "not valid json {", "utf8");
+
+    expect(() => loadConfig()).toThrow("Failed to parse config file");
+
+    // Backup file should exist
+    const dir = path.dirname(configPath);
+    const backups = fs.readdirSync(dir).filter((f) => f.startsWith("config.json.invalid-"));
+    expect(backups.length).toBeGreaterThan(0);
+
+    // Original file untouched
+    expect(fs.readFileSync(configPath, "utf8")).toBe("not valid json {");
+  });
+
+  it("throws ConfigLoadError on schema-invalid config", () => {
+    const env = setupTempEnv("mcpx-config-schema-invalid-");
+    cleanups.push(env.restore);
+
+    const configPath = getConfigPath();
+    fs.mkdirSync(path.dirname(configPath), { recursive: true });
+    fs.writeFileSync(configPath, JSON.stringify({
+      schemaVersion: 1,
+      gateway: { port: 37373, tokenRef: "secret://local_gateway_token", autoStart: true },
+      servers: {
+        bad_server: {
+          transport: "http",
+          url: 123 // should be a string
+        }
+      }
+    }), "utf8");
+
+    expect(() => loadConfig()).toThrow("validation errors");
+
+    // Backup file should exist
+    const dir = path.dirname(configPath);
+    const backups = fs.readdirSync(dir).filter((f) => f.startsWith("config.json.invalid-"));
+    expect(backups.length).toBeGreaterThan(0);
+  });
+
+  it("returns defaults for missing config file", () => {
+    const env = setupTempEnv("mcpx-config-missing-");
+    cleanups.push(env.restore);
+
+    const config = loadConfig();
+    expect(config.servers).toEqual({});
+    expect(config.gateway.port).toBe(37373);
+  });
+
   it("drops client-internal app bundle stdio servers on load", () => {
     const env = setupTempEnv("mcpx-config-repair-internal-");
     cleanups.push(env.restore);
