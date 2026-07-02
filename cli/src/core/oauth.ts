@@ -16,6 +16,7 @@ import type { HttpServerSpec, McpxConfig } from "../types.js";
 import { loadConfig, saveConfig } from "./config.js";
 import { SecretsManager } from "./secrets.js";
 import { syncAllClients, persistSyncState } from "./sync.js";
+import { UpstreamError } from "./errors.js";
 
 interface StoredOAuthTokens {
   tokens: OAuthTokens;
@@ -293,9 +294,17 @@ export async function runOAuthLogin(
   configPath?: string,
   codeReceiver?: OAuthCodeReceiver
 ): Promise<{ serverName: string; authorized: true }> {
-  // Clear any stale OAuth state from previous runs so the fresh flow
-  // always starts from a clean slate (DCR, PKCE, etc.).
-  new McpxOAuthProvider(serverName, secrets).invalidateCredentials("all");
+  const oauthName = oauthSecretName(serverName, "tokens");
+  const clientName = oauthSecretName(serverName, "client");
+
+  // Snapshot existing tokens so we can restore them if the flow fails.
+  const backupTokens = secrets.getSecret(oauthName);
+  const backupClient = secrets.getSecret(clientName);
+
+  // Clear verifier and discovery so the fresh flow starts clean (DCR, PKCE, etc.)
+  // but preserve tokens and client secrets — a failed re-auth should not destroy working credentials.
+  new McpxOAuthProvider(serverName, secrets).invalidateCredentials("verifier");
+  new McpxOAuthProvider(serverName, secrets).invalidateCredentials("discovery");
 
   const state = crypto.randomUUID();
   let callbackServer: http.Server | undefined;
@@ -339,6 +348,11 @@ export async function runOAuthLogin(
     persistSyncState(summary, config);
     saveConfig(config, configPath);
     return { serverName, authorized: true };
+  } catch (error) {
+    // Restore tokens on failure so working credentials are never destroyed
+    if (backupTokens) secrets.setSecret(oauthName, backupTokens);
+    if (backupClient) secrets.setSecret(clientName, backupClient);
+    throw error;
   } finally {
     if (callbackServer) {
       await closeServer(callbackServer);
@@ -354,34 +368,59 @@ export async function getOAuthAccessToken(
 ): Promise<string> {
   const stored = readJsonSecret<StoredOAuthTokens>(secrets, oauthSecretName(serverName, "tokens"));
   if (!stored) {
-    throw new Error(`No OAuth tokens stored for "${serverName}". Run mcpx auth login ${serverName}.`);
+    throw new UpstreamError(serverName, "auth_required", `No OAuth tokens stored for "${serverName}".`);
   }
 
-  if (!options.forceRefresh && !tokensAreExpiring(stored)) {
-    return stored.tokens.access_token;
-  }
-
-  if (!stored.tokens.refresh_token) {
-    if (!options.forceRefresh) {
-      return stored.tokens.access_token;
+  // If token is hard-expired (past expires_at + 60s buffer) with no refresh, classify as auth_expired.
+  // Within the buffer, still return the existing token.
+  if (options.forceRefresh || tokensAreExpiring(stored)) {
+    if (!stored.tokens.refresh_token) {
+      if (!options.forceRefresh) {
+        return stored.tokens.access_token;
+      }
+      throw new UpstreamError(serverName, "auth_expired", `No refresh token for "${serverName}". Re-authentication required.`);
     }
-    throw new Error(`No OAuth refresh token stored for "${serverName}". Re-authentication required.`);
+
+    const provider = new McpxOAuthProvider(serverName, secrets);
+    const clientInformation = provider.clientInformation();
+    if (!clientInformation) {
+      throw new UpstreamError(serverName, "auth_expired", `No OAuth client info for "${serverName}". Re-authentication required.`);
+    }
+
+    let serverInfo: Awaited<ReturnType<typeof discoverOAuthServerInfo>>;
+    try {
+      const cachedDiscovery = provider.discoveryState();
+      serverInfo = cachedDiscovery ?? await discoverOAuthServerInfo(spec.url);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (/ECONNREFUSED|ENOTFOUND|EAI_AGAIN|fetch failed/i.test(message)) {
+        throw new UpstreamError(serverName, "unreachable", `OAuth discovery failed: ${message}`);
+      }
+      throw new UpstreamError(serverName, "upstream_error", `OAuth discovery failed: ${message}`);
+    }
+
+    try {
+      const refreshed = await refreshAuthorization(serverInfo.authorizationServerUrl, {
+        metadata: serverInfo.authorizationServerMetadata,
+        clientInformation,
+        refreshToken: stored.tokens.refresh_token,
+        resource: serverInfo.resourceMetadata?.resource ? new URL(serverInfo.resourceMetadata.resource) : undefined
+      });
+      provider.saveTokens(refreshed);
+      return refreshed.access_token;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      // Token endpoint 4xx / invalid_grant / invalid_client → auth_expired (keep tokens)
+      if (/invalid_grant|invalid_client|4\d{2}/i.test(message)) {
+        throw new UpstreamError(serverName, "auth_expired", `OAuth refresh failed: ${message}`);
+      }
+      // Network errors → unreachable (keep tokens)
+      if (/ECONNREFUSED|ENOTFOUND|EAI_AGAIN|fetch failed/i.test(message)) {
+        throw new UpstreamError(serverName, "unreachable", `OAuth refresh failed: ${message}`);
+      }
+      throw new UpstreamError(serverName, "upstream_error", `OAuth refresh failed: ${message}`);
+    }
   }
 
-  const provider = new McpxOAuthProvider(serverName, secrets);
-  const clientInformation = provider.clientInformation();
-  if (!clientInformation) {
-    throw new Error(`No OAuth client information stored for "${serverName}". Re-authentication required.`);
-  }
-
-  const cachedDiscovery = provider.discoveryState();
-  const serverInfo = cachedDiscovery ?? await discoverOAuthServerInfo(spec.url);
-  const refreshed = await refreshAuthorization(serverInfo.authorizationServerUrl, {
-    metadata: serverInfo.authorizationServerMetadata,
-    clientInformation,
-    refreshToken: stored.tokens.refresh_token,
-    resource: serverInfo.resourceMetadata?.resource ? new URL(serverInfo.resourceMetadata.resource) : undefined
-  });
-  provider.saveTokens(refreshed);
-  return refreshed.access_token;
+  return stored.tokens.access_token;
 }
