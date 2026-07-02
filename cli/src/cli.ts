@@ -1302,7 +1302,7 @@ function registerSyncCommand(program: Command, cliPath: string): void {
       const targetClients = parseClientList([...(clients ?? []), ...(options.client ?? [])]);
       const secrets = new SecretsManager();
       await ensureDaemonIfEnabled(cliPath, secrets);
-      const summary = syncAllClients(config, secrets, targetClients);
+      const summary = syncAllClients(config, secrets, { targetClients });
       persistSyncState(summary, config);
       saveConfig(config);
       printSyncSummary(summary, options.json ?? false);
