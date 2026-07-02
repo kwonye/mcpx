@@ -230,6 +230,8 @@ export interface UpstreamTokenCount {
   total: number;
   error?: string;
   runtimeError?: string;
+  errorCode?: string;
+  runtimeErrorCode?: string;
 }
 
 export type PluginSourceType = "github" | "git" | "git-subdir" | "local" | "npm" | "marketplace";

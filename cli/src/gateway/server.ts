@@ -12,6 +12,7 @@ import { loadMergedConfig } from "../core/config.js";
 import { buildEnrichedPath } from "../core/spawn-env.js";
 import { getOAuthAccessToken, isOAuthReference, oauthReferenceServerName } from "../core/oauth.js";
 import { SecretsManager } from "../core/secrets.js";
+import { UpstreamError, classifyUpstreamError, SecretNotFoundError } from "../core/errors.js";
 import { APP_VERSION } from "../version.js";
 import type {
   HttpServerSpec,
@@ -55,22 +56,8 @@ interface UpstreamConnectionEntry {
 interface GatewayRuntimeState {
   upstreamConnections: Map<string, UpstreamConnectionEntry>;
   tokenCache?: Map<string, { fingerprint: string; count: UpstreamTokenCount }>;
-  upstreamErrors?: Map<string, string>;
+  upstreamErrors?: Map<string, { code: string; message: string }>;
   lastWwwAuthenticate?: Map<string, string>;
-}
-
-class UpstreamHttpError extends Error {
-  readonly status: number;
-  readonly wwwAuthenticate?: string;
-  readonly bodyText: string;
-
-  constructor(upstreamName: string, status: number, bodyText: string, wwwAuthenticate?: string) {
-    super(`Upstream ${upstreamName} returned HTTP ${status}: ${bodyText.slice(0, 400)}`);
-    this.name = "UpstreamHttpError";
-    this.status = status;
-    this.bodyText = bodyText;
-    this.wwwAuthenticate = wwwAuthenticate;
-  }
 }
 
 function makeError(id: string | number | null, code: number, message: string, data?: unknown): JsonRpcResponse {
@@ -292,8 +279,10 @@ export async function getUpstreamTokenCounts(
     const fingerprint = specFingerprint(upstream.spec);
     const cached = runtime.tokenCache.get(upstream.name);
     if (cached?.fingerprint === fingerprint) {
-      const runtimeError = runtime.upstreamErrors?.get(upstream.name);
-      results[upstream.name] = runtimeError ? { ...cached.count, runtimeError } : cached.count;
+      const runtimeErr = runtime.upstreamErrors?.get(upstream.name);
+      results[upstream.name] = runtimeErr
+        ? { ...cached.count, runtimeError: runtimeErr.message, runtimeErrorCode: runtimeErr.code }
+        : cached.count;
       continue;
     }
 
@@ -341,8 +330,8 @@ export async function getUpstreamTokenCounts(
     if (errors.length === 0) {
       runtime.tokenCache.set(upstream.name, { fingerprint, count: countObj });
     }
-    const runtimeError = runtime.upstreamErrors?.get(upstream.name);
-    results[upstream.name] = runtimeError ? { ...countObj, runtimeError } : countObj;
+    const runtimeErr = runtime.upstreamErrors?.get(upstream.name);
+    results[upstream.name] = runtimeErr ? { ...countObj, runtimeError: runtimeErr.message, runtimeErrorCode: runtimeErr.code } : countObj;
   }
 
   return results;
@@ -592,13 +581,9 @@ async function callUpstreamOnce(
       return callUpstreamOnce(upstream, method, params, secrets, runtime, passthroughAuthorizationHeader, true);
     }
 
-    // Convert HTTP-level errors to UpstreamHttpError so auth-challenge detection works.
-    if (upstream.spec.transport === "http" && error instanceof StreamableHTTPError && error.code) {
-      const wwwAuthenticate = runtime.lastWwwAuthenticate?.get(upstream.name);
-      throw new UpstreamHttpError(upstream.name, error.code, error.message ?? "", wwwAuthenticate);
-    }
-
-    throw error;
+    // Classify all errors through the structured taxonomy.
+    const wwwAuthenticate = runtime.lastWwwAuthenticate?.get(upstream.name);
+    throw classifyUpstreamError(upstream.name, error, wwwAuthenticate);
   }
 }
 
@@ -620,8 +605,8 @@ function authHeaderIsValid(request: http.IncomingMessage, expectedToken: string)
   return scheme === "Bearer" && token === expectedToken;
 }
 
-function isAuthChallenge(error: unknown): error is UpstreamHttpError {
-  return error instanceof UpstreamHttpError && (error.status === 401 || error.status === 403);
+function isAuthChallenge(error: unknown): error is UpstreamError {
+  return error instanceof UpstreamError && (error.code === "auth_required" || error.code === "auth_expired");
 }
 
 function getClientAuthorizationForUpstream(request: http.IncomingMessage, expectedToken: string): string | undefined {
@@ -684,7 +669,8 @@ async function handleListTools(
         throw error;
       }
 
-      runtime.upstreamErrors?.set(upstream.name, error instanceof Error ? error.message : String(error));
+      const code = error instanceof UpstreamError ? error.code : "upstream_error";
+      runtime.upstreamErrors?.set(upstream.name, { code, message: error instanceof Error ? error.message : String(error) });
     }
   }
 
@@ -740,7 +726,8 @@ async function handleListResources(
         throw error;
       }
 
-      runtime.upstreamErrors?.set(upstream.name, error instanceof Error ? error.message : String(error));
+      const code = error instanceof UpstreamError ? error.code : "upstream_error";
+      runtime.upstreamErrors?.set(upstream.name, { code, message: error instanceof Error ? error.message : String(error) });
     }
   }
 
@@ -794,7 +781,8 @@ async function handleListPrompts(
         throw error;
       }
 
-      runtime.upstreamErrors?.set(upstream.name, error instanceof Error ? error.message : String(error));
+      const code = error instanceof UpstreamError ? error.code : "upstream_error";
+      runtime.upstreamErrors?.set(upstream.name, { code, message: error instanceof Error ? error.message : String(error) });
     }
   }
 
@@ -851,8 +839,9 @@ async function routeNamespacedCall(
       if (isAuthChallenge(error)) {
         throw error;
       }
-      runtime.upstreamErrors?.set(upstream.name, (error as Error).message);
-      return makeError(id, -32000, (error as Error).message);
+      const errCode = error instanceof UpstreamError ? error.code : "upstream_error";
+      runtime.upstreamErrors?.set(upstream.name, { code: errCode, message: (error as Error).message });
+      return makeError(id, -32000, (error as Error).message, { mcpxCode: errCode, upstream: upstream.name });
     }
   }
 
@@ -888,8 +877,9 @@ async function routeNamespacedCall(
       if (isAuthChallenge(error)) {
         throw error;
       }
-      runtime.upstreamErrors?.set(upstream.name, (error as Error).message);
-      return makeError(id, -32000, (error as Error).message);
+      const errCode = error instanceof UpstreamError ? error.code : "upstream_error";
+      runtime.upstreamErrors?.set(upstream.name, { code: errCode, message: (error as Error).message });
+      return makeError(id, -32000, (error as Error).message, { mcpxCode: errCode, upstream: upstream.name });
     }
   }
 
@@ -924,8 +914,9 @@ async function routeNamespacedCall(
     if (isAuthChallenge(error)) {
       throw error;
     }
-    runtime.upstreamErrors?.set(upstream.name, (error as Error).message);
-    return makeError(id, -32000, (error as Error).message);
+    const errCode = error instanceof UpstreamError ? error.code : "upstream_error";
+    runtime.upstreamErrors?.set(upstream.name, { code: errCode, message: (error as Error).message });
+    return makeError(id, -32000, (error as Error).message, { mcpxCode: errCode, upstream: upstream.name });
   }
 }
 
@@ -1277,9 +1268,9 @@ export function createGatewayServer(options: GatewayServerOptions): http.Server 
           response.setHeader("www-authenticate", rewriteWwwAuthenticateResourceMetadata(error.wwwAuthenticate, localResourceMetadataUrl));
         }
         response.end(JSON.stringify(makeError(null, -32001, "Upstream authentication required.", {
+          mcpxCode: error.code,
           status: error.status,
-          body: error.bodyText,
-          wwwAuthenticate: error.wwwAuthenticate
+          upstream: error.upstream
         })));
         if (debug) {
           console.error(`[mcpx gateway] -> ${error.status} upstream auth challenge`);

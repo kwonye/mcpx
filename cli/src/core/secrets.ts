@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import { getSecretsStorePath, getSecretsKeyPath, ensureParentDir } from "./paths.js";
 import { readJsonFile, writeJsonAtomic } from "../util/fs.js";
+import { SecretNotFoundError } from "./errors.js";
 
 const ALGORITHM = "aes-256-gcm";
 
@@ -136,7 +137,7 @@ export class SecretsManager {
     if (!secretName) return value;
 
     const secret = this.getSecret(secretName);
-    if (!secret) throw new Error(`Secret not found: ${secretName}`);
+    if (!secret) throw new SecretNotFoundError(secretName);
     return secret;
   }
 

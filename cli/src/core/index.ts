@@ -1,6 +1,10 @@
 // Config
 export { loadConfig, saveConfig, defaultConfig, loadMergedConfig, loadProjectConfig, saveProjectConfig, ConfigLoadError, migrateProjectServers } from "./config.js";
 export { mutateConfig } from "./config-store.js";
+
+// Errors
+export { UpstreamError, SecretNotFoundError, classifyUpstreamError } from "./errors.js";
+export type { UpstreamErrorCode } from "./errors.js";
 export { parseCliAddCommand, tokenizeCommandLine } from "./add-command.js";
 export { buildEnrichedPath } from "./spawn-env.js";
 export { runOAuthLogin, getOAuthAccessToken, isOAuthReference, oauthReferenceServerName } from "./oauth.js";
