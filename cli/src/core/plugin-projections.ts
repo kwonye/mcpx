@@ -27,6 +27,7 @@ function loadOwnership(targetDir: string): OwnershipManifest {
 }
 
 function saveOwnership(targetDir: string, manifest: OwnershipManifest): void {
+  ensureDir(targetDir);
   fs.writeFileSync(
     path.join(targetDir, OWNERSHIP_MANIFEST),
     JSON.stringify(manifest, null, 2)
@@ -34,7 +35,6 @@ function saveOwnership(targetDir: string, manifest: OwnershipManifest): void {
 }
 
 function recordOwned(targetDir: string, pluginId: string, paths: string[]): void {
-  ensureDir(targetDir);
   const manifest = loadOwnership(targetDir);
   manifest.plugins[pluginId] = {
     pluginId,
@@ -76,8 +76,31 @@ export function pruneAllPluginProjections(targetDir: string): void {
   }
 }
 
+/**
+ * Prune every plugin from the ownership manifest that is NOT in the keep list.
+ */
+export function pruneUnlistedPlugins(targetDir: string, keepPluginIds: string[]): void {
+  const manifest = loadOwnership(targetDir);
+  const keep = new Set(keepPluginIds);
+  for (const [pluginId] of Object.entries(manifest.plugins)) {
+    if (!keep.has(pluginId)) {
+      prunePluginProjections(targetDir, pluginId);
+    }
+  }
+}
+
 function nsName(pluginName: string, id: string): string {
   return `${pluginName}__${id}`;
+}
+
+function isComponentApproved(plugin: PluginSyncInput, component: PluginComponent): boolean {
+  const approval = plugin.approvals?.[component];
+  // Default: allow skills and commands, deny hooks; mcpServers respects component flag
+  if (approval === false) return false;
+  if (approval === true) return true;
+  if (component === "hooks") return false;
+  if (component === "mcpServers") return plugin.components.mcpServers;
+  return plugin.components[component] ?? false;
 }
 
 // --- Claude Code: materialize whole plugin into ~/.claude/skills/<plugin>/ ---
@@ -85,21 +108,23 @@ function syncClaude(plugins: PluginSyncInput[]): PluginSyncResult {
   const targetBase = path.join(homeDir(), ".claude", "skills");
   const projectedDirs: string[] = [];
   const unsupported: PluginComponent[] = [];
+  const skippedUnapproved: string[] = [];
 
   for (const plugin of plugins) {
     if (!plugin.enabled) continue;
+    if (!isComponentApproved(plugin, "skills")) {
+      skippedUnapproved.push(`${plugin.pluginName}:skills`);
+      continue;
+    }
 
     const targetDir = path.join(targetBase, plugin.pluginName);
     ensureDir(targetDir);
 
-    // Strip .mcp.json to prevent Claude from loading MCP servers natively (gateway owns them)
     const mcpJsonSrc = path.join(plugin.pluginRoot, ".mcp.json");
     const mcpJsonDest = path.join(targetDir, ".mcp.json");
 
-    // Copy plugin root to skills dir, excluding .mcp.json
     copyPluginDir(plugin.pluginRoot, targetDir, [".mcp.json", ".git"]);
 
-    // Remove MCP JSON if it was copied
     if (fs.existsSync(mcpJsonDest)) {
       fs.rmSync(mcpJsonDest, { recursive: true, force: true });
     }
@@ -118,7 +143,6 @@ function syncClaude(plugins: PluginSyncInput[]): PluginSyncResult {
 
 // --- Claude Desktop: MCP only via gateway (no plugin projection needed) ---
 function syncClaudeDesktop(plugins: PluginSyncInput[]): PluginSyncResult {
-  // MCP servers are already handled by syncAllClients → gateway
   const unsupported: PluginComponent[] = ["skills", "hooks", "agents", "commands"];
   return {
     clientId: "claude-desktop",
@@ -135,18 +159,20 @@ function syncCodex(plugins: PluginSyncInput[]): PluginSyncResult {
   const unsupported: PluginComponent[] = ["hooks", "agents"];
 
   for (const plugin of plugins) {
-    if (!plugin.enabled || !plugin.components.skills) continue;
-    ensureDir(targetBase);
+    if (!plugin.enabled) continue;
 
-    const owned: string[] = [];
-    for (const skill of plugin.skills) {
-      const targetDir = path.join(targetBase, nsName(plugin.pluginName, skill.id));
-      ensureDir(targetDir);
-      copyFileOrDir(skill.path, path.join(targetDir, "SKILL.md"));
-      owned.push(nsName(plugin.pluginName, skill.id));
-      projectedDirs.push(targetDir);
+    if (plugin.components.skills && isComponentApproved(plugin, "skills")) {
+      ensureDir(targetBase);
+      const owned: string[] = [];
+      for (const skill of plugin.skills) {
+        const targetDir = path.join(targetBase, nsName(plugin.pluginName, skill.id));
+        ensureDir(targetDir);
+        copyFileOrDir(skill.path, path.join(targetDir, "SKILL.md"));
+        owned.push(nsName(plugin.pluginName, skill.id));
+        projectedDirs.push(targetDir);
+      }
+      recordOwned(targetBase, plugin.pluginId, owned);
     }
-    recordOwned(targetBase, plugin.pluginId, owned);
   }
 
   return {
@@ -170,7 +196,7 @@ function syncCursor(plugins: PluginSyncInput[]): PluginSyncResult {
   for (const plugin of plugins) {
     if (!plugin.enabled) continue;
 
-    if (plugin.components.skills) {
+    if (plugin.components.skills && isComponentApproved(plugin, "skills")) {
       ensureDir(skillsBase);
       for (const skill of plugin.skills) {
         const targetDir = path.join(skillsBase, nsName(plugin.pluginName, skill.id));
@@ -181,7 +207,7 @@ function syncCursor(plugins: PluginSyncInput[]): PluginSyncResult {
       }
     }
 
-    if (plugin.components.commands) {
+    if (plugin.components.commands && isComponentApproved(plugin, "commands")) {
       ensureDir(commandsBase);
       for (const cmd of plugin.commands) {
         const targetPath = path.join(commandsBase, `${nsName(plugin.pluginName, cmd.id)}.md`);
@@ -210,18 +236,20 @@ function syncVsCode(plugins: PluginSyncInput[]): PluginSyncResult {
   const unsupported: PluginComponent[] = ["hooks", "agents"];
 
   for (const plugin of plugins) {
-    if (!plugin.enabled || !plugin.components.skills) continue;
-    ensureDir(skillsBase);
+    if (!plugin.enabled) continue;
 
-    const owned: string[] = [];
-    for (const skill of plugin.skills) {
-      const targetDir = path.join(skillsBase, nsName(plugin.pluginName, skill.id));
-      ensureDir(targetDir);
-      copyFileOrDir(skill.path, path.join(targetDir, "SKILL.md"));
-      owned.push(nsName(plugin.pluginName, skill.id));
-      projectedDirs.push(targetDir);
+    if (plugin.components.skills && isComponentApproved(plugin, "skills")) {
+      ensureDir(skillsBase);
+      const owned: string[] = [];
+      for (const skill of plugin.skills) {
+        const targetDir = path.join(skillsBase, nsName(plugin.pluginName, skill.id));
+        ensureDir(targetDir);
+        copyFileOrDir(skill.path, path.join(targetDir, "SKILL.md"));
+        owned.push(nsName(plugin.pluginName, skill.id));
+        projectedDirs.push(targetDir);
+      }
+      recordOwned(skillsBase, plugin.pluginId, owned);
     }
-    recordOwned(skillsBase, plugin.pluginId, owned);
   }
 
   return {
@@ -232,69 +260,27 @@ function syncVsCode(plugins: PluginSyncInput[]): PluginSyncResult {
   };
 }
 
-// --- Kiro: skills only ---
-function syncKiro(plugins: PluginSyncInput[]): PluginSyncResult {
-  const skillsBase = path.join(homeDir(), ".kiro", "skills");
+// --- Qwen: skills only ---
+function syncQwen(plugins: PluginSyncInput[]): PluginSyncResult {
+  const targetBase = path.join(homeDir(), ".qwen", "skills");
   const projectedDirs: string[] = [];
   const unsupported: PluginComponent[] = ["hooks", "agents", "commands"];
 
   for (const plugin of plugins) {
-    if (!plugin.enabled || !plugin.components.skills) continue;
-    ensureDir(skillsBase);
-
-    const owned: string[] = [];
-    for (const skill of plugin.skills) {
-      const targetPath = path.join(skillsBase, `${nsName(plugin.pluginName, skill.id)}.md`);
-      copyFileOrDir(skill.path, targetPath);
-      owned.push(`${nsName(plugin.pluginName, skill.id)}.md`);
-      projectedDirs.push(targetPath);
-    }
-    recordOwned(skillsBase, plugin.pluginId, owned);
-  }
-
-  return {
-    clientId: "kiro",
-    status: "SYNCED",
-    projectedDirs,
-    unsupported,
-  };
-}
-
-// --- Qwen: skills + commands ---
-function syncQwen(plugins: PluginSyncInput[]): PluginSyncResult {
-  const skillsBase = path.join(homeDir(), ".qwen", "skills");
-  const commandsBase = path.join(homeDir(), ".qwen", "commands");
-  const projectedDirs: string[] = [];
-  const unsupported: PluginComponent[] = ["hooks", "agents"];
-
-  const ownedSkills: string[] = [];
-  const ownedCommands: string[] = [];
-
-  for (const plugin of plugins) {
     if (!plugin.enabled) continue;
 
-    if (plugin.components.skills) {
-      ensureDir(skillsBase);
+    if (plugin.components.skills && isComponentApproved(plugin, "skills")) {
+      ensureDir(targetBase);
+      const owned: string[] = [];
       for (const skill of plugin.skills) {
-        const targetPath = path.join(skillsBase, `${nsName(plugin.pluginName, skill.id)}.md`);
-        copyFileOrDir(skill.path, targetPath);
-        ownedSkills.push(`${nsName(plugin.pluginName, skill.id)}.md`);
-        projectedDirs.push(targetPath);
+        const targetDir = path.join(targetBase, nsName(plugin.pluginName, skill.id));
+        ensureDir(targetDir);
+        copyFileOrDir(skill.path, path.join(targetDir, "SKILL.md"));
+        owned.push(nsName(plugin.pluginName, skill.id));
+        projectedDirs.push(targetDir);
       }
+      recordOwned(targetBase, plugin.pluginId, owned);
     }
-
-    if (plugin.components.commands) {
-      ensureDir(commandsBase);
-      for (const cmd of plugin.commands) {
-        const targetPath = path.join(commandsBase, `${nsName(plugin.pluginName, cmd.id)}.md`);
-        copyFileOrDir(cmd.path, targetPath);
-        ownedCommands.push(`${nsName(plugin.pluginName, cmd.id)}.md`);
-        projectedDirs.push(targetPath);
-      }
-    }
-
-    if (ownedSkills.length > 0) recordOwned(skillsBase, plugin.pluginId, ownedSkills);
-    if (ownedCommands.length > 0) recordOwned(commandsBase, plugin.pluginId, ownedCommands);
   }
 
   return {
@@ -305,57 +291,134 @@ function syncQwen(plugins: PluginSyncInput[]): PluginSyncResult {
   };
 }
 
-// --- Main dispatch ---
-const CLIENT_SYNCERS: Record<string, (plugins: PluginSyncInput[]) => PluginSyncResult> = {
-  claude: syncClaude,
-  "claude-desktop": syncClaudeDesktop,
-  codex: syncCodex,
-  cursor: syncCursor,
-  vscode: syncVsCode,
-  kiro: syncKiro,
-  qwen: syncQwen,
-};
+// --- Cline: skills only ---
+function syncCline(plugins: PluginSyncInput[]): PluginSyncResult {
+  const targetBase = path.join(homeDir(), ".config", "cline", "skills");
+  const projectedDirs: string[] = [];
+  const unsupported: PluginComponent[] = ["hooks", "agents", "commands"];
 
-export function syncPluginsToClient(
-  clientId: ClientId,
-  plugins: PluginSyncInput[]
-): PluginSyncResult {
-  const syncer = CLIENT_SYNCERS[clientId];
-  if (!syncer) {
-    return {
-      clientId,
-      status: "SKIPPED",
-      projectedDirs: [],
-      unsupported: ["mcpServers", "skills", "hooks", "agents", "commands"],
-      error: `No plugin sync implementation for ${clientId}`,
-    };
+  for (const plugin of plugins) {
+    if (!plugin.enabled) continue;
+
+    if (plugin.components.skills && isComponentApproved(plugin, "skills")) {
+      ensureDir(targetBase);
+      const owned: string[] = [];
+      for (const skill of plugin.skills) {
+        const targetDir = path.join(targetBase, nsName(plugin.pluginName, skill.id));
+        ensureDir(targetDir);
+        copyFileOrDir(skill.path, path.join(targetDir, "SKILL.md"));
+        owned.push(nsName(plugin.pluginName, skill.id));
+        projectedDirs.push(targetDir);
+      }
+      recordOwned(targetBase, plugin.pluginId, owned);
+    }
   }
-  return syncer(plugins);
+
+  return {
+    clientId: "cline",
+    status: "SYNCED",
+    projectedDirs,
+    unsupported,
+  };
 }
 
-// --- Helpers ---
+// --- Kiro: skills only ---
+function syncKiro(plugins: PluginSyncInput[]): PluginSyncResult {
+  const targetBase = path.join(homeDir(), ".kiro", "skills");
+  const projectedDirs: string[] = [];
+  const unsupported: PluginComponent[] = ["hooks", "agents", "commands"];
+
+  for (const plugin of plugins) {
+    if (!plugin.enabled) continue;
+
+    if (plugin.components.skills && isComponentApproved(plugin, "skills")) {
+      ensureDir(targetBase);
+      const owned: string[] = [];
+      for (const skill of plugin.skills) {
+        const targetDir = path.join(targetBase, nsName(plugin.pluginName, skill.id));
+        ensureDir(targetDir);
+        copyFileOrDir(skill.path, path.join(targetDir, "SKILL.md"));
+        owned.push(nsName(plugin.pluginName, skill.id));
+        projectedDirs.push(targetDir);
+      }
+      recordOwned(targetBase, plugin.pluginId, owned);
+    }
+  }
+
+  return {
+    clientId: "kiro",
+    status: "SYNCED",
+    projectedDirs,
+    unsupported,
+  };
+}
+
+export function syncPluginsToClient(clientId: string, plugins: PluginSyncInput[]): PluginSyncResult | null {
+  const syncMap: Record<string, (plugins: PluginSyncInput[]) => PluginSyncResult> = {
+    claude: syncClaude,
+    "claude-desktop": syncClaudeDesktop,
+    codex: syncCodex,
+    cursor: syncCursor,
+    vscode: syncVsCode,
+    qwen: syncQwen,
+    cline: syncCline,
+    kiro: syncKiro,
+  };
+
+  const syncFn = syncMap[clientId];
+  if (!syncFn) return null;
+
+  // Prune unlisted plugins before projecting
+  const targetBaseMap: Record<string, string> = {
+    claude: path.join(homeDir(), ".claude", "skills"),
+    "claude-desktop": "",
+    codex: path.join(homeDir(), ".codex", "skills"),
+    cursor: path.join(homeDir(), ".cursor"),
+    vscode: path.join(homeDir(), ".copilot", "skills"),
+    qwen: path.join(homeDir(), ".qwen", "skills"),
+    cline: path.join(homeDir(), ".config", "cline", "skills"),
+    kiro: path.join(homeDir(), ".kiro", "skills"),
+  };
+
+  const target = targetBaseMap[clientId];
+  if (target) {
+    const enabledIds = plugins.filter((p) => p.enabled).map((p) => p.pluginId);
+    pruneUnlistedPlugins(target, enabledIds);
+  }
+
+  return syncFn(plugins);
+}
+
+// --- File copy helpers ---
 function copyPluginDir(src: string, dest: string, exclude: string[] = []): void {
+  const excludeSet = new Set(exclude);
   ensureDir(dest);
   const entries = fs.readdirSync(src, { withFileTypes: true });
   for (const entry of entries) {
-    if (exclude.includes(entry.name)) continue;
-    if (entry.name.startsWith(".") && entry.name !== ".claude-plugin") continue;
+    if (excludeSet.has(entry.name)) continue;
     const srcPath = path.join(src, entry.name);
     const destPath = path.join(dest, entry.name);
     if (entry.isDirectory()) {
       copyPluginDir(srcPath, destPath, exclude);
-    } else {
-      fs.mkdirSync(path.dirname(destPath), { recursive: true });
-      fs.copyFileSync(srcPath, destPath);
+    } else if (entry.isFile()) {
+      try {
+        fs.copyFileSync(srcPath, destPath);
+      } catch {
+        // ignore
+      }
     }
   }
 }
 
 function copyFileOrDir(src: string, dest: string): void {
-  ensureDir(path.dirname(dest));
-  if (fs.statSync(src).isDirectory()) {
-    copyPluginDir(src, dest);
-  } else {
-    fs.copyFileSync(src, dest);
+  try {
+    ensureDir(path.dirname(dest));
+    if (fs.statSync(src).isDirectory()) {
+      copyPluginDir(src, dest);
+    } else {
+      fs.copyFileSync(src, dest);
+    }
+  } catch {
+    // ignore
   }
 }

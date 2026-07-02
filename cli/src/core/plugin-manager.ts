@@ -81,12 +81,21 @@ export class PluginManager {
       throw new Error(`Plugin ${pluginId} is already installed`);
     }
 
+    // Name collision check: ensure no existing plugin has the same server names
+    const serverNames: string[] = info.components.mcpServers.map(s => `${pluginName}__${s.id}`);
+    for (const existing of Object.values(config.plugins)) {
+      for (const sn of serverNames) {
+        if (existing.serverNames.includes(sn)) {
+          throw new Error(`Server name collision: "${sn}" is already claimed by plugin "${existing.name}". Use --name to specify a different plugin name.`);
+        }
+      }
+    }
+
     const dataDir = path.join(getPluginDataRoot(), pluginId);
     ensureDir(dataDir);
 
     const enabled = options?.enabled ?? true;
     const discovered = info.components;
-    const serverNames: string[] = discovered.mcpServers.map(s => `${pluginName}__${s.id}`);
 
     const plugin: ManagedPlugin = {
       id: pluginId,
