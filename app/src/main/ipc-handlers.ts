@@ -30,6 +30,7 @@ import {
   applyAuthReference,
   resolveAuthTarget,
   toSecretRef,
+  maybePrefixBearer,
   parseCliAddCommand,
   tokenizeCommandLine,
   runOAuthLogin,
@@ -176,16 +177,17 @@ export function registerIpcHandlers(): void {
     return result;
   });
 
-  ipcMain.handle(IPC.CONFIGURE_AUTH, async (_event, { serverName, headerName, authValue, secretName }: { serverName: string; headerName: string; authValue: string; secretName?: string }) => {
+  ipcMain.handle(IPC.CONFIGURE_AUTH, async (_event, { serverName, headerName, authValue, secretName, raw }: { serverName: string; headerName: string; authValue: string; secretName?: string; raw?: boolean }) => {
     const config = loadConfig();
     const spec = config.servers[serverName];
     if (!spec) throw new Error(`Server "${serverName}" not found`);
 
     const secrets = new SecretsManager();
     const resolvedSecretName = secretName ?? `auth_${serverName.toLowerCase().replace(/[^a-z0-9._-]/g, "_")}_header_${headerName.toLowerCase().replace(/[^a-z0-9._-]/g, "_")}`;
-    secrets.setSecret(resolvedSecretName, authValue);
-
     const target = resolveAuthTarget(spec, headerName);
+    const finalValue = maybePrefixBearer(target, authValue, raw ?? false);
+    secrets.setSecret(resolvedSecretName, finalValue);
+
     applyAuthReference(spec, target, toSecretRef(resolvedSecretName));
     saveConfig(config);
 
