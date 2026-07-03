@@ -9,6 +9,7 @@ import { projectSkillsToDir } from "../core/skill-projections.js";
 import { readJsonFile, writeJsonAtomic } from "../util/fs.js";
 import {
   buildImportSkip,
+  detectManagedEntryDrift,
   emptyImportScan,
   ensureManagedEntryWritable,
   errorResult,
@@ -141,8 +142,10 @@ export class QwenAdapter implements ClientAdapter {
     try {
       const raw = readJsonFile<JsonObject>(configPath, {});
       const managedNames = options.managedEntries.map((entry) => entry.name);
+      const enabledEntries = options.managedEntries.filter((entry) => entry.enabled);
+      const enabledManagedNames = enabledEntries.map((entry) => entry.name);
       const serverEntries = Object.fromEntries(
-        options.managedEntries.map((entry) => [entry.name, {
+        enabledEntries.map((entry) => [entry.name, {
           httpUrl: entry.url,
           headers: entry.headers
         }])
@@ -150,7 +153,12 @@ export class QwenAdapter implements ClientAdapter {
 
       const topLevelServers = ((raw.mcpServers as JsonObject | undefined) ?? {}) as JsonObject;
       removeSourceEntries(topLevelServers, options.sourceEntriesToRemove);
-      for (const name of managedNames) {
+      
+      const driftedNames = enabledManagedNames.filter((name) =>
+        detectManagedEntryDrift(options.managedIndex, this.id, name, topLevelServers[name])
+      );
+      
+      for (const name of enabledManagedNames) {
         const topLevelConflict = ensureManagedEntryWritable(
           options.managedIndex,
           this.id,
@@ -162,7 +170,7 @@ export class QwenAdapter implements ClientAdapter {
         }
       }
 
-      pruneStaleManagedEntries(options.managedIndex, this.id, topLevelServers, managedNames);
+      pruneStaleManagedEntries(options.managedIndex, this.id, topLevelServers, enabledManagedNames);
       for (const [name, entry] of Object.entries(serverEntries)) {
         topLevelServers[name] = entry;
       }
@@ -181,7 +189,7 @@ export class QwenAdapter implements ClientAdapter {
           ])
         )
       );
-      return okResult(this.id, configPath);
+      return { ...okResult(this.id, configPath), driftedEntries: driftedNames.length > 0 ? driftedNames : undefined };
     } catch (error) {
       return errorResult(this.id, configPath, (error as Error).message);
     }

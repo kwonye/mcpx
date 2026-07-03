@@ -347,6 +347,29 @@ export async function disablePlugin(nameOrId: string): Promise<void> {
   await manager.disablePlugin(id);
 }
 
+export async function setPluginProjectOverride(
+  nameOrId: string,
+  projectPath: string,
+  override: { enabled?: boolean; components?: Partial<Record<string, boolean>> }
+): Promise<void> {
+  const config = loadConfig();
+  const id = resolvePluginId(config, nameOrId);
+  const plugin = config.plugins?.[id];
+  if (!plugin) throw new Error(`Plugin ${id} not found`);
+  if (!config.projects?.[projectPath]) {
+    throw new Error(`Project "${projectPath}" is not registered. Run "mcpx project init" there first.`);
+  }
+  if (!plugin.projectOverrides) plugin.projectOverrides = {};
+  plugin.projectOverrides[projectPath] = { ...plugin.projectOverrides[projectPath], ...override };
+  saveConfig(config);
+
+  const secrets = new SecretsManager();
+  const syncConfig = loadConfig();
+  const summary = syncAllClients(syncConfig, secrets);
+  persistSyncState(summary, syncConfig);
+  saveConfig(syncConfig);
+}
+
 export async function approvePluginComponent(nameOrId: string, component: string): Promise<void> {
   const manager = new PluginManager();
   const config = loadConfig(manager["configPath"]);

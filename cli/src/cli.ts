@@ -253,6 +253,9 @@ function printSyncSummary(summary: ReturnType<typeof syncAllClients>, asJson = f
       process.stdout.write(` - ${result.message}`);
     }
     process.stdout.write("\n");
+    if (result.driftedEntries && result.driftedEntries.length > 0) {
+      process.stdout.write(`  (note: ${result.driftedEntries.length} manually-edited entr${result.driftedEntries.length === 1 ? "y was" : "ies were"} reset to mcpx-managed values: ${result.driftedEntries.join(", ")})\n`);
+    }
   }
 }
 
@@ -1295,14 +1298,15 @@ function registerSyncCommand(program: Command, cliPath: string): void {
   program
     .command("sync [clients...]")
     .option("--client <id>", "Limit sync to specific client(s), comma-separated or repeated", (value, prev: string[] = []) => [...prev, value], [])
+    .option("--import", "Also scan clients for unmanaged servers and adopt them into the mcpx catalog", false)
     .option("--json", "Output JSON")
     .description("Sync gateway configuration to supported clients (e.g. `mcpx sync claude`)")
-    .action(async (clients: string[], options: { client: string[]; json?: boolean }) => {
+    .action(async (clients: string[], options: { client: string[]; json?: boolean; import?: boolean }) => {
       const config = loadConfig();
       const targetClients = parseClientList([...(clients ?? []), ...(options.client ?? [])]);
       const secrets = new SecretsManager();
       await ensureDaemonIfEnabled(cliPath, secrets);
-      const summary = syncAllClients(config, secrets, { targetClients });
+      const summary = syncAllClients(config, secrets, { targetClients, importScan: options.import ?? false });
       persistSyncState(summary, config);
       saveConfig(config);
       printSyncSummary(summary, options.json ?? false);
@@ -1951,12 +1955,20 @@ function registerPluginCommands(program: Command, _cliPath: string): void {
 
   plugin
     .command("enable <name>")
-    .description("Enable plugin")
-    .action(async (name: string) => {
-      const { enablePlugin } = await import("./core/plugin-manager.js");
+    .option("--project <path>", "Scope this enable to a single registered project instead of globally")
+    .description("Enable plugin (globally, or for one project with --project)")
+    .action(async (name: string, options: { project?: string }) => {
       try {
-        await enablePlugin(name);
-        process.stdout.write(`Plugin ${name} enabled\n`);
+        if (options.project) {
+          const { setPluginProjectOverride } = await import("./core/plugin-manager.js");
+          const resolvedPath = path.resolve(options.project);
+          await setPluginProjectOverride(name, resolvedPath, { enabled: true });
+          process.stdout.write(`Plugin ${name} enabled for project: ${resolvedPath}\n`);
+        } else {
+          const { enablePlugin } = await import("./core/plugin-manager.js");
+          await enablePlugin(name);
+          process.stdout.write(`Plugin ${name} enabled\n`);
+        }
       } catch (e: any) {
         process.stderr.write(`Error: ${e.message}\n`);
         process.exit(1);
@@ -1965,12 +1977,20 @@ function registerPluginCommands(program: Command, _cliPath: string): void {
 
   plugin
     .command("disable <name>")
-    .description("Disable plugin")
-    .action(async (name: string) => {
-      const { disablePlugin } = await import("./core/plugin-manager.js");
+    .option("--project <path>", "Scope this disable to a single registered project instead of globally")
+    .description("Disable plugin (globally, or for one project with --project)")
+    .action(async (name: string, options: { project?: string }) => {
       try {
-        await disablePlugin(name);
-        process.stdout.write(`Plugin ${name} disabled\n`);
+        if (options.project) {
+          const { setPluginProjectOverride } = await import("./core/plugin-manager.js");
+          const resolvedPath = path.resolve(options.project);
+          await setPluginProjectOverride(name, resolvedPath, { enabled: false });
+          process.stdout.write(`Plugin ${name} disabled for project: ${resolvedPath}\n`);
+        } else {
+          const { disablePlugin } = await import("./core/plugin-manager.js");
+          await disablePlugin(name);
+          process.stdout.write(`Plugin ${name} disabled\n`);
+        }
       } catch (e: any) {
         process.stderr.write(`Error: ${e.message}\n`);
         process.exit(1);
@@ -2043,14 +2063,22 @@ export async function runCli(argv = process.argv): Promise<void> {
     const stagedInfo = getStagedUpdate();
 
     if (stagedCliPath && stagedInfo && stagedCliPath !== argv[1] && shouldUseStagedCli(stagedInfo.version, APP_VERSION)) {
-      execFileSync(process.execPath, [stagedCliPath, ...rawArgs], {
-        stdio: "inherit",
-        env: {
-          ...process.env,
-          MCPX_USING_STAGED: "1"
-        }
-      });
-      return;
+      try {
+        execFileSync(process.execPath, [stagedCliPath, ...rawArgs], {
+          stdio: "inherit",
+          env: {
+            ...process.env,
+            MCPX_USING_STAGED: "1"
+          }
+        });
+        return;
+      } catch (error) {
+        process.stderr.write(
+          `Warning: staged update v${stagedInfo.version} failed to run (${(error as Error).message}). ` +
+          `Falling back to the currently installed version (v${APP_VERSION}). ` +
+          `Run "mcpx update rollback" to clear the broken staged update.\n`
+        );
+      }
     }
   }
 

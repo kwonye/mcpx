@@ -135,6 +135,7 @@ export interface SyncResult {
   status: ClientStatus;
   configPath?: string;
   message?: string;
+  driftedEntries?: string[];
 }
 
 export interface Skill {

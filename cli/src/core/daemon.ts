@@ -9,6 +9,8 @@ import type { McpxConfig } from "../types.js";
 import { saveConfig } from "./config.js";
 import { syncAllClients, persistSyncState } from "./sync.js";
 import { startBackgroundUpdateCheck } from "./update-manager.js";
+import { withManagedIndexLock } from "./managed-index-lock.js";
+import { getManagedIndexPath } from "./paths.js";
 
 export interface DaemonStatus {
   running: boolean;
@@ -16,6 +18,7 @@ export interface DaemonStatus {
   pidFile: string;
   logFile: string;
   port?: number;
+  portMismatch?: boolean;
 }
 
 export interface DaemonStartResult {
@@ -25,7 +28,7 @@ export interface DaemonStartResult {
   message: string;
 }
 
-function readPidFromFile(pidPath = getPidPath()): number | null {
+function readPidRecordFromFile(pidPath = getPidPath()): { pid: number; port: number | null } | null {
   if (!fs.existsSync(pidPath)) {
     return null;
   }
@@ -35,12 +38,17 @@ function readPidFromFile(pidPath = getPidPath()): number | null {
     return null;
   }
 
-  const pid = Number(raw);
+  const [pidRaw, portRaw] = raw.split(":");
+  const pid = Number(pidRaw);
   if (!Number.isFinite(pid) || pid <= 0) {
     return null;
   }
+  const port = portRaw ? Number(portRaw) : null;
+  return { pid, port: Number.isFinite(port) && port! > 0 ? port : null };
+}
 
-  return pid;
+function readPidFromFile(pidPath = getPidPath()): number | null {
+  return readPidRecordFromFile(pidPath)?.pid ?? null;
 }
 
 function processExists(pid: number): boolean {
@@ -68,9 +76,9 @@ async function isPortAvailable(port: number): Promise<boolean> {
   });
 }
 
-export async function resolveGatewayPort(config: McpxConfig, secrets?: SecretsManager): Promise<number> {
+export async function resolveGatewayPort(config: McpxConfig, secrets?: SecretsManager): Promise<{ port: number; fellBackFrom?: number }> {
   if (await isPortAvailable(config.gateway.port)) {
-    return config.gateway.port;
+    return { port: config.gateway.port };
   }
 
   for (let offset = 1; offset <= 20; offset += 1) {
@@ -95,7 +103,7 @@ export async function resolveGatewayPort(config: McpxConfig, secrets?: SecretsMa
         }
       }
 
-      return candidate;
+      return { port: candidate, fellBackFrom: oldPort };
     }
   }
 
@@ -131,8 +139,8 @@ async function waitForGatewayReady(port: number, token: string, timeoutMs = 5000
 
 export function getDaemonStatus(config: McpxConfig): DaemonStatus {
   const pidPath = getPidPath();
-  const pid = readPidFromFile(pidPath);
-  if (!pid) {
+  const record = readPidRecordFromFile(pidPath);
+  if (!record) {
     return {
       running: false,
       pidFile: pidPath,
@@ -141,12 +149,15 @@ export function getDaemonStatus(config: McpxConfig): DaemonStatus {
     };
   }
 
+  const running = processExists(record.pid);
+  const port = record.port ?? config.gateway.port;
   return {
-    running: processExists(pid),
-    pid,
+    running,
+    pid: record.pid,
     pidFile: pidPath,
     logFile: getLogPath(),
-    port: config.gateway.port
+    port,
+    portMismatch: running && record.port !== null && record.port !== config.gateway.port
   };
 }
 
@@ -166,7 +177,10 @@ export async function startDaemon(config: McpxConfig, cliPath: string, secrets: 
     try { fs.unlinkSync(getPidPath()); } catch {}
   }
 
-  const port = await resolveGatewayPort(config, secrets);
+  const { port, fellBackFrom } = await resolveGatewayPort(config, secrets);
+  if (fellBackFrom) {
+    process.stderr.write(`mcpx: port ${fellBackFrom} was unavailable; gateway started on ${port} instead. All client configs were re-synced to the new port.\n`);
+  }
   const token = ensureGatewayToken(config, secrets);
 
   const pidPath = getPidPath();
@@ -175,6 +189,34 @@ export async function startDaemon(config: McpxConfig, cliPath: string, secrets: 
   ensureParentDir(logPath);
 
   const logFd = fs.openSync(logPath, "a", 0o600);
+  const logStat = fs.fstatSync(logFd);
+  if (logStat.size > 10 * 1024 * 1024) {
+    fs.closeSync(logFd);
+    const log1 = `${logPath}.1`;
+    const log2 = `${logPath}.2`;
+    try { if (fs.existsSync(log2)) fs.unlinkSync(log2); } catch {}
+    try { if (fs.existsSync(log1)) fs.renameSync(log1, log2); } catch {}
+    try { fs.renameSync(logPath, log1); } catch {}
+    const newLogFd = fs.openSync(logPath, "a", 0o600);
+    const child = spawn(process.execPath, [cliPath, "daemon", "run", "--port", String(port)], {
+      detached: true,
+      stdio: ["ignore", newLogFd, newLogFd],
+      env: {
+        ...process.env,
+        MCPX_DAEMON_CHILD: "1"
+      }
+    });
+    child.unref();
+    fs.writeFileSync(pidPath, `${child.pid}:${port}\n`, { mode: 0o600 });
+    startBackgroundUpdateCheck();
+    await waitForGatewayReady(port, token);
+    return {
+      started: true,
+      pid: child.pid ?? -1,
+      port,
+      message: "mcpx daemon started."
+    };
+  }
   const child = spawn(process.execPath, [cliPath, "daemon", "run", "--port", String(port)], {
     detached: true,
     stdio: ["ignore", logFd, logFd],
@@ -186,7 +228,7 @@ export async function startDaemon(config: McpxConfig, cliPath: string, secrets: 
 
   child.unref();
 
-  fs.writeFileSync(pidPath, `${child.pid}\n`, { mode: 0o600 });
+  fs.writeFileSync(pidPath, `${child.pid}:${port}\n`, { mode: 0o600 });
 
   startBackgroundUpdateCheck();
   await waitForGatewayReady(port, token);
@@ -213,7 +255,8 @@ export function stopDaemon(): { stopped: boolean; message: string } {
   // PID safety: verify the process is actually a mcpx daemon before killing
   try {
     const cmd = execFileSync("ps", ["-p", String(pid), "-o", "command="], { encoding: "utf8", timeout: 2000 }).trim();
-    if (!cmd.includes("mcpx") && !cmd.includes("daemon") && !cmd.includes("cli.js")) {
+    const looksLikeMcpxDaemon = cmd.includes("daemon run") && (cmd.includes("mcpx") || cmd.includes("cli.js"));
+    if (!looksLikeMcpxDaemon) {
       fs.unlinkSync(pidPath);
       return {
         stopped: false,

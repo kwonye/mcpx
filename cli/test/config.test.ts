@@ -290,26 +290,34 @@ describe("project config and merging", () => {
     expect(globalContext.type).toBe("global");
     expect(globalContext.config.servers.globalOne).toBeDefined();
 
-    // Project context: type is "project", projectPath is set, but config is still global
+    // Project context without -l: type is "project", but writes still go to global catalog
     const originalCwd = process.cwd;
     process.cwd = () => projectPath;
     try {
+      const projectContext = resolveActiveConfig();
+      expect(projectContext.type).toBe("project");
+      expect(projectContext.projectPath).toBe(projectPath);
+      expect(projectContext.config.servers.globalOne).toBeDefined();
+
+      // Project context WITH -l: writes go to project-local .mcpx.json
       const localContext = resolveActiveConfig({ local: true });
       expect(localContext.type).toBe("project");
       expect(localContext.projectPath).toBe(projectPath);
-      // In the new model, the project context still reads global catalog
+      expect(localContext.configPath).toBe(localConfigPath);
       expect(localContext.config.servers.globalOne).toBeDefined();
 
-      // save() writes to the global config
-      localContext.config.servers.addedGlobally = {
+      localContext.config.servers.addedLocally = {
         transport: "http",
-        url: "https://new.com",
+        url: "https://local.com",
         enabled: true
       };
       localContext.save();
 
+      const savedLocal = JSON.parse(fs.readFileSync(localConfigPath, "utf8"));
+      expect(savedLocal.servers.addedLocally).toBeDefined();
+
       const savedGlobal = JSON.parse(fs.readFileSync(configPath, "utf8"));
-      expect(savedGlobal.servers.addedGlobally).toBeDefined();
+      expect(savedGlobal.servers.addedLocally).toBeUndefined();
     } finally {
       process.cwd = originalCwd;
     }

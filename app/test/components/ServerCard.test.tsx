@@ -69,7 +69,7 @@ describe("ServerCard", () => {
         onClick={() => {}}
       />
     );
-    expect(screen.getByText("5")).toBeDefined();
+    expect(screen.getByText("5 clients")).toBeDefined();
   });
 
   it("shows disabled state", () => {
@@ -155,6 +155,7 @@ describe("ServerCard", () => {
 
   it("clicking the re-auth button on an OAuth server calls startOauth then onRefresh", async () => {
     const onRefresh = vi.fn();
+    vi.spyOn(window, "confirm").mockReturnValue(true);
     render(
       <ServerCard
         name="stripe"
@@ -177,6 +178,7 @@ describe("ServerCard", () => {
       expect(mockMcpx.startOauth).toHaveBeenCalledWith("stripe");
       expect(onRefresh).toHaveBeenCalled();
     });
+    (window.confirm as any).mockRestore();
   });
 
   it("clicking the re-auth button on a non-OAuth server calls onAuthClick, not startOauth", () => {

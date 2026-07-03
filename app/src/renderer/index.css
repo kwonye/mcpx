@@ -1070,7 +1070,7 @@ select {
 }
 
 .cli-command-panel {
-    padding: 18px;
+    padding: var(--panel-padding);
     border-radius: var(--radius-lg);
 }
 
@@ -1941,6 +1941,8 @@ select {
 .token-badge--clickable {
     cursor: pointer;
     font: inherit;
+    font-weight: 600;
+    border: 1px solid currentColor;
     transition: background 0.15s, border-color 0.15s;
 }
 
@@ -2223,7 +2225,7 @@ select {
 
 .project-nav-child {
     min-height: 30px;
-    gap: 7px;
+    gap: var(--space-2);
     padding: 0 8px;
     border-radius: 8px;
     font-size: 0.8rem;
@@ -2910,7 +2912,7 @@ select {
 
 .project-detail-card,
 .project-detail-empty {
-    padding: 18px;
+    padding: var(--panel-padding);
 }
 
 .project-detail-header-row {
@@ -3091,7 +3093,7 @@ select {
 
 .server-card {
     min-height: 150px;
-    padding: 15px;
+    padding: var(--space-4);
 }
 
 .server-card__header,

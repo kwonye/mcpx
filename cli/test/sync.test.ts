@@ -1063,8 +1063,7 @@ describe("sync engine", () => {
       mcp?: { excluded?: string[] };
     };
 
-    expect(synced.mcpServers["vercel (mcpx)"]?.httpUrl).toBeDefined();
-    expect(synced.mcpServers["vercel (mcpx)"]?.disabled).toBeUndefined();
+    expect(synced.mcpServers["vercel (mcpx)"]).toBeUndefined();
     expect(synced.mcpServers["context7 (mcpx)"]?.httpUrl).toBeDefined();
     expect(synced.mcpServers["context7 (mcpx)"]?.disabled).toBeUndefined();
 

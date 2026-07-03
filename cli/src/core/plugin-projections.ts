@@ -94,6 +94,14 @@ function nsName(pluginName: string, id: string): string {
   return `${pluginName}__${id}`;
 }
 
+function assertWithinBase(base: string, target: string): void {
+  const resolvedBase = path.resolve(base);
+  const resolvedTarget = path.resolve(target);
+  if (resolvedTarget !== resolvedBase && !resolvedTarget.startsWith(resolvedBase + path.sep)) {
+    throw new Error(`Refusing to write outside projection base: ${target} (base: ${base})`);
+  }
+}
+
 function isComponentApproved(plugin: PluginSyncInput, component: PluginComponent): boolean {
   const approval = plugin.approvals?.[component];
   // Default: allow skills and commands, deny hooks; mcpServers respects component flag
@@ -167,6 +175,7 @@ function syncCodex(plugins: PluginSyncInput[]): PluginSyncResult {
       const owned: string[] = [];
       for (const skill of plugin.skills) {
         const targetDir = path.join(targetBase, nsName(plugin.pluginName, skill.id));
+        assertWithinBase(targetBase, targetDir);
         ensureDir(targetDir);
         copyFileOrDir(skill.path, path.join(targetDir, "SKILL.md"));
         owned.push(nsName(plugin.pluginName, skill.id));
@@ -201,6 +210,7 @@ function syncCursor(plugins: PluginSyncInput[]): PluginSyncResult {
       ensureDir(skillsBase);
       for (const skill of plugin.skills) {
         const targetDir = path.join(skillsBase, nsName(plugin.pluginName, skill.id));
+        assertWithinBase(skillsBase, targetDir);
         ensureDir(targetDir);
         copyFileOrDir(skill.path, path.join(targetDir, "SKILL.md"));
         ownedSkills.push(nsName(plugin.pluginName, skill.id));
@@ -212,6 +222,7 @@ function syncCursor(plugins: PluginSyncInput[]): PluginSyncResult {
       ensureDir(commandsBase);
       for (const cmd of plugin.commands) {
         const targetPath = path.join(commandsBase, `${nsName(plugin.pluginName, cmd.id)}.md`);
+        assertWithinBase(commandsBase, targetPath);
         copyFileOrDir(cmd.path, targetPath);
         ownedCommands.push(`${nsName(plugin.pluginName, cmd.id)}.md`);
         projectedDirs.push(targetPath);
@@ -244,6 +255,7 @@ function syncVsCode(plugins: PluginSyncInput[]): PluginSyncResult {
       const owned: string[] = [];
       for (const skill of plugin.skills) {
         const targetDir = path.join(skillsBase, nsName(plugin.pluginName, skill.id));
+        assertWithinBase(skillsBase, targetDir);
         ensureDir(targetDir);
         copyFileOrDir(skill.path, path.join(targetDir, "SKILL.md"));
         owned.push(nsName(plugin.pluginName, skill.id));
@@ -275,6 +287,7 @@ function syncQwen(plugins: PluginSyncInput[]): PluginSyncResult {
       const owned: string[] = [];
       for (const skill of plugin.skills) {
         const targetDir = path.join(targetBase, nsName(plugin.pluginName, skill.id));
+        assertWithinBase(targetBase, targetDir);
         ensureDir(targetDir);
         copyFileOrDir(skill.path, path.join(targetDir, "SKILL.md"));
         owned.push(nsName(plugin.pluginName, skill.id));
@@ -306,6 +319,7 @@ function syncCline(plugins: PluginSyncInput[]): PluginSyncResult {
       const owned: string[] = [];
       for (const skill of plugin.skills) {
         const targetDir = path.join(targetBase, nsName(plugin.pluginName, skill.id));
+        assertWithinBase(targetBase, targetDir);
         ensureDir(targetDir);
         copyFileOrDir(skill.path, path.join(targetDir, "SKILL.md"));
         owned.push(nsName(plugin.pluginName, skill.id));
@@ -337,6 +351,7 @@ function syncKiro(plugins: PluginSyncInput[]): PluginSyncResult {
       const owned: string[] = [];
       for (const skill of plugin.skills) {
         const targetDir = path.join(targetBase, nsName(plugin.pluginName, skill.id));
+        assertWithinBase(targetBase, targetDir);
         ensureDir(targetDir);
         copyFileOrDir(skill.path, path.join(targetDir, "SKILL.md"));
         owned.push(nsName(plugin.pluginName, skill.id));

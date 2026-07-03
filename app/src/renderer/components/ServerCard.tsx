@@ -27,6 +27,10 @@ export function ServerCard(props: ServerCardProps) {
   async function handleReauth(event: React.MouseEvent) {
     event.stopPropagation();
     if (props.isOAuth) {
+      const confirmed = window.confirm(
+        `Re-authenticate "${props.name}"? This opens your browser to sign in again.`
+      );
+      if (!confirmed) return;
       setReauthing(true);
       try {
         await window.mcpx.startOauth(props.name);
@@ -122,8 +126,10 @@ export function ServerCard(props: ServerCardProps) {
           </span>
         </div>
         <div className="server-card__meta server-card__meta--right">
-          <span className="eyebrow">State</span>
-          <span className="server-card__count">{props.enabled ? props.syncedCount : "Off"}</span>
+          <span className="eyebrow">Synced</span>
+          <span className="server-card__count" title={`Synced to ${props.syncedCount} client${props.syncedCount === 1 ? "" : "s"}`}>
+            {props.enabled ? `${props.syncedCount} clients` : "Off"}
+          </span>
         </div>
       </div>
     </div>

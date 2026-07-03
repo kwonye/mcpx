@@ -9,6 +9,11 @@ const SKILLS_DIR = "skills";
 const COMMANDS_DIR = "commands";
 const AGENTS_DIR = "agents";
 
+function sanitizeComponentId(id: string): string {
+  const stripped = id.replace(/[\/\\]/g, "_").replace(/^\.+/, "");
+  return stripped.length > 0 ? stripped : "unnamed";
+}
+
 export function readManifest(pluginRoot: string): PluginManifest | null {
   const manifestPath = path.join(pluginRoot, PLUGIN_JSON_REL);
   if (!fs.existsSync(manifestPath)) {
@@ -73,7 +78,7 @@ function discoverSkills(pluginRoot: string): DiscoveredComponent[] {
           const content = fs.readFileSync(skillPath, "utf8");
           const { frontmatter } = parseFrontmatter(content);
           results.push({
-            id: frontmatter.name ?? path.basename(entry.name, ".md"),
+            id: sanitizeComponentId(frontmatter.name ?? path.basename(entry.name, ".md")),
             type: "skills",
             path: skillPath,
             description: frontmatter.description,
@@ -87,7 +92,7 @@ function discoverSkills(pluginRoot: string): DiscoveredComponent[] {
         const content = fs.readFileSync(skillMdPath, "utf8");
         const { frontmatter } = parseFrontmatter(content);
         results.push({
-          id: frontmatter.name ?? entry.name,
+          id: sanitizeComponentId(frontmatter.name ?? entry.name),
           type: "skills",
           path: skillMdPath,
           description: frontmatter.description,
@@ -112,7 +117,7 @@ function discoverCommands(pluginRoot: string): DiscoveredComponent[] {
         const content = fs.readFileSync(cmdPath, "utf8");
         const { frontmatter } = parseFrontmatter(content);
         results.push({
-          id: frontmatter.name ?? path.basename(entry.name, ".md"),
+          id: sanitizeComponentId(frontmatter.name ?? path.basename(entry.name, ".md")),
           type: "commands",
           path: cmdPath,
           description: frontmatter.description,
@@ -137,7 +142,7 @@ function discoverAgents(pluginRoot: string): DiscoveredComponent[] {
         const content = fs.readFileSync(agentPath, "utf8");
         const { frontmatter } = parseFrontmatter(content);
         results.push({
-          id: frontmatter.name ?? path.basename(entry.name, ".md"),
+          id: sanitizeComponentId(frontmatter.name ?? path.basename(entry.name, ".md")),
           type: "agents",
           path: agentPath,
           description: frontmatter.description,

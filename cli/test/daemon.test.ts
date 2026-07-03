@@ -50,7 +50,8 @@ describe("daemon utilities", () => {
 
     const resolved = await resolveGatewayPort(config);
 
-    expect(resolved).toBeGreaterThan(occupied.port);
-    expect(config.gateway.port).toBe(resolved);
+    expect(resolved.port).toBeGreaterThan(occupied.port);
+    expect(config.gateway.port).toBe(resolved.port);
+    expect(resolved.fellBackFrom).toBe(occupied.port);
   });
 });

@@ -9,6 +9,7 @@ import { syncPluginsToClient } from "../core/plugin-projections.js";
 import { projectSkillsToDir } from "../core/skill-projections.js";
 import {
   buildImportSkip,
+  detectManagedEntryDrift,
   emptyImportScan,
   ensureManagedEntryWritable,
   errorResult,
@@ -136,16 +137,20 @@ export class CodexAdapter implements ClientAdapter {
       const mcpServers = ((doc.mcp_servers as Record<string, unknown> | undefined) ?? {}) as Record<string, unknown>;
       removeSourceEntries(mcpServers, options.sourceEntriesToRemove);
       const managedNames = options.managedEntries.map((entry) => entry.name);
+      const enabledEntries = options.managedEntries.filter((entry) => entry.enabled);
+      const enabledManagedNames = enabledEntries.map((entry) => entry.name);
       const serverEntries = Object.fromEntries(
-        options.managedEntries
-          .filter((entry) => entry.enabled)
-          .map((entry) => [entry.name, {
-            url: entry.url,
-            http_headers: entry.headers
-          }])
+        enabledEntries.map((entry) => [entry.name, {
+          url: entry.url,
+          http_headers: entry.headers
+        }])
       ) as Record<string, unknown>;
 
-      for (const name of managedNames) {
+      const driftedNames = enabledManagedNames.filter((name) =>
+        detectManagedEntryDrift(options.managedIndex, this.id, name, mcpServers[name])
+      );
+
+      for (const name of enabledManagedNames) {
         const conflict = ensureManagedEntryWritable(
           options.managedIndex,
           this.id,
@@ -157,7 +162,7 @@ export class CodexAdapter implements ClientAdapter {
         }
       }
 
-      pruneStaleManagedEntries(options.managedIndex, this.id, mcpServers, managedNames);
+      pruneStaleManagedEntries(options.managedIndex, this.id, mcpServers, enabledManagedNames);
       for (const [name, entry] of Object.entries(serverEntries)) {
         mcpServers[name] = entry;
       }
@@ -175,7 +180,7 @@ export class CodexAdapter implements ClientAdapter {
         configPath,
         Object.fromEntries(Object.entries(serverEntries).map(([name, entry]) => [name, JSON.stringify(entry)]))
       );
-      return okResult(this.id, configPath);
+      return { ...okResult(this.id, configPath), driftedEntries: driftedNames.length > 0 ? driftedNames : undefined };
     } catch (error) {
       return errorResult(this.id, configPath, (error as Error).message);
     }

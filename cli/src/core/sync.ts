@@ -19,6 +19,7 @@ import { getManagedIndexPath } from "./paths.js";
 import { ensureGatewayToken } from "./registry.js";
 import { SecretsManager } from "./secrets.js";
 import { listSkills } from "./skills.js";
+import { withManagedIndexLock } from "./managed-index-lock.js";
 
 export interface SyncOptions {
   targetClients?: ClientId[];
@@ -284,80 +285,82 @@ export function syncAllClients(
     ? { targetClients: options, importScan: false }
     : { importScan: false, ...options };
   const managedIndexPath = getManagedIndexPath();
-  const managedIndex = loadManagedIndex(managedIndexPath);
-  const adapters = getFilteredAdapters(opts.targetClients);
-  const allPhaseErrors: SyncSummary["phaseErrors"] = [];
+  return withManagedIndexLock(`${managedIndexPath}.lock`, () => {
+    const managedIndex = loadManagedIndex(managedIndexPath);
+    const adapters = getFilteredAdapters(opts.targetClients);
+    const allPhaseErrors: SyncSummary["phaseErrors"] = [];
 
-  // Phase 1: Import (optional, gated by importScan option)
-  let imports: SyncImportReport = { imported: [], duplicates: [], skipped: [], conflicts: [], errors: [] };
-  let sourceEntriesToRemove = new Map<ClientId, Set<string>>();
-  if (opts.importScan) {
-    const importResult = runImportPhase(adapters, config, managedIndex);
-    imports = importResult.imports;
-    sourceEntriesToRemove = importResult.sourceEntriesToRemove;
-    allPhaseErrors.push(...(importResult.phaseErrors ?? []));
-  }
+    // Phase 1: Import (optional, gated by importScan option)
+    let imports: SyncImportReport = { imported: [], duplicates: [], skipped: [], conflicts: [], errors: [] };
+    let sourceEntriesToRemove = new Map<ClientId, Set<string>>();
+    if (opts.importScan) {
+      const importResult = runImportPhase(adapters, config, managedIndex);
+      imports = importResult.imports;
+      sourceEntriesToRemove = importResult.sourceEntriesToRemove;
+      allPhaseErrors.push(...(importResult.phaseErrors ?? []));
+    }
 
-  // Phase 2: Gateway entries
-  const localToken = ensureGatewayToken(config, secrets);
-  const gatewayUrl = getGatewayUrl(config);
-  const managedEntries = buildManagedEntries(config, gatewayUrl, localToken);
+    // Phase 2: Gateway entries
+    const localToken = ensureGatewayToken(config, secrets);
+    const gatewayUrl = getGatewayUrl(config);
+    const managedEntries = buildManagedEntries(config, gatewayUrl, localToken);
 
-  const gatewayResult = runGatewayPhase(
-    adapters, config, managedEntries, managedIndex, managedIndexPath,
-    sourceEntriesToRemove, buildProjectScopes(config),
-  );
-  const results = gatewayResult.results;
-  allPhaseErrors.push(...(gatewayResult.phaseErrors ?? []));
+    const gatewayResult = runGatewayPhase(
+      adapters, config, managedEntries, managedIndex, managedIndexPath,
+      sourceEntriesToRemove, buildProjectScopes(config),
+    );
+    const results = gatewayResult.results;
+    allPhaseErrors.push(...(gatewayResult.phaseErrors ?? []));
 
-  // Phase 3: Skills
-  const skills = listSkills();
-  const skillsErrors = runSkillsPhase(adapters, skills);
-  allPhaseErrors.push(...(skillsErrors ?? []));
+    // Phase 3: Skills
+    const skills = listSkills();
+    const skillsErrors = runSkillsPhase(adapters, skills);
+    allPhaseErrors.push(...(skillsErrors ?? []));
 
-  // Phase 4: Plugins (always dispatched, even with zero inputs — handles pruning)
-  const pluginInputs: PluginSyncInput[] = Object.values(config.plugins ?? {}).map((p) => ({
-    pluginId: p.id,
-    pluginName: p.name,
-    pluginRoot: p.root,
-    components: p.components,
-    approvals: p.approvals ?? {},
-    enabled: p.enabled,
-    serverNames: p.serverNames,
-    skills: p.discovered.skills,
-    commands: p.discovered.commands,
-    agents: p.discovered.agents,
-    hooks: p.discovered.hooks,
-  }));
-  const pluginResult = runPluginsPhase(adapters, pluginInputs);
-  const pluginResults = pluginResult.pluginResults;
-  allPhaseErrors.push(...(pluginResult.phaseErrors ?? []));
+    // Phase 4: Plugins (always dispatched, even with zero inputs — handles pruning)
+    const pluginInputs: PluginSyncInput[] = Object.values(config.plugins ?? {}).map((p) => ({
+      pluginId: p.id,
+      pluginName: p.name,
+      pluginRoot: p.root,
+      components: p.components,
+      approvals: p.approvals ?? {},
+      enabled: p.enabled,
+      serverNames: p.serverNames,
+      skills: p.discovered.skills,
+      commands: p.discovered.commands,
+      agents: p.discovered.agents,
+      hooks: p.discovered.hooks,
+    }));
+    const pluginResult = runPluginsPhase(adapters, pluginInputs);
+    const pluginResults = pluginResult.pluginResults;
+    allPhaseErrors.push(...(pluginResult.phaseErrors ?? []));
 
-  saveManagedIndex(managedIndex, managedIndexPath);
+    saveManagedIndex(managedIndex, managedIndexPath);
 
-  const clientStates: Record<string, { status: ClientStatus; configPath?: string; message?: string; lastSyncAt: string }> = {};
-  for (const result of results) {
-    clientStates[result.clientId] = {
-      status: result.status,
-      configPath: result.configPath,
-      message: result.message,
-      lastSyncAt: new Date().toISOString(),
+    const clientStates: Record<string, { status: ClientStatus; configPath?: string; message?: string; lastSyncAt: string }> = {};
+    for (const result of results) {
+      clientStates[result.clientId] = {
+        status: result.status,
+        configPath: result.configPath,
+        message: result.message,
+        lastSyncAt: new Date().toISOString(),
+      };
+    }
+
+    const hasErrors = results.some((r) => r.status === "ERROR")
+      || imports.conflicts.length > 0
+      || imports.errors.length > 0;
+
+    return {
+      gatewayUrl,
+      imports,
+      results,
+      hasErrors,
+      clientStates,
+      phaseErrors: allPhaseErrors.length > 0 ? allPhaseErrors : undefined,
+      pluginResults: pluginResults.length > 0 ? pluginResults : undefined,
     };
-  }
-
-  const hasErrors = results.some((r) => r.status === "ERROR")
-    || imports.conflicts.length > 0
-    || imports.errors.length > 0;
-
-  return {
-    gatewayUrl,
-    imports,
-    results,
-    hasErrors,
-    clientStates,
-    phaseErrors: allPhaseErrors.length > 0 ? allPhaseErrors : undefined,
-    pluginResults: pluginResults.length > 0 ? pluginResults : undefined,
-  };
+  });
 }
 
 export function persistSyncState(summary: SyncSummary, config: McpxConfig): void {

@@ -90,7 +90,7 @@ function buildAuthBindings(spec: UpstreamServerSpec): StatusAuthBinding[] {
   }));
 }
 
-async function fetchTokenCounts(gatewayUrl: string, token: string): Promise<Record<string, UpstreamTokenCount>> {
+async function fetchTokenCounts(gatewayUrl: string, token: string): Promise<{ counts: Record<string, UpstreamTokenCount>; fetchError?: string }> {
   try {
     const res = await fetch(gatewayUrl, {
       method: "POST",
@@ -104,15 +104,15 @@ async function fetchTokenCounts(gatewayUrl: string, token: string): Promise<Reco
         method: "custom/tokenCounts",
         params: {}
       }),
-      signal: AbortSignal.timeout(4000)
+      signal: AbortSignal.timeout(65_000)
     });
     if (!res.ok) {
-      return {};
+      return { counts: {}, fetchError: `HTTP ${res.status}` };
     }
     const data = await res.json() as any;
-    return data?.result ?? {};
+    return { counts: data?.result ?? {} };
   } catch (error) {
-    return {};
+    return { counts: {}, fetchError: error instanceof Error ? error.message : String(error) };
   }
 }
 
@@ -126,8 +126,11 @@ export async function buildStatusReport(
   const gatewayUrl = getGatewayUrl(config);
 
   let tokenCounts: Record<string, UpstreamTokenCount> = {};
+  let tokenCountFetchError: string | undefined;
   if (daemon.running) {
-    tokenCounts = await fetchTokenCounts(gatewayUrl, token);
+    const result = await fetchTokenCounts(gatewayUrl, token);
+    tokenCounts = result.counts;
+    tokenCountFetchError = result.fetchError;
   }
 
   const projectEntries = Object.values(config.projects ?? {});

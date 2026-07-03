@@ -92,6 +92,15 @@ async function downloadAndStageUpdate(): Promise<{ success: boolean; version?: s
       throw new Error("CLI entry point not found in downloaded package");
     }
 
+    try {
+      execSync(`${process.execPath} ${JSON.stringify(cliPath)} --version`, {
+        stdio: ["ignore", "pipe", "pipe"],
+        timeout: 10_000
+      });
+    } catch (smokeTestError) {
+      throw new Error(`Downloaded CLI failed smoke test (--version): ${smokeTestError instanceof Error ? smokeTestError.message : String(smokeTestError)}`);
+    }
+
     stageUpdate(targetVersion, cliPath);
     removeOldVersions(2);
 
@@ -111,6 +120,9 @@ async function downloadAndStageUpdate(): Promise<{ success: boolean; version?: s
 }
 
 export function startBackgroundUpdateCheck(): void {
+  if (process.env.MCPX_NO_UPDATE === "1") {
+    return;
+  }
   if (isUpdateInProgress()) {
     return;
   }
@@ -159,24 +171,30 @@ export async function performUpdate(): Promise<{ success: boolean; message: stri
   if (isUpdateInProgress()) {
     return { success: false, message: "Another update is already in progress." };
   }
+  if (!acquireLock()) {
+    return { success: false, message: "Another update is already in progress." };
+  }
+  try {
+    const result = await downloadAndStageUpdate();
 
-  const result = await downloadAndStageUpdate();
+    if (result.success && result.version) {
+      return {
+        success: true,
+        message: `Update to v${result.version} ready! Will activate on next run.`
+      };
+    }
 
-  if (result.success && result.version) {
+    if (result.error === "No update available") {
+      return { success: true, message: "Already on latest version." };
+    }
+
     return {
-      success: true,
-      message: `Update to v${result.version} ready! Will activate on next run.`
+      success: false,
+      message: result.error ?? "Update failed"
     };
+  } finally {
+    releaseLock();
   }
-
-  if (result.error === "No update available") {
-    return { success: true, message: "Already on latest version." };
-  }
-
-  return {
-    success: false,
-    message: result.error ?? "Update failed"
-  };
 }
 
 export function performRollback(): { success: boolean; message: string } {

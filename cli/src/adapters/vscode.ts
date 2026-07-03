@@ -8,6 +8,7 @@ import { projectSkillsToDir } from "../core/skill-projections.js";
 import { readJsonFile, writeJsonAtomic } from "../util/fs.js";
 import {
   buildImportSkip,
+  detectManagedEntryDrift,
   emptyImportScan,
   ensureManagedEntryWritable,
   errorResult,
@@ -144,6 +145,11 @@ export class VsCodeAdapter implements ClientAdapter {
         }])
       ) as Record<string, unknown>;
       const enabledManagedNames = enabledEntries.map((entry) => entry.name);
+      
+      const driftedNames = enabledManagedNames.filter((name) =>
+        detectManagedEntryDrift(options.managedIndex, this.id, name, servers[name])
+      );
+      
       for (const name of enabledManagedNames) {
         const conflict = ensureManagedEntryWritable(
           options.managedIndex,
@@ -178,7 +184,7 @@ export class VsCodeAdapter implements ClientAdapter {
           ])
         )
       );
-      return okResult(this.id, configPath);
+      return { ...okResult(this.id, configPath), driftedEntries: driftedNames.length > 0 ? driftedNames : undefined };
     } catch (error) {
       return errorResult(this.id, configPath, (error as Error).message);
     }

@@ -361,12 +361,33 @@ function withTimeout<T>(work: Promise<T>, timeoutMs: number, timeoutMessage: str
   });
 }
 
-function specFingerprint(spec: UpstreamServerSpec): string {
-  return JSON.stringify(spec);
+function specFingerprint(spec: UpstreamServerSpec, secrets?: SecretsManager): string {
+  if (!secrets) return JSON.stringify(spec);
+  const resolvedMarkers: Record<string, string> = {};
+  const collect = (obj?: Record<string, string>) => {
+    if (!obj) return;
+    for (const [key, value] of Object.entries(obj)) {
+      if (value.startsWith("secret://") || value.startsWith("oauth://")) {
+        try { resolvedMarkers[key] = secrets.resolveMaybeSecret(value); } catch { resolvedMarkers[key] = value; }
+      }
+    }
+  };
+  if (spec.transport === "stdio") collect(spec.env);
+  if (spec.transport === "http") collect(spec.headers);
+  return JSON.stringify({ spec, resolvedMarkers });
 }
+
+const EXTRA_INHERITED_ENV = ["TMPDIR", "LANG"] as const;
 
 function resolveStdioEnv(spec: StdioServerSpec, secrets: SecretsManager): Record<string, string> {
   const env = getDefaultEnvironment();
+  for (const key of EXTRA_INHERITED_ENV) {
+    const value = process.env[key];
+    if (value) env[key] = value;
+  }
+  for (const [key, value] of Object.entries(process.env)) {
+    if (key.startsWith("LC_") && value) env[key] = value;
+  }
   env.PATH = buildEnrichedPath(env.PATH);
 
   for (const [key, value] of Object.entries(spec.env ?? {})) {
@@ -674,7 +695,14 @@ async function handleListTools(
     }
   }
 
-  return { tools };
+  const failedUpstreams = upstreams
+    .filter((u) => runtime.upstreamErrors?.has(u.name))
+    .map((u) => ({ name: u.name, ...runtime.upstreamErrors!.get(u.name)! }));
+
+  return {
+    tools,
+    ...(failedUpstreams.length > 0 ? { _meta: { mcpxUpstreamErrors: failedUpstreams } } : {})
+  };
 }
 
 async function handleListResources(
@@ -731,7 +759,14 @@ async function handleListResources(
     }
   }
 
-  return { resources };
+  const failedUpstreams = upstreams
+    .filter((u) => runtime.upstreamErrors?.has(u.name))
+    .map((u) => ({ name: u.name, ...runtime.upstreamErrors!.get(u.name)! }));
+
+  return {
+    resources,
+    ...(failedUpstreams.length > 0 ? { _meta: { mcpxUpstreamErrors: failedUpstreams } } : {})
+  };
 }
 
 async function handleListPrompts(
@@ -786,7 +821,14 @@ async function handleListPrompts(
     }
   }
 
-  return { prompts };
+  const failedUpstreams = upstreams
+    .filter((u) => runtime.upstreamErrors?.has(u.name))
+    .map((u) => ({ name: u.name, ...runtime.upstreamErrors!.get(u.name)! }));
+
+  return {
+    prompts,
+    ...(failedUpstreams.length > 0 ? { _meta: { mcpxUpstreamErrors: failedUpstreams } } : {})
+  };
 }
 
 async function routeNamespacedCall(
@@ -1143,6 +1185,17 @@ export function createGatewayServer(options: GatewayServerOptions): http.Server 
           response.end(JSON.stringify(makeError(null, -32001, "Unauthorized")));
           if (debug) {
             console.error(`[mcpx gateway] -> 401 (GET unauthorized)`);
+          }
+          return;
+        }
+
+        const wantsStream = (request.headers.accept ?? "").includes("text/event-stream");
+        if (wantsStream && request.headers["mcp-session-id"]) {
+          response.statusCode = 405;
+          response.setHeader("content-type", "application/json");
+          response.end(JSON.stringify({ error: "get_stream_not_supported", message: "mcpx does not support server-initiated SSE streams over GET; use POST for all requests." }));
+          if (debug) {
+            console.error(`[mcpx gateway] -> 405 (GET stream not supported)`);
           }
           return;
         }

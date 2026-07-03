@@ -9,15 +9,16 @@ import { projectSkillsToDir } from "../core/skill-projections.js";
 import { readJsonFile, writeJsonAtomic } from "../util/fs.js";
 import {
   buildImportSkip,
+  detectManagedEntryDrift,
   emptyImportScan,
   ensureManagedEntryWritable,
   errorResult,
   isManagedGatewayProjection,
   okResult,
   pruneStaleManagedEntries,
+  purgeManagedFromDisabledArray,
   removeSourceEntries,
-  setManagedEntries,
-  purgeManagedFromDisabledArray
+  setManagedEntries
 } from "./utils/index.js";
 
 type JsonObject = Record<string, unknown>;
@@ -168,6 +169,11 @@ export class ClaudeAdapter implements ClientAdapter {
 
       const topLevelServers = ((raw.mcpServers as JsonObject | undefined) ?? {}) as JsonObject;
       removeSourceEntries(topLevelServers, options.sourceEntriesToRemove);
+      
+      const driftedNames = enabledManagedNames.filter((name) =>
+        detectManagedEntryDrift(options.managedIndex, this.id, name, topLevelServers[name])
+      );
+      
       for (const name of enabledManagedNames) {
         const topLevelConflict = ensureManagedEntryWritable(
           options.managedIndex,
@@ -226,7 +232,7 @@ export class ClaudeAdapter implements ClientAdapter {
         configPath,
         Object.fromEntries(Object.entries(serverEntries).map(([name, entry]) => [name, JSON.stringify(entry)]))
       );
-      return okResult(this.id, configPath);
+      return { ...okResult(this.id, configPath), driftedEntries: driftedNames.length > 0 ? driftedNames : undefined };
     } catch (error) {
       return errorResult(this.id, configPath, (error as Error).message);
     }

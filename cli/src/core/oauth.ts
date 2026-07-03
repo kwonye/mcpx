@@ -347,11 +347,13 @@ export async function runOAuthLogin(
     const summary = syncAllClients(config, secrets);
     persistSyncState(summary, config);
     saveConfig(config, configPath);
+    new McpxOAuthProvider(serverName, secrets).invalidateCredentials("verifier");
     return { serverName, authorized: true };
   } catch (error) {
     // Restore tokens on failure so working credentials are never destroyed
     if (backupTokens) secrets.setSecret(oauthName, backupTokens);
     if (backupClient) secrets.setSecret(clientName, backupClient);
+    new McpxOAuthProvider(serverName, secrets).invalidateCredentials("verifier");
     throw error;
   } finally {
     if (callbackServer) {

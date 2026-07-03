@@ -1,3 +1,4 @@
+import path from "node:path";
 import { spawn } from "node:child_process";
 import { loadConfig } from "./config.js";
 import { resolvePluginVars } from "./plugin-parse.js";
@@ -76,10 +77,14 @@ export function runPluginHost(pluginNameOrId: string, serverId: string): void {
 
   // Path traversal guard
   const allPaths = [command, ...args, ...Object.values(resolvedEnv)];
+  const resolvedPluginRoot = path.resolve(pluginRoot);
+  const resolvedDataDir = path.resolve(dataDir);
   for (const p of allPaths) {
     if (p.includes("..") || p.startsWith("/")) {
-      const resolved = resolvePluginVars(p, pluginRoot, dataDir);
-      if (!resolved.startsWith(pluginRoot) && !resolved.startsWith(dataDir)) {
+      const resolved = path.resolve(resolvePluginVars(p, pluginRoot, dataDir));
+      const withinRoot = resolved === resolvedPluginRoot || resolved.startsWith(resolvedPluginRoot + path.sep);
+      const withinData = resolved === resolvedDataDir || resolved.startsWith(resolvedDataDir + path.sep);
+      if (!withinRoot && !withinData) {
         process.stderr.write(`[mcpx] Rejected path escapes plugin root: ${p}\n`);
         process.exit(1);
       }

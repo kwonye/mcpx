@@ -42,7 +42,8 @@ export function ensureManagedEntryWritable(
   managedIndex: ManagedIndex,
   clientId: ClientId,
   entryName: string,
-  existingValue: unknown
+  existingValue: unknown,
+  expectedEntry?: { url?: string; headers?: Record<string, string>; command?: string; args?: string[] }
 ): string | null {
   if (existingValue === undefined || existingValue === null) {
     return null;
@@ -52,7 +53,26 @@ export function ensureManagedEntryWritable(
     return null;
   }
 
+  if (expectedEntry && isManagedGatewayProjection(entryName) && matchesExpectedShape(existingValue, expectedEntry)) {
+    if (!managedIndex.managed[clientId]) {
+      managedIndex.managed[clientId] = { configPath: "", entries: {} };
+    }
+    managedIndex.managed[clientId].entries[entryName] = {
+      fingerprint: sha256(JSON.stringify(existingValue)),
+      lastSyncedAt: new Date().toISOString()
+    };
+    return null;
+  }
+
   return `Cannot sync managed entry \"${entryName}\" because an unmanaged entry already exists.`;
+}
+
+function matchesExpectedShape(value: unknown, expected: { url?: string; headers?: Record<string, string>; command?: string; args?: string[] }): boolean {
+  if (!value || typeof value !== "object") return false;
+  const v = value as Record<string, unknown>;
+  if (expected.url && v.url !== expected.url) return false;
+  if (expected.command && v.command !== expected.command) return false;
+  return true;
 }
 
 export function setManagedEntries(
@@ -217,4 +237,16 @@ export function purgeManagedFromExcludedArray(
     delete mcp.excluded;
   }
   raw.mcp = Object.keys(mcp).length > 0 ? mcp : undefined;
+}
+
+export function detectManagedEntryDrift(
+  managedIndex: ManagedIndex,
+  clientId: ClientId,
+  entryName: string,
+  existingValue: unknown
+): boolean {
+  const recorded = managedIndex.managed[clientId]?.entries?.[entryName];
+  if (!recorded || existingValue === undefined) return false;
+  const liveFingerprint = sha256(JSON.stringify(existingValue));
+  return liveFingerprint !== recorded.fingerprint;
 }

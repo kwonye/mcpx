@@ -314,19 +314,42 @@ export function migrateProjectServers(config: McpxConfig, projectPath: string): 
 
 export function resolveActiveConfig(options: { global?: boolean; local?: boolean } = {}): ActiveConfigContext {
   const globalPath = getConfigPath();
-  const config = loadConfig(globalPath);
+  const globalConfig = loadConfig(globalPath);
 
-  // Detect project context (informational — all writes still go to the global catalog)
   if (!options.global) {
     const projectConfigPath = findProjectConfigPath();
-    if (options.local || projectConfigPath) {
+    if (options.local) {
       const projectPath = projectConfigPath ? path.dirname(projectConfigPath) : process.cwd();
+      const localPath = path.join(projectPath, ".mcpx.json");
+      const projectConfig = loadProjectConfig(localPath);
+      const mergedConfig: McpxConfig = {
+        ...globalConfig,
+        servers: { ...globalConfig.servers, ...projectConfig.servers }
+      };
+      return {
+        type: "project",
+        configPath: localPath,
+        projectPath,
+        config: mergedConfig,
+        save: () => {
+          const localServers: Record<string, any> = {};
+          for (const [name, spec] of Object.entries(mergedConfig.servers)) {
+            if (!(name in globalConfig.servers)) {
+              localServers[name] = spec;
+            }
+          }
+          saveProjectConfig({ ...projectConfig, servers: localServers }, localPath);
+        }
+      };
+    }
+    if (projectConfigPath) {
+      const projectPath = path.dirname(projectConfigPath);
       return {
         type: "project",
         configPath: globalPath,
         projectPath,
-        config,
-        save: () => saveConfig(config, globalPath)
+        config: globalConfig,
+        save: () => saveConfig(globalConfig, globalPath)
       };
     }
   }
@@ -334,7 +357,7 @@ export function resolveActiveConfig(options: { global?: boolean; local?: boolean
   return {
     type: "global",
     configPath: globalPath,
-    config,
-    save: () => saveConfig(config, globalPath)
+    config: globalConfig,
+    save: () => saveConfig(globalConfig, globalPath)
   };
 }
