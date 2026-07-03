@@ -166,6 +166,7 @@ function syncCodex(plugins: PluginSyncInput[]): PluginSyncResult {
   const targetBase = path.join(homeDir(), ".codex", "skills");
   const projectedDirs: string[] = [];
   const unsupported: PluginComponent[] = ["hooks", "agents"];
+  const errors: string[] = [];
 
   for (const plugin of plugins) {
     if (!plugin.enabled) continue;
@@ -174,12 +175,18 @@ function syncCodex(plugins: PluginSyncInput[]): PluginSyncResult {
       ensureDir(targetBase);
       const owned: string[] = [];
       for (const skill of plugin.skills) {
-        const targetDir = path.join(targetBase, nsName(plugin.pluginName, skill.id));
-        assertWithinBase(targetBase, targetDir);
-        ensureDir(targetDir);
-        copyFileOrDir(skill.path, path.join(targetDir, "SKILL.md"));
-        owned.push(nsName(plugin.pluginName, skill.id));
-        projectedDirs.push(targetDir);
+        try {
+          const targetDir = path.join(targetBase, nsName(plugin.pluginName, skill.id));
+          assertWithinBase(targetBase, targetDir);
+          ensureDir(targetDir);
+          copyFileOrDir(skill.path, path.join(targetDir, "SKILL.md"));
+          owned.push(nsName(plugin.pluginName, skill.id));
+          projectedDirs.push(targetDir);
+        } catch (error) {
+          // A single misbehaving plugin/skill (e.g. a path-traversal attempt) must
+          // not block other, legitimate plugins queued in this same sync pass.
+          errors.push(`${plugin.pluginName}/${skill.id}: ${(error as Error).message}`);
+        }
       }
       recordOwned(targetBase, plugin.pluginId, owned);
     }
@@ -190,6 +197,7 @@ function syncCodex(plugins: PluginSyncInput[]): PluginSyncResult {
     status: "SYNCED",
     projectedDirs,
     unsupported,
+    ...(errors.length > 0 ? { error: errors.join("; ") } : {}),
   };
 }
 
@@ -199,6 +207,7 @@ function syncCursor(plugins: PluginSyncInput[]): PluginSyncResult {
   const commandsBase = path.join(homeDir(), ".cursor", "commands");
   const projectedDirs: string[] = [];
   const unsupported: PluginComponent[] = ["hooks", "agents"];
+  const errors: string[] = [];
 
   for (const plugin of plugins) {
     if (!plugin.enabled) continue;
@@ -209,23 +218,31 @@ function syncCursor(plugins: PluginSyncInput[]): PluginSyncResult {
     if (plugin.components.skills && isComponentApproved(plugin, "skills")) {
       ensureDir(skillsBase);
       for (const skill of plugin.skills) {
-        const targetDir = path.join(skillsBase, nsName(plugin.pluginName, skill.id));
-        assertWithinBase(skillsBase, targetDir);
-        ensureDir(targetDir);
-        copyFileOrDir(skill.path, path.join(targetDir, "SKILL.md"));
-        ownedSkills.push(nsName(plugin.pluginName, skill.id));
-        projectedDirs.push(targetDir);
+        try {
+          const targetDir = path.join(skillsBase, nsName(plugin.pluginName, skill.id));
+          assertWithinBase(skillsBase, targetDir);
+          ensureDir(targetDir);
+          copyFileOrDir(skill.path, path.join(targetDir, "SKILL.md"));
+          ownedSkills.push(nsName(plugin.pluginName, skill.id));
+          projectedDirs.push(targetDir);
+        } catch (error) {
+          errors.push(`${plugin.pluginName}/${skill.id}: ${(error as Error).message}`);
+        }
       }
     }
 
     if (plugin.components.commands && isComponentApproved(plugin, "commands")) {
       ensureDir(commandsBase);
       for (const cmd of plugin.commands) {
-        const targetPath = path.join(commandsBase, `${nsName(plugin.pluginName, cmd.id)}.md`);
-        assertWithinBase(commandsBase, targetPath);
-        copyFileOrDir(cmd.path, targetPath);
-        ownedCommands.push(`${nsName(plugin.pluginName, cmd.id)}.md`);
-        projectedDirs.push(targetPath);
+        try {
+          const targetPath = path.join(commandsBase, `${nsName(plugin.pluginName, cmd.id)}.md`);
+          assertWithinBase(commandsBase, targetPath);
+          copyFileOrDir(cmd.path, targetPath);
+          ownedCommands.push(`${nsName(plugin.pluginName, cmd.id)}.md`);
+          projectedDirs.push(targetPath);
+        } catch (error) {
+          errors.push(`${plugin.pluginName}/${cmd.id}: ${(error as Error).message}`);
+        }
       }
     }
 
@@ -238,6 +255,7 @@ function syncCursor(plugins: PluginSyncInput[]): PluginSyncResult {
     status: "SYNCED",
     projectedDirs,
     unsupported,
+    ...(errors.length > 0 ? { error: errors.join("; ") } : {}),
   };
 }
 
@@ -246,6 +264,7 @@ function syncVsCode(plugins: PluginSyncInput[]): PluginSyncResult {
   const skillsBase = path.join(homeDir(), ".copilot", "skills");
   const projectedDirs: string[] = [];
   const unsupported: PluginComponent[] = ["hooks", "agents"];
+  const errors: string[] = [];
 
   for (const plugin of plugins) {
     if (!plugin.enabled) continue;
@@ -254,12 +273,16 @@ function syncVsCode(plugins: PluginSyncInput[]): PluginSyncResult {
       ensureDir(skillsBase);
       const owned: string[] = [];
       for (const skill of plugin.skills) {
-        const targetDir = path.join(skillsBase, nsName(plugin.pluginName, skill.id));
-        assertWithinBase(skillsBase, targetDir);
-        ensureDir(targetDir);
-        copyFileOrDir(skill.path, path.join(targetDir, "SKILL.md"));
-        owned.push(nsName(plugin.pluginName, skill.id));
-        projectedDirs.push(targetDir);
+        try {
+          const targetDir = path.join(skillsBase, nsName(plugin.pluginName, skill.id));
+          assertWithinBase(skillsBase, targetDir);
+          ensureDir(targetDir);
+          copyFileOrDir(skill.path, path.join(targetDir, "SKILL.md"));
+          owned.push(nsName(plugin.pluginName, skill.id));
+          projectedDirs.push(targetDir);
+        } catch (error) {
+          errors.push(`${plugin.pluginName}/${skill.id}: ${(error as Error).message}`);
+        }
       }
       recordOwned(skillsBase, plugin.pluginId, owned);
     }
@@ -270,6 +293,7 @@ function syncVsCode(plugins: PluginSyncInput[]): PluginSyncResult {
     status: "SYNCED",
     projectedDirs,
     unsupported,
+    ...(errors.length > 0 ? { error: errors.join("; ") } : {}),
   };
 }
 
@@ -278,6 +302,7 @@ function syncQwen(plugins: PluginSyncInput[]): PluginSyncResult {
   const targetBase = path.join(homeDir(), ".qwen", "skills");
   const projectedDirs: string[] = [];
   const unsupported: PluginComponent[] = ["hooks", "agents", "commands"];
+  const errors: string[] = [];
 
   for (const plugin of plugins) {
     if (!plugin.enabled) continue;
@@ -286,12 +311,16 @@ function syncQwen(plugins: PluginSyncInput[]): PluginSyncResult {
       ensureDir(targetBase);
       const owned: string[] = [];
       for (const skill of plugin.skills) {
-        const targetDir = path.join(targetBase, nsName(plugin.pluginName, skill.id));
-        assertWithinBase(targetBase, targetDir);
-        ensureDir(targetDir);
-        copyFileOrDir(skill.path, path.join(targetDir, "SKILL.md"));
-        owned.push(nsName(plugin.pluginName, skill.id));
-        projectedDirs.push(targetDir);
+        try {
+          const targetDir = path.join(targetBase, nsName(plugin.pluginName, skill.id));
+          assertWithinBase(targetBase, targetDir);
+          ensureDir(targetDir);
+          copyFileOrDir(skill.path, path.join(targetDir, "SKILL.md"));
+          owned.push(nsName(plugin.pluginName, skill.id));
+          projectedDirs.push(targetDir);
+        } catch (error) {
+          errors.push(`${plugin.pluginName}/${skill.id}: ${(error as Error).message}`);
+        }
       }
       recordOwned(targetBase, plugin.pluginId, owned);
     }
@@ -302,6 +331,7 @@ function syncQwen(plugins: PluginSyncInput[]): PluginSyncResult {
     status: "SYNCED",
     projectedDirs,
     unsupported,
+    ...(errors.length > 0 ? { error: errors.join("; ") } : {}),
   };
 }
 
@@ -310,6 +340,7 @@ function syncCline(plugins: PluginSyncInput[]): PluginSyncResult {
   const targetBase = path.join(homeDir(), ".config", "cline", "skills");
   const projectedDirs: string[] = [];
   const unsupported: PluginComponent[] = ["hooks", "agents", "commands"];
+  const errors: string[] = [];
 
   for (const plugin of plugins) {
     if (!plugin.enabled) continue;
@@ -318,12 +349,16 @@ function syncCline(plugins: PluginSyncInput[]): PluginSyncResult {
       ensureDir(targetBase);
       const owned: string[] = [];
       for (const skill of plugin.skills) {
-        const targetDir = path.join(targetBase, nsName(plugin.pluginName, skill.id));
-        assertWithinBase(targetBase, targetDir);
-        ensureDir(targetDir);
-        copyFileOrDir(skill.path, path.join(targetDir, "SKILL.md"));
-        owned.push(nsName(plugin.pluginName, skill.id));
-        projectedDirs.push(targetDir);
+        try {
+          const targetDir = path.join(targetBase, nsName(plugin.pluginName, skill.id));
+          assertWithinBase(targetBase, targetDir);
+          ensureDir(targetDir);
+          copyFileOrDir(skill.path, path.join(targetDir, "SKILL.md"));
+          owned.push(nsName(plugin.pluginName, skill.id));
+          projectedDirs.push(targetDir);
+        } catch (error) {
+          errors.push(`${plugin.pluginName}/${skill.id}: ${(error as Error).message}`);
+        }
       }
       recordOwned(targetBase, plugin.pluginId, owned);
     }
@@ -334,6 +369,7 @@ function syncCline(plugins: PluginSyncInput[]): PluginSyncResult {
     status: "SYNCED",
     projectedDirs,
     unsupported,
+    ...(errors.length > 0 ? { error: errors.join("; ") } : {}),
   };
 }
 
@@ -342,6 +378,7 @@ function syncKiro(plugins: PluginSyncInput[]): PluginSyncResult {
   const targetBase = path.join(homeDir(), ".kiro", "skills");
   const projectedDirs: string[] = [];
   const unsupported: PluginComponent[] = ["hooks", "agents", "commands"];
+  const errors: string[] = [];
 
   for (const plugin of plugins) {
     if (!plugin.enabled) continue;
@@ -350,12 +387,16 @@ function syncKiro(plugins: PluginSyncInput[]): PluginSyncResult {
       ensureDir(targetBase);
       const owned: string[] = [];
       for (const skill of plugin.skills) {
-        const targetDir = path.join(targetBase, nsName(plugin.pluginName, skill.id));
-        assertWithinBase(targetBase, targetDir);
-        ensureDir(targetDir);
-        copyFileOrDir(skill.path, path.join(targetDir, "SKILL.md"));
-        owned.push(nsName(plugin.pluginName, skill.id));
-        projectedDirs.push(targetDir);
+        try {
+          const targetDir = path.join(targetBase, nsName(plugin.pluginName, skill.id));
+          assertWithinBase(targetBase, targetDir);
+          ensureDir(targetDir);
+          copyFileOrDir(skill.path, path.join(targetDir, "SKILL.md"));
+          owned.push(nsName(plugin.pluginName, skill.id));
+          projectedDirs.push(targetDir);
+        } catch (error) {
+          errors.push(`${plugin.pluginName}/${skill.id}: ${(error as Error).message}`);
+        }
       }
       recordOwned(targetBase, plugin.pluginId, owned);
     }
@@ -366,6 +407,7 @@ function syncKiro(plugins: PluginSyncInput[]): PluginSyncResult {
     status: "SYNCED",
     projectedDirs,
     unsupported,
+    ...(errors.length > 0 ? { error: errors.join("; ") } : {}),
   };
 }
 

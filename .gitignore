@@ -3,6 +3,7 @@ dist/
 coverage/
 *.log
 .DS_Store
+bin/
 
 # Claude
 .claude/

@@ -1,6 +1,6 @@
 // Config
 export { loadConfig, saveConfig, defaultConfig, loadMergedConfig, loadProjectConfig, saveProjectConfig, ConfigLoadError, migrateProjectServers } from "./config.js";
-export { mutateConfig } from "./config-store.js";
+export { mutateConfig, mutateProjectConfig, mutateActiveConfig } from "./config-store.js";
 
 // Errors
 export { UpstreamError, SecretNotFoundError, classifyUpstreamError } from "./errors.js";

@@ -188,7 +188,7 @@ export async function startDaemon(config: McpxConfig, cliPath: string, secrets: 
   ensureParentDir(pidPath);
   ensureParentDir(logPath);
 
-  const logFd = fs.openSync(logPath, "a", 0o600);
+  let logFd = fs.openSync(logPath, "a", 0o600);
   const logStat = fs.fstatSync(logFd);
   if (logStat.size > 10 * 1024 * 1024) {
     fs.closeSync(logFd);
@@ -197,26 +197,9 @@ export async function startDaemon(config: McpxConfig, cliPath: string, secrets: 
     try { if (fs.existsSync(log2)) fs.unlinkSync(log2); } catch {}
     try { if (fs.existsSync(log1)) fs.renameSync(log1, log2); } catch {}
     try { fs.renameSync(logPath, log1); } catch {}
-    const newLogFd = fs.openSync(logPath, "a", 0o600);
-    const child = spawn(process.execPath, [cliPath, "daemon", "run", "--port", String(port)], {
-      detached: true,
-      stdio: ["ignore", newLogFd, newLogFd],
-      env: {
-        ...process.env,
-        MCPX_DAEMON_CHILD: "1"
-      }
-    });
-    child.unref();
-    fs.writeFileSync(pidPath, `${child.pid}:${port}\n`, { mode: 0o600 });
-    startBackgroundUpdateCheck();
-    await waitForGatewayReady(port, token);
-    return {
-      started: true,
-      pid: child.pid ?? -1,
-      port,
-      message: "mcpx daemon started."
-    };
+    logFd = fs.openSync(logPath, "a", 0o600);
   }
+
   const child = spawn(process.execPath, [cliPath, "daemon", "run", "--port", String(port)], {
     detached: true,
     stdio: ["ignore", logFd, logFd],
