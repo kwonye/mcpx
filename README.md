@@ -212,6 +212,8 @@ mcpx secret ls
 mcpx secret rm vercel_auth_header
 
 mcpx auth set vercel --header Authorization --value "Bearer <token>"
+mcpx add xquik https://xquik.com/mcp
+mcpx auth set xquik --header Authorization --value "Bearer <XQUIK_API_KEY>"
 mcpx auth set next-devtools --env NEXT_DEVTOOLS_TOKEN --value "<token>"
 mcpx auth show
 mcpx auth rm vercel --header Authorization --delete-secret
