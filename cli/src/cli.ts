@@ -9,8 +9,8 @@ import { execFileSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { emitKeypressEvents } from "node:readline";
 import { createInterface, type Interface as ReadlineInterface } from "node:readline/promises";
-import { loadConfig, saveConfig, loadMergedConfig, resolveActiveConfig, loadProjectConfig, saveProjectConfig, ConfigLoadError } from "./core/config.js";
-import { mutateActiveConfig, mutateConfig } from "./core/config-store.js";
+import { loadConfig, loadMergedConfig, resolveActiveConfig, loadProjectConfig, ConfigLoadError } from "./core/config.js";
+import { mutateActiveConfig, mutateConfig, mutateProjectConfig } from "./core/config-store.js";
 import { addServer, removeServer, setServerEnabled, registerProject, unregisterProject, rotateGatewayToken } from "./core/registry.js";
 import { listSkills, getSkill, saveSkill, deleteSkill } from "./core/skills.js";
 import { SecretsManager, readSecretValueFromStdin } from "./core/secrets.js";
@@ -824,8 +824,10 @@ async function configureServerAuthInteractively(
 
   const secrets = new SecretsManager();
   secrets.setSecret(secretName, authValue);
-  applyAuthReference(spec, target, toSecretRef(secretName));
-  saveConfig(config);
+  await mutateConfig((freshConfig) => {
+    const freshSpec = getServerSpecOrThrow(freshConfig, serverName);
+    applyAuthReference(freshSpec, target, toSecretRef(secretName));
+  });
 
   process.stdout.write(`Configured auth for "${serverName}" at ${target.kind}:${target.key} using secret://${secretName}.\n`);
 }
@@ -846,9 +848,15 @@ async function clearServerAuthInteractively(rl: ReadlineInterface, serverName: s
     return;
   }
 
-  const removed = removeAuthReference(spec, {
-    kind: selected.kind,
-    key: selected.key
+  let shouldDeleteSecret = false;
+  if (selected.secretName) {
+    const shouldDelete = (await promptLine(rl, `Delete keychain secret "${selected.secretName}" too? (y/N): `)).toLowerCase();
+    shouldDeleteSecret = shouldDelete === "y" || shouldDelete === "yes";
+  }
+
+  const removed = await mutateConfig((freshConfig) => {
+    const freshSpec = getServerSpecOrThrow(freshConfig, serverName);
+    return removeAuthReference(freshSpec, { kind: selected.kind, key: selected.key });
   });
 
   if (!removed) {
@@ -858,8 +866,7 @@ async function clearServerAuthInteractively(rl: ReadlineInterface, serverName: s
 
   const secretName = secretRefName(removed);
   if (secretName) {
-    const shouldDelete = (await promptLine(rl, `Delete keychain secret "${secretName}" too? (y/N): `)).toLowerCase();
-    if (shouldDelete === "y" || shouldDelete === "yes") {
+    if (shouldDeleteSecret) {
       new SecretsManager().removeSecret(secretName);
       process.stdout.write(`Removed binding and deleted ${secretName}.\n`);
     } else {
@@ -868,8 +875,6 @@ async function clearServerAuthInteractively(rl: ReadlineInterface, serverName: s
   } else {
     process.stdout.write("Removed inline binding.\n");
   }
-
-  saveConfig(config);
 }
 
 async function reconnectGatewayAndSync(cliPath: string): Promise<void> {
@@ -878,8 +883,9 @@ async function reconnectGatewayAndSync(cliPath: string): Promise<void> {
   const restart = await restartDaemon(config, cliPath, secrets);
   process.stdout.write(`${restart.message} pid=${restart.pid} port=${restart.port}\n`);
   const summary = syncAllClients(config, secrets);
-  persistSyncState(summary, config);
-  saveConfig(config);
+  await mutateConfig((freshConfig) => {
+    persistSyncState(summary, freshConfig);
+  });
   printSyncSummary(summary, false);
 }
 
@@ -907,10 +913,15 @@ async function setServerEnabledInteractively(
       if (projectEntry) {
         const localPath = path.join(projectEntry.path, ".mcpx.json");
         if (fs.existsSync(localPath)) {
-          const projectConfig = loadProjectConfig(localPath);
-          if (projectConfig.servers[baseServerName]) {
+          const handled = await mutateProjectConfig(localPath, (projectConfig) => {
+            if (!projectConfig.servers[baseServerName]) {
+              return false;
+            }
             setServerEnabled(projectConfig as any, baseServerName, enabled);
-            saveProjectConfig(projectConfig, localPath);
+            return true;
+          });
+
+          if (handled) {
             process.stdout.write(`${enabled ? "Enabled" : "Disabled"} server: ${serverName}\n`);
             process.stdout.write("Auto-syncing managed gateway entries across all supported clients...\n");
             await autoSyncManagedEntries(cliPath);
@@ -921,9 +932,9 @@ async function setServerEnabledInteractively(
     }
   }
 
-  const config = loadConfig();
-  setServerEnabled(config, serverName, enabled);
-  saveConfig(config);
+  await mutateConfig((freshConfig) => {
+    setServerEnabled(freshConfig, serverName, enabled);
+  });
   process.stdout.write(`${enabled ? "Enabled" : "Disabled"} server: ${serverName}\n`);
   process.stdout.write("Auto-syncing managed gateway entries across all supported clients...\n");
   await autoSyncManagedEntries(cliPath);
@@ -1313,8 +1324,9 @@ function registerSyncCommand(program: Command, cliPath: string): void {
       const secrets = new SecretsManager();
       await ensureDaemonIfEnabled(cliPath, secrets);
       const summary = syncAllClients(config, secrets, { targetClients, importScan: options.import ?? false });
-      persistSyncState(summary, config);
-      saveConfig(config);
+      await mutateConfig((freshConfig) => {
+        persistSyncState(summary, freshConfig);
+      });
       printSyncSummary(summary, options.json ?? false);
       ensureExitCodeForSyncFailures(summary.hasErrors);
     });
@@ -1553,7 +1565,7 @@ function registerAuthCommands(program: Command): void {
     .option("--secret-name <name>", "Override keychain secret name")
     .option("--raw", "Do not auto-prefix Authorization values with Bearer")
     .description("Store auth in keychain and bind it to an upstream server")
-    .action((server: string, options: AuthSetOptions) => {
+    .action(async (server: string, options: AuthSetOptions) => {
       const config = loadConfig();
       const spec = getServerSpecOrThrow(config, server);
       const target = resolveAuthTarget(spec, options.header, options.env);
@@ -1563,8 +1575,10 @@ function registerAuthCommands(program: Command): void {
 
       const secrets = new SecretsManager();
       secrets.setSecret(secretName, authValue);
-      applyAuthReference(spec, target, toSecretRef(secretName));
-      saveConfig(config);
+      await mutateConfig((freshConfig) => {
+        const freshSpec = getServerSpecOrThrow(freshConfig, server);
+        applyAuthReference(freshSpec, target, toSecretRef(secretName));
+      });
 
       process.stdout.write(`Configured auth for server "${server}" via ${target.kind} "${target.key}".\n`);
       process.stdout.write(`Stored secret: ${secretName}\n`);
@@ -1576,11 +1590,15 @@ function registerAuthCommands(program: Command): void {
     .option("--env <name>", "Env var name (required for stdio servers)")
     .option("--delete-secret", "Delete referenced keychain secret when removing binding")
     .description("Remove auth binding from an upstream server")
-    .action((server: string, options: AuthRemoveOptions) => {
+    .action(async (server: string, options: AuthRemoveOptions) => {
       const config = loadConfig();
       const spec = getServerSpecOrThrow(config, server);
       const target = resolveAuthTarget(spec, options.header, options.env);
-      const removedValue = removeAuthReference(spec, target);
+
+      const removedValue = await mutateConfig((freshConfig) => {
+        const freshSpec = getServerSpecOrThrow(freshConfig, server);
+        return removeAuthReference(freshSpec, target);
+      });
 
       if (!removedValue) {
         process.stdout.write(`No auth binding found for server "${server}" at ${target.kind} "${target.key}".\n`);
@@ -1598,8 +1616,6 @@ function registerAuthCommands(program: Command): void {
       } else {
         process.stdout.write("Removed binding.\n");
       }
-
-      saveConfig(config);
     });
 
   auth
@@ -1817,9 +1833,9 @@ function registerProjectCommands(program: Command, cliPath: string): void {
       process.stdout.write(`Initialized project configuration at: ${targetPath}\n`);
 
       const { registerProject } = await import("./core/registry.js");
-      const globalConfig = loadConfig();
-      registerProject(globalConfig, process.cwd(), projectName);
-      saveConfig(globalConfig);
+      await mutateConfig((globalConfig) => {
+        registerProject(globalConfig, process.cwd(), projectName);
+      });
       process.stdout.write(`Registered project "${projectName}" globally.\n`);
     });
 
@@ -1854,8 +1870,9 @@ function registerProjectCommands(program: Command, cliPath: string): void {
 
       const entry = globalConfig.projects[resolvedPath];
       const { unregisterProject } = await import("./core/registry.js");
-      unregisterProject(globalConfig, resolvedPath);
-      saveConfig(globalConfig);
+      await mutateConfig((freshConfig) => {
+        unregisterProject(freshConfig, resolvedPath);
+      });
       process.stdout.write(`Unregistered project "${entry.name}" (${resolvedPath}) from the global configuration.\n`);
       
       process.stdout.write("Auto-syncing managed gateway entries across all supported clients...\n");

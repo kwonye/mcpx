@@ -1125,4 +1125,234 @@ describe("gateway passthrough", () => {
     };
     expect(okTokensPayload.result.Railway.runtimeError).toBeUndefined();
   });
+
+  it("builds a well-known upstream URL without a double slash when the upstream URL has a trailing slash", async () => {
+    const env = setupTempEnv("mcpx-gateway-wk-trailing-slash-");
+    cleanups.push(env.restore);
+
+    let requestedPath = "";
+    const upstream = await startServer(async (req, res) => {
+      requestedPath = req.url ?? "";
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ resource: "https://example.com/" }));
+    });
+    cleanups.push(() => closeServer(upstream.server));
+
+    const config = defaultConfig();
+    // Trailing slash on the upstream URL is the regression case: naive string
+    // concatenation of "<prefix>" + "<pathname>" would produce a "//" here.
+    config.servers.vercel = {
+      transport: "http",
+      url: `http://127.0.0.1:${upstream.port}/mcp/`,
+      headers: {
+        Authorization: "Bearer test-token"
+      }
+    };
+    // A second upstream ensures the request is actually resolved via the
+    // `?upstream=vercel` filter rather than an implicit single-upstream fallback.
+    config.servers.other = {
+      transport: "http",
+      url: `http://127.0.0.1:${upstream.port}/other`
+    };
+    saveConfig(config);
+
+    const gateway = createGatewayServer({
+      port: 0,
+      expectedToken: "test-local-token",
+      secrets: new SecretsManager()
+    });
+    await waitForListening(gateway);
+    cleanups.push(() => closeServer(gateway));
+
+    const gatewayAddress = gateway.address();
+    if (!gatewayAddress || typeof gatewayAddress === "string") {
+      throw new Error("Failed to resolve gateway address.");
+    }
+
+    const response = await fetch(
+      `http://127.0.0.1:${gatewayAddress.port}/.well-known/oauth-protected-resource?upstream=vercel`
+    );
+    expect(response.status).toBe(200);
+    const payload = (await response.json()) as { resource: string };
+    expect(payload.resource).toBe(`http://127.0.0.1:${gatewayAddress.port}/mcp?upstream=vercel`);
+
+    // requestedPath is the raw path+query the gateway sent to the fake upstream
+    // (no "http://" scheme present), so any "//" here is a genuine double-slash bug.
+    expect(requestedPath).toBe("/.well-known/oauth-protected-resource/mcp");
+    expect(requestedPath).not.toContain("//");
+  });
+
+  it("surfaces mcpxUpstreamErrors in tools/list _meta when one of several upstreams fails", async () => {
+    const env = setupTempEnv("mcpx-gateway-partial-fail-");
+    cleanups.push(env.restore);
+
+    const healthyUpstream = await startServer(async (req, res) => {
+      const chunks: Buffer[] = [];
+      for await (const chunk of req) {
+        chunks.push(Buffer.from(chunk));
+      }
+
+      const payload = JSON.parse(Buffer.concat(chunks).toString("utf8")) as { method: string; id: string | number | null };
+      if (payload.method === "initialize") {
+        respondWithInit(res, payload.id);
+        return;
+      }
+
+      if (payload.method === "tools/list") {
+        res.setHeader("content-type", "application/json");
+        res.end(JSON.stringify({ jsonrpc: "2.0", id: payload.id, result: { tools: [{ name: "echo", description: "Echo", inputSchema: { type: "object" } }] } }));
+        return;
+      }
+
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ jsonrpc: "2.0", id: payload.id, result: {} }));
+    });
+    cleanups.push(() => closeServer(healthyUpstream.server));
+
+    // Bind an ephemeral port, then close it immediately so nothing is
+    // listening there. Connecting to it fails fast with ECONNREFUSED,
+    // giving us a deterministic "unreachable" upstream.
+    const deadServer = await startServer(() => {});
+    const deadPort = deadServer.port;
+    await closeServer(deadServer.server);
+
+    const config = defaultConfig();
+    config.servers.good = {
+      transport: "http",
+      url: `http://127.0.0.1:${healthyUpstream.port}/mcp`
+    };
+    config.servers.bad = {
+      transport: "http",
+      url: `http://127.0.0.1:${deadPort}/mcp`
+    };
+    saveConfig(config);
+
+    const gateway = createGatewayServer({
+      port: 0,
+      expectedToken: "test-local-token",
+      secrets: new SecretsManager()
+    });
+    await waitForListening(gateway);
+    cleanups.push(() => closeServer(gateway));
+
+    const gatewayAddress = gateway.address();
+    if (!gatewayAddress || typeof gatewayAddress === "string") {
+      throw new Error("Failed to resolve gateway address.");
+    }
+
+    const response = await fetch(`http://127.0.0.1:${gatewayAddress.port}/mcp`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        Authorization: "Bearer test-local-token"
+      },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} })
+    });
+
+    expect(response.status).toBe(200);
+    const payload = (await response.json()) as {
+      result: {
+        tools: Array<{ name: string }>;
+        _meta?: { mcpxUpstreamErrors?: Array<{ name: string; code: string; message: string }> };
+      };
+    };
+
+    const toolNames = payload.result.tools.map((tool) => tool.name);
+    expect(toolNames).toContain("good.echo");
+    expect(toolNames.some((name) => name.startsWith("bad."))).toBe(false);
+
+    expect(payload.result._meta?.mcpxUpstreamErrors).toBeDefined();
+    const failedUpstreams = payload.result._meta?.mcpxUpstreamErrors ?? [];
+    expect(failedUpstreams.map((entry) => entry.name)).toEqual(["bad"]);
+    expect(failedUpstreams[0]?.code).toBe("unreachable");
+    expect(typeof failedUpstreams[0]?.message).toBe("string");
+    expect(failedUpstreams[0]?.message.length).toBeGreaterThan(0);
+  });
+
+  it("returns well-formed SSE frames with one complete JSON-RPC payload per event for batched requests", async () => {
+    const env = setupTempEnv("mcpx-gateway-sse-");
+    cleanups.push(env.restore);
+
+    const upstream = await startServer(async (req, res) => {
+      const chunks: Buffer[] = [];
+      for await (const chunk of req) {
+        chunks.push(Buffer.from(chunk));
+      }
+
+      const payload = JSON.parse(Buffer.concat(chunks).toString("utf8")) as { method: string; id: string | number | null };
+      if (payload.method === "initialize") {
+        respondWithInit(res, payload.id);
+        return;
+      }
+
+      if (payload.method === "tools/list") {
+        res.setHeader("content-type", "application/json");
+        res.end(JSON.stringify({ jsonrpc: "2.0", id: payload.id, result: { tools: [{ name: "echo", description: "Echo", inputSchema: { type: "object" } }] } }));
+        return;
+      }
+
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ jsonrpc: "2.0", id: payload.id, result: {} }));
+    });
+    cleanups.push(() => closeServer(upstream.server));
+
+    const config = defaultConfig();
+    config.servers.vercel = {
+      transport: "http",
+      url: `http://127.0.0.1:${upstream.port}/mcp`
+    };
+    saveConfig(config);
+
+    const gateway = createGatewayServer({
+      port: 0,
+      expectedToken: "test-local-token",
+      secrets: new SecretsManager()
+    });
+    await waitForListening(gateway);
+    cleanups.push(() => closeServer(gateway));
+
+    const gatewayAddress = gateway.address();
+    if (!gatewayAddress || typeof gatewayAddress === "string") {
+      throw new Error("Failed to resolve gateway address.");
+    }
+
+    // Batch of two requests forces the multi-response SSE path (one "event:
+    // message" / "data:" frame per JSON-RPC response, in request order).
+    const response = await fetch(`http://127.0.0.1:${gatewayAddress.port}/mcp`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        Accept: "text/event-stream",
+        Authorization: "Bearer test-local-token"
+      },
+      body: JSON.stringify([
+        { jsonrpc: "2.0", id: 1, method: "tools/list", params: {} },
+        { jsonrpc: "2.0", id: 2, method: "ping" }
+      ])
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("text/event-stream");
+
+    const rawBody = await response.text();
+    const frames = rawBody.split("\n\n").filter((frame) => frame.length > 0);
+    expect(frames.length).toBe(2);
+
+    const events = frames.map((frame) => {
+      const lines = frame.split("\n");
+      expect(lines[0]).toBe("event: message");
+      expect(lines[1]?.startsWith("data: ")).toBe(true);
+      // Parsing each data payload independently proves it round-trips as a
+      // single, complete JSON document that wasn't truncated or merged with
+      // a neighboring event.
+      return JSON.parse(lines[1]!.slice("data: ".length)) as { id: number; result?: unknown };
+    });
+
+    expect(events[0]?.id).toBe(1);
+    const firstResult = events[0]?.result as { tools: Array<{ name: string }> };
+    expect(firstResult.tools.map((tool) => tool.name)).toContain("echo");
+
+    expect(events[1]?.id).toBe(2);
+    expect(events[1]?.result).toEqual({ ok: true });
+  });
 });

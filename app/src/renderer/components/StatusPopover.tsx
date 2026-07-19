@@ -91,19 +91,7 @@ export function StatusPopover() {
     return <div className="popover">Loading...</div>;
   }
 
-  const report = status as {
-    daemon: { running: boolean; pid?: number; port: number };
-    upstreamCount: number;
-    servers: Array<{
-      name: string;
-      enabled: boolean;
-      transport: string;
-      authBindings: Array<{ kind: string; key: string; value: string }>;
-      clients: Array<{ clientId: string; status: string; managed: boolean }>;
-      tokenCount?: { tools: number; resources: number; prompts: number; total: number; error?: string };
-    }>;
-    totalGlobalTokens?: number;
-  };
+  const report = status;
 
   const errorCount = report.servers.reduce((count, server) => {
     return count + server.clients.filter((c) => c.managed && c.status === "ERROR").length;

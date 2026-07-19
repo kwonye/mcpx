@@ -36,4 +36,79 @@ describe("add command parsing", () => {
       }
     });
   });
+
+  it("parses claude mcp add commands", () => {
+    const result = parseCliAddCommand("claude mcp add supabase https://mcp.supabase.com/mcp");
+
+    expect(result).toEqual({
+      name: "supabase",
+      spec: {
+        transport: "http",
+        url: "https://mcp.supabase.com/mcp"
+      }
+    });
+  });
+
+  it("parses qwen mcp add commands", () => {
+    const result = parseCliAddCommand("qwen mcp add supabase https://mcp.supabase.com/mcp");
+
+    expect(result).toEqual({
+      name: "supabase",
+      spec: {
+        transport: "http",
+        url: "https://mcp.supabase.com/mcp"
+      }
+    });
+  });
+
+  it("parses code --add-mcp JSON payloads", () => {
+    const result = parseCliAddCommand('code --add-mcp \'{"name":"supabase","url":"https://mcp.supabase.com/mcp"}\'');
+
+    expect(result).toEqual({
+      name: "supabase",
+      spec: {
+        transport: "http",
+        url: "https://mcp.supabase.com/mcp"
+      }
+    });
+  });
+
+  it("parses openclaw mcp add commands", () => {
+    const result = parseCliAddCommand("openclaw mcp add supabase https://mcp.supabase.com/mcp");
+
+    expect(result).toEqual({
+      name: "supabase",
+      spec: {
+        transport: "http",
+        url: "https://mcp.supabase.com/mcp"
+      }
+    });
+  });
+
+  it("parses hermes mcp add commands", () => {
+    const result = parseCliAddCommand("hermes mcp add supabase https://mcp.supabase.com/mcp");
+
+    expect(result).toEqual({
+      name: "supabase",
+      spec: {
+        transport: "http",
+        url: "https://mcp.supabase.com/mcp"
+      }
+    });
+  });
+
+  it("rejects unrecognized prose instead of silently misparsing it as a server", () => {
+    expect(() => parseCliAddCommand("definitely not valid")).toThrow("Unrecognized command");
+  });
+
+  it("rejects bare '<name> <url>' input with no recognized command verb", () => {
+    // No supported caller relies on this shape (the desktop app's CLI-input boxes always
+    // prompt for a full "mcpx add ..." / "claude mcp add ..." style command, and no prior
+    // test asserted the bare fallback), so it is rejected rather than silently accepted.
+    expect(() => parseCliAddCommand("supabase https://mcp.supabase.com/mcp")).toThrow("Unrecognized command");
+  });
+
+  it("rejects bare input even after stripping the optional 'mcpx ' prefix", () => {
+    expect(() => parseCliAddCommand("mcpx supabase https://mcp.supabase.com/mcp")).toThrow("Unrecognized command");
+  });
 });

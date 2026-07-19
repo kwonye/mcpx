@@ -246,7 +246,8 @@ function computeTreeHash(dir: string): string {
   const crypto = require("node:crypto");
   const hash = crypto.createHash("sha256");
   for (const entry of entries) {
-    if (entry.name.startsWith(".")) continue;
+    if (entry.name.startsWith(".git")) continue;
+    if (entry.name === ".DS_Store") continue;
     if (entry.isDirectory()) {
       hash.update(entry.name);
       hash.update(computeTreeHash(path.join(dir, entry.name)));
@@ -263,6 +264,7 @@ function copyDirSync(src: string, dest: string): void {
   const entries = fs.readdirSync(src, { withFileTypes: true });
   for (const entry of entries) {
     if (entry.name.startsWith(".git")) continue;
+    if (entry.name === ".DS_Store") continue;
     const srcPath = path.join(src, entry.name);
     const destPath = path.join(dest, entry.name);
     if (entry.isDirectory()) {

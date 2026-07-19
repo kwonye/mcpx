@@ -12,6 +12,7 @@ import type {
   OAuthClientMetadata,
   OAuthTokens
 } from "@modelcontextprotocol/sdk/shared/auth.js";
+import { InvalidClientError, InvalidGrantError } from "@modelcontextprotocol/sdk/server/auth/errors.js";
 import type { HttpServerSpec, McpxConfig } from "../types.js";
 import { loadConfig, saveConfig } from "./config.js";
 import { SecretsManager } from "./secrets.js";
@@ -320,6 +321,11 @@ export async function runOAuthLogin(
     redirectUrl = `http://127.0.0.1:${port}/callback`;
     codePromise = waitForAuthorizationCode(callbackServer, state);
   }
+  // Mark the rejection as handled immediately so that a codePromise which rejects
+  // before it is awaited below (e.g. discovery/registration fails first) doesn't
+  // crash the process as an unhandled promise rejection. The `await codePromise`
+  // further down still observes and propagates the rejection normally.
+  codePromise.catch(() => {});
 
   const provider = new InteractiveOAuthProvider(serverName, secrets, redirectUrl, state, openUrl);
 
@@ -412,8 +418,13 @@ export async function getOAuthAccessToken(
       return refreshed.access_token;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      // Token endpoint 4xx / invalid_grant / invalid_client → auth_expired (keep tokens)
-      if (/invalid_grant|invalid_client|4\d{2}/i.test(message)) {
+      // Token endpoint 4xx / invalid_grant / invalid_client → auth_expired (keep tokens).
+      // The SDK throws typed InvalidGrantError/InvalidClientError instances whose
+      // `.message` is only the server's error_description (the literal string
+      // "invalid_grant" never appears there for a spec-compliant response), so detect
+      // those SDK error classes directly; the regex remains a fallback for errors that
+      // aren't instances of the SDK's OAuth error classes.
+      if (err instanceof InvalidGrantError || err instanceof InvalidClientError || /invalid_grant|invalid_client|4\d{2}/i.test(message)) {
         throw new UpstreamError(serverName, "auth_expired", `OAuth refresh failed: ${message}`);
       }
       // Network errors → unreachable (keep tokens)

@@ -7,6 +7,7 @@ import { PluginLifecycle } from "./plugin-lifecycle.js";
 import { parseSource } from "./plugin-source.js";
 import { readManifest, discoverComponents, hasManifest } from "./plugin-parse.js";
 import { loadConfig, saveConfig } from "./config.js";
+import { mutateConfig } from "./config-store.js";
 import { syncAllClients, persistSyncState } from "./sync.js";
 import { SecretsManager } from "./secrets.js";
 import type {
@@ -75,27 +76,12 @@ export class PluginManager {
     const pluginName = options?.name || info.manifest?.name || path.basename(info.root);
     const pluginId = `${pluginName}@${info.sha.slice(0, 8)}`;
 
-    const config = loadConfig(this.configPath);
-    if (!config.plugins) config.plugins = {};
-    if (config.plugins[pluginId]) {
-      throw new Error(`Plugin ${pluginId} is already installed`);
-    }
-
-    // Name collision check: ensure no existing plugin has the same server names
-    const serverNames: string[] = info.components.mcpServers.map(s => `${pluginName}__${s.id}`);
-    for (const existing of Object.values(config.plugins)) {
-      for (const sn of serverNames) {
-        if (existing.serverNames.includes(sn)) {
-          throw new Error(`Server name collision: "${sn}" is already claimed by plugin "${existing.name}". Use --name to specify a different plugin name.`);
-        }
-      }
-    }
-
     const dataDir = path.join(getPluginDataRoot(), pluginId);
     ensureDir(dataDir);
 
     const enabled = options?.enabled ?? true;
     const discovered = info.components;
+    const serverNames: string[] = discovered.mcpServers.map(s => `${pluginName}__${s.id}`);
 
     const plugin: ManagedPlugin = {
       id: pluginId,
@@ -122,95 +108,140 @@ export class PluginManager {
       approvals: options?.approvals || {},
     };
 
-    config.plugins[pluginId] = plugin;
-    saveConfig(config, this.configPath);
+    // Read-check-write happens inside the lock, reloaded fresh from disk, so
+    // the "already installed" and name-collision checks below are race-free
+    // against a concurrent install/uninstall/update.
+    await mutateConfig((config) => {
+      if (!config.plugins) config.plugins = {};
+      if (config.plugins[pluginId]) {
+        throw new Error(`Plugin ${pluginId} is already installed`);
+      }
 
-    // Register MCP servers into config.servers with namespace
-    for (const mcp of discovered.mcpServers) {
-      const nsName = `${pluginName}__${mcp.id}`;
-      const approved = plugin.approvals?.mcpServers !== false;
-      config.servers[nsName] = {
-        transport: "stdio",
-        command: "npx",
-        args: ["-y", "@kwonye/mcpx@latest", "plugin-host", pluginId, mcp.id],
-        enabled: enabled && approved,
-      };
-    }
-    saveConfig(config, this.configPath);
+      // Name collision check: ensure no existing plugin has the same server names
+      for (const existing of Object.values(config.plugins)) {
+        for (const sn of serverNames) {
+          if (existing.serverNames.includes(sn)) {
+            throw new Error(`Server name collision: "${sn}" is already claimed by plugin "${existing.name}". Use --name to specify a different plugin name.`);
+          }
+        }
+      }
+
+      // Check collision with user-added servers
+      for (const sn of serverNames) {
+        if (config.servers?.[sn]) {
+          throw new Error(`Server name collision: "${sn}" is already registered as a server. Remove that server or use --name to choose a different plugin name.`);
+        }
+      }
+
+      config.plugins[pluginId] = plugin;
+
+      // Register MCP servers into config.servers with namespace
+      for (const mcp of discovered.mcpServers) {
+        const nsName = `${pluginName}__${mcp.id}`;
+        const approved = plugin.approvals?.mcpServers !== false;
+        config.servers[nsName] = {
+          transport: "stdio",
+          command: "npx",
+          args: ["-y", "@kwonye/mcpx@latest", "plugin-host", pluginId, mcp.id],
+          enabled: enabled && approved,
+        };
+      }
+    }, this.configPath);
 
     // Init data
     this.lifecycle.initData(pluginId);
 
-    // Sync projections
+    // Sync projections — sync (slow I/O) runs outside the lock; persisting
+    // its result is a second locked mutation against a freshly reloaded
+    // config so it can't clobber a concurrent write.
     const syncConfig = loadConfig(this.configPath);
     const summary = syncAllClients(syncConfig, this.secrets);
-    persistSyncState(summary, syncConfig);
-    saveConfig(syncConfig, this.configPath);
+    await mutateConfig((freshConfig) => {
+      persistSyncState(summary, freshConfig);
+    }, this.configPath);
 
     return plugin;
   }
 
   async updatePlugin(pluginId: string): Promise<ManagedPlugin> {
-    const config = loadConfig(this.configPath);
-    if (!config.plugins) throw new Error(`Plugin ${pluginId} not found`);
-    const current = config.plugins[pluginId];
-    if (!current) throw new Error(`Plugin ${pluginId} not found`);
+    // Inspect source outside the lock (slow I/O)
+    let currentPlugin: ManagedPlugin | undefined;
+    let info: Awaited<ReturnType<typeof this.inspectSource>> | undefined;
 
-    const info = await this.inspectSource(current.source);
-    const pluginName = info.manifest?.name || current.name;
+    await mutateConfig((config) => {
+      if (!config.plugins) throw new Error(`Plugin ${pluginId} not found`);
+      const current = config.plugins[pluginId];
+      if (!current) throw new Error(`Plugin ${pluginId} not found`);
+      currentPlugin = current;
+    }, this.configPath);
 
-    // Remove old MCP servers
-    for (const oldName of current.serverNames) {
-      delete config.servers[oldName];
-    }
+    // We know currentPlugin is set because mutateConfig didn't throw
+    const source = currentPlugin!.source;
+    info = await this.inspectSource(source);
+    const pluginName = info.manifest?.name || currentPlugin!.name;
 
-    // Update plugin record
-    current.version = info.manifest?.version || current.version;
-    current.resolvedSha = info.sha;
-    current.root = info.root;
-    current.discovered = info.components;
-    current.serverNames = info.components.mcpServers.map(s => `${pluginName}__${s.id}`);
+    // Now update with freshly-read config inside the lock
+    let updatedPlugin: ManagedPlugin | undefined;
+    await mutateConfig((config) => {
+      if (!config.plugins) throw new Error(`Plugin ${pluginId} not found`);
+      const current = config.plugins[pluginId];
+      if (!current) throw new Error(`Plugin ${pluginId} not found`);
 
-    // Re-register MCP servers
-    const approved = current.approvals?.mcpServers !== false;
-    for (const mcp of info.components.mcpServers) {
-      const nsName = `${pluginName}__${mcp.id}`;
-      config.servers[nsName] = {
-        transport: "stdio",
-        command: "npx",
-        args: ["-y", "@kwonye/mcpx@latest", "plugin-host", pluginId, mcp.id],
-        enabled: current.enabled && approved,
-      };
-    }
+      // Remove old MCP servers
+      for (const oldName of current.serverNames) {
+        delete config.servers[oldName];
+      }
 
-    // Reset SHA-bound approvals
-    current.approvals = {};
+      // Update plugin record
+      current.version = info!.manifest?.version || current.version;
+      current.resolvedSha = info!.sha;
+      current.root = info!.root;
+      current.discovered = info!.components;
+      current.serverNames = info!.components.mcpServers.map(s => `${pluginName}__${s.id}`);
 
-    config.plugins[pluginId] = current;
-    saveConfig(config, this.configPath);
+      // Re-register MCP servers
+      const approved = current.approvals?.mcpServers !== false;
+      for (const mcp of info!.components.mcpServers) {
+        const nsName = `${pluginName}__${mcp.id}`;
+        config.servers[nsName] = {
+          transport: "stdio",
+          command: "npx",
+          args: ["-y", "@kwonye/mcpx@latest", "plugin-host", pluginId, mcp.id],
+          enabled: current.enabled && approved,
+        };
+      }
 
+      // Reset SHA-bound approvals
+      current.approvals = {};
+
+      config.plugins[pluginId] = current;
+      updatedPlugin = current;
+    }, this.configPath);
+
+    // Sync outside the lock (slow I/O)
     const syncConfig = loadConfig(this.configPath);
     const summary = syncAllClients(syncConfig, this.secrets);
-    persistSyncState(summary, syncConfig);
-    saveConfig(syncConfig, this.configPath);
+    await mutateConfig((freshConfig) => {
+      persistSyncState(summary, freshConfig);
+    }, this.configPath);
 
-    return current;
+    return updatedPlugin!;
   }
 
   async uninstallPlugin(pluginId: string, keepData: boolean = false): Promise<void> {
-    const config = loadConfig(this.configPath);
-    if (!config.plugins) throw new Error(`Plugin ${pluginId} not found`);
-    const plugin = config.plugins[pluginId];
-    if (!plugin) throw new Error(`Plugin ${pluginId} not found`);
+    await mutateConfig((config) => {
+      if (!config.plugins) throw new Error(`Plugin ${pluginId} not found`);
+      const plugin = config.plugins[pluginId];
+      if (!plugin) throw new Error(`Plugin ${pluginId} not found`);
 
-    // Remove MCP servers from config
-    for (const name of plugin.serverNames) {
-      delete config.servers[name];
-    }
+      // Remove MCP servers from config
+      for (const name of plugin.serverNames) {
+        delete config.servers[name];
+      }
 
-    // Remove from config
-    delete config.plugins[pluginId];
-    saveConfig(config, this.configPath);
+      // Remove from config
+      delete config.plugins[pluginId];
+    }, this.configPath);
 
     if (!keepData) {
       await this.lifecycle.removeData(pluginId);
@@ -218,61 +249,71 @@ export class PluginManager {
 
     const syncConfig = loadConfig(this.configPath);
     const summary = syncAllClients(syncConfig, this.secrets);
-    persistSyncState(summary, syncConfig);
-    saveConfig(syncConfig, this.configPath);
+    await mutateConfig((freshConfig) => {
+      persistSyncState(summary, freshConfig);
+    }, this.configPath);
   }
 
   async enablePlugin(pluginId: string): Promise<void> {
-    const config = loadConfig(this.configPath);
-    if (!config.plugins) throw new Error(`Plugin ${pluginId} not found`);
-    const plugin = config.plugins[pluginId];
-    if (!plugin) throw new Error(`Plugin ${pluginId} not found`);
-    plugin.enabled = true;
-    saveConfig(config, this.configPath);
+    // Existence check and enable inside the lock
+    await mutateConfig((config) => {
+      if (!config.plugins) throw new Error(`Plugin ${pluginId} not found`);
+      const plugin = config.plugins[pluginId];
+      if (!plugin) throw new Error(`Plugin ${pluginId} not found`);
+      plugin.enabled = true;
+    }, this.configPath);
 
+    // Sync outside the lock (slow I/O)
     const syncConfig = loadConfig(this.configPath);
     const summary = syncAllClients(syncConfig, this.secrets);
-    persistSyncState(summary, syncConfig);
-    saveConfig(syncConfig, this.configPath);
+    await mutateConfig((freshConfig) => {
+      persistSyncState(summary, freshConfig);
+    }, this.configPath);
   }
 
   async disablePlugin(pluginId: string): Promise<void> {
-    const config = loadConfig(this.configPath);
-    if (!config.plugins) throw new Error(`Plugin ${pluginId} not found`);
-    const plugin = config.plugins[pluginId];
-    if (!plugin) throw new Error(`Plugin ${pluginId} not found`);
-    plugin.enabled = false;
-    saveConfig(config, this.configPath);
+    // Existence check and disable inside the lock
+    await mutateConfig((config) => {
+      if (!config.plugins) throw new Error(`Plugin ${pluginId} not found`);
+      const plugin = config.plugins[pluginId];
+      if (!plugin) throw new Error(`Plugin ${pluginId} not found`);
+      plugin.enabled = false;
+    }, this.configPath);
 
+    // Sync outside the lock (slow I/O)
     const syncConfig = loadConfig(this.configPath);
     const summary = syncAllClients(syncConfig, this.secrets);
-    persistSyncState(summary, syncConfig);
-    saveConfig(syncConfig, this.configPath);
+    await mutateConfig((freshConfig) => {
+      persistSyncState(summary, freshConfig);
+    }, this.configPath);
   }
 
   async approveComponent(pluginId: string, component: string): Promise<void> {
-    const config = loadConfig(this.configPath);
-    if (!config.plugins) throw new Error(`Plugin ${pluginId} not found`);
-    const plugin = config.plugins[pluginId];
-    if (!plugin) throw new Error(`Plugin ${pluginId} not found`);
+    // Existence check and approval inside the lock
+    await mutateConfig((config) => {
+      if (!config.plugins) throw new Error(`Plugin ${pluginId} not found`);
+      const plugin = config.plugins[pluginId];
+      if (!plugin) throw new Error(`Plugin ${pluginId} not found`);
 
-    if (!plugin.approvals) plugin.approvals = {};
-    plugin.approvals[component as PluginComponent] = true;
+      if (!plugin.approvals) plugin.approvals = {};
+      plugin.approvals[component as PluginComponent] = true;
 
-    // If approving mcpServers, enable the servers
-    if (component === "mcpServers") {
-      for (const name of plugin.serverNames) {
-        if (config.servers[name]) {
-          (config.servers[name] as any).enabled = plugin.enabled;
+      // If approving mcpServers, enable the servers
+      if (component === "mcpServers") {
+        for (const name of plugin.serverNames) {
+          if (config.servers[name]) {
+            (config.servers[name] as any).enabled = plugin.enabled;
+          }
         }
       }
-    }
+    }, this.configPath);
 
-    saveConfig(config, this.configPath);
+    // Sync outside the lock (slow I/O)
     const syncConfig = loadConfig(this.configPath);
     const summary = syncAllClients(syncConfig, this.secrets);
-    persistSyncState(summary, syncConfig);
-    saveConfig(syncConfig, this.configPath);
+    await mutateConfig((freshConfig) => {
+      persistSyncState(summary, freshConfig);
+    }, this.configPath);
   }
 
   async getPluginStatus(pluginId: string): Promise<ManagedPlugin | null> {
@@ -352,22 +393,23 @@ export async function setPluginProjectOverride(
   projectPath: string,
   override: { enabled?: boolean; components?: Partial<Record<string, boolean>> }
 ): Promise<void> {
-  const config = loadConfig();
-  const id = resolvePluginId(config, nameOrId);
-  const plugin = config.plugins?.[id];
-  if (!plugin) throw new Error(`Plugin ${id} not found`);
-  if (!config.projects?.[projectPath]) {
-    throw new Error(`Project "${projectPath}" is not registered. Run "mcpx project init" there first.`);
-  }
-  if (!plugin.projectOverrides) plugin.projectOverrides = {};
-  plugin.projectOverrides[projectPath] = { ...plugin.projectOverrides[projectPath], ...override };
-  saveConfig(config);
+  await mutateConfig((config) => {
+    const id = resolvePluginId(config, nameOrId);
+    const plugin = config.plugins?.[id];
+    if (!plugin) throw new Error(`Plugin ${id} not found`);
+    if (!config.projects?.[projectPath]) {
+      throw new Error(`Project "${projectPath}" is not registered. Run "mcpx project init" there first.`);
+    }
+    if (!plugin.projectOverrides) plugin.projectOverrides = {};
+    plugin.projectOverrides[projectPath] = { ...plugin.projectOverrides[projectPath], ...override };
+  });
 
   const secrets = new SecretsManager();
   const syncConfig = loadConfig();
   const summary = syncAllClients(syncConfig, secrets);
-  persistSyncState(summary, syncConfig);
-  saveConfig(syncConfig);
+  await mutateConfig((freshConfig) => {
+    persistSyncState(summary, freshConfig);
+  });
 }
 
 export async function approvePluginComponent(nameOrId: string, component: string): Promise<void> {
@@ -410,28 +452,35 @@ export function resolvePluginId(config: { plugins?: Record<string, ManagedPlugin
 
 export async function pluginConfigSet(nameOrId: string, key: string, value: string, projectPath?: string): Promise<void> {
   const manager = new PluginManager();
-  const config = loadConfig(manager["configPath"]);
-  const id = resolvePluginId(config, nameOrId);
-  const plugin = config.plugins?.[id];
-  if (!plugin) throw new Error(`Plugin ${id} not found`);
-  if (projectPath) {
-    if (!plugin.projectOverrides) plugin.projectOverrides = {};
-    if (!plugin.projectOverrides[projectPath]) plugin.projectOverrides[projectPath] = {};
-    if (!plugin.projectOverrides[projectPath].config) plugin.projectOverrides[projectPath].config = {};
-    (plugin.projectOverrides[projectPath].config as Record<string, unknown>)[key] = value;
-  } else {
-    if (!plugin.config) plugin.config = {};
-    (plugin.config as Record<string, unknown>)[key] = value;
-  }
-  saveConfig(config, manager["configPath"]);
+  const configPath = manager["configPath"];
+
+  // ID resolution and config mutation inside the lock
+  await mutateConfig((config) => {
+    const id = resolvePluginId(config, nameOrId);
+    const plugin = config.plugins?.[id];
+    if (!plugin) throw new Error(`Plugin ${id} not found`);
+    if (projectPath) {
+      if (!plugin.projectOverrides) plugin.projectOverrides = {};
+      if (!plugin.projectOverrides[projectPath]) plugin.projectOverrides[projectPath] = {};
+      if (!plugin.projectOverrides[projectPath].config) plugin.projectOverrides[projectPath].config = {};
+      (plugin.projectOverrides[projectPath].config as Record<string, unknown>)[key] = value;
+    } else {
+      if (!plugin.config) plugin.config = {};
+      (plugin.config as Record<string, unknown>)[key] = value;
+    }
+  }, configPath);
 }
 
 export async function pluginSync(): Promise<void> {
+  // Load config and compute sync outside the lock (slow I/O)
   const config = loadConfig();
   const secrets = new SecretsManager();
   const summary = syncAllClients(config, secrets);
-  persistSyncState(summary, config);
-  saveConfig(config);
+
+  // Persist sync state inside the lock with fresh reload
+  await mutateConfig((freshConfig) => {
+    persistSyncState(summary, freshConfig);
+  });
 }
 
 export async function preparePlugin(name: string): Promise<void> {

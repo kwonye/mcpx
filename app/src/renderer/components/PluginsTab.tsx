@@ -1,29 +1,10 @@
 import { useEffect, useState } from "react";
 import { SkillsTab } from "./SkillsTab";
-
-interface ManagedPlugin {
-  id: string;
-  name: string;
-  version: string;
-  source: string;
-  enabled: boolean;
-  status: string;
-  error?: string;
-  components: Record<string, boolean>;
-  discovered: {
-    mcpServers: Array<{ id: string }>;
-    skills: Array<{ id: string }>;
-    hooks: Array<{ id: string }>;
-    agents: Array<{ id: string }>;
-    commands: Array<{ id: string }>;
-  };
-  serverNames: string[];
-  approvals?: Record<string, boolean>;
-  projectOverrides?: Record<string, unknown>;
-}
+import type { ManagedPlugin, PluginComponent } from "@mcpx/core";
 
 export function PluginsTab() {
   const [plugins, setPlugins] = useState<ManagedPlugin[]>([]);
+  const [error, setError] = useState<string | null>(null);
   const [installInput, setInstallInput] = useState("");
   const [installing, setInstalling] = useState(false);
   const [installError, setInstallError] = useState<string | null>(null);
@@ -33,8 +14,9 @@ export function PluginsTab() {
     try {
       const list = await window.mcpx.plugins.list();
       setPlugins(list as ManagedPlugin[]);
-    } catch {
+    } catch (err) {
       setPlugins([]);
+      setError(err instanceof Error ? err.message : String(err));
     }
   }
 
@@ -59,6 +41,7 @@ export function PluginsTab() {
   }
 
   async function handleToggle(plugin: ManagedPlugin) {
+    setError(null);
     try {
       if (plugin.enabled) {
         await window.mcpx.plugins.disable(plugin.id);
@@ -66,36 +49,39 @@ export function PluginsTab() {
         await window.mcpx.plugins.enable(plugin.id);
       }
       await loadPlugins();
-    } catch {
-      // ignore
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
     }
   }
 
   async function handleApprove(pluginId: string, component: string) {
+    setError(null);
     try {
       await window.mcpx.plugins.approve(pluginId, component);
       await loadPlugins();
-    } catch {
-      // ignore
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
     }
   }
 
   async function handleUninstall(plugin: ManagedPlugin) {
     if (!confirm(`Uninstall plugin "${plugin.name}"?`)) return;
+    setError(null);
     try {
       await window.mcpx.plugins.uninstall(plugin.id, { keepData: true });
       await loadPlugins();
-    } catch {
-      // ignore
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
     }
   }
 
   async function handleUpdate(plugin: ManagedPlugin) {
+    setError(null);
     try {
       await window.mcpx.plugins.update(plugin.id);
       await loadPlugins();
-    } catch {
-      // ignore
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
     }
   }
 
@@ -134,6 +120,8 @@ export function PluginsTab() {
         </button>
       </form>
       {installError && <div className="plugin-install-error">{installError}</div>}
+
+      {error && <div className="feedback-message error">{error}</div>}
 
       {plugins.length === 0 && (
         <div className="empty-state">
@@ -182,7 +170,7 @@ export function PluginsTab() {
                 <div className="plugin-card__components">
                   {Object.entries(plugin.components).filter(([, v]) => v).map(([key]) => {
                     const needsApproval = gatedComponents.includes(key as typeof gatedComponents[number])
-                      && plugin.approvals?.[key] !== true;
+                      && plugin.approvals?.[key as PluginComponent] !== true;
                     return (
                       <span key={key} className="plugin-component-chip">
                         {key}

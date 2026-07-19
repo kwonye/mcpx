@@ -1,6 +1,6 @@
 # Desktop App Overview
 
-The `mcpx` desktop app provides a visual interface for managing MCP servers, featuring a menubar tray icon, a comprehensive dashboard, and a discovery "Browse" tab.
+The `mcpx` desktop app provides a visual interface for managing MCP servers, featuring a macOS menubar tray with a quick-status popover and a comprehensive dashboard with tabs for managing servers, projects, plugins, and settings.
 
 ## Architecture
 
@@ -20,8 +20,11 @@ The app is built with **Electron + React** and is designed to be a lightweight w
 ### Renderer (`src/renderer/`)
 - **UI Framework:** React 19.
 - **State Management:** Custom `useMcpx` hook for interacting with the backend.
-- **Dashboard:** Server list, detail views, and real-time logs.
-- **Browse Tab:** Discovery interface for finding and installing servers from the official MCP Registry.
+- **Dashboard:** Tabbed interface with multiple views for server management and configuration.
+- **Servers Tab:** Server list, detail views, and real-time logs.
+- **Projects Tab:** Per-project server toggles and project-level configuration.
+- **Plugins Tab:** Plugin management UI with an embedded Shared Skills editor for ownership-managed skill projections.
+- **Settings Tab:** Global configuration and preferences.
 
 ## Building and Installing Locally
 

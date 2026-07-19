@@ -67,7 +67,7 @@ export { parseSource } from "./plugin-source.js";
 export { readManifest, discoverComponents, hasManifest } from "./plugin-parse.js";
 
 // Plugin management functions
-export { inspectPlugin, installPlugin, preparePlugin, updatePlugin, uninstallPlugin, enablePlugin, disablePlugin, approvePluginComponent, getPluginStatus, listPlugins, pluginConfigSet, pluginSync, resolvePluginId } from "./plugin-manager.js";
+export { inspectPlugin, installPlugin, preparePlugin, updatePlugin, uninstallPlugin, enablePlugin, disablePlugin, setPluginProjectOverride, approvePluginComponent, getPluginStatus, listPlugins, pluginConfigSet, pluginSync, resolvePluginId } from "./plugin-manager.js";
 
 // Paths
 export { getConfigPath, getManagedIndexPath } from "./paths.js";
@@ -118,5 +118,6 @@ export type {
   DiscoveredComponents,
   DiscoveredComponent,
   PluginSyncInput,
-  PluginSyncResult
+  PluginSyncResult,
+  Skill
 } from "../types.js";

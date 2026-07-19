@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Toggle } from "./ui/Toggle";
 import { formatTokenApprox } from "../utils/tokenHelper";
 import { ContextBudgetCard } from "./ContextBudgetCard";
 import { ConfirmDialog } from "./ConfirmDialog";
+import type { ManagedPlugin } from "@mcpx/core";
 
 interface ServerEntry {
   name: string;
@@ -42,9 +43,24 @@ export function ProjectsTab({ status, onRefresh, selectedProjectPath, onSelected
   const [success, setSuccess] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<{ path: string; name: string } | null>(null);
+  const [plugins, setPlugins] = useState<ManagedPlugin[]>([]);
 
   const projects = Object.values(status.projects ?? {});
   const selectedProject = projects.find((p) => p.path === selectedProjectPath) ?? null;
+
+  async function loadPlugins() {
+    try {
+      const list = await window.mcpx.plugins.list();
+      setPlugins(list as ManagedPlugin[]);
+    } catch (err) {
+      setPlugins([]);
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  useEffect(() => {
+    loadPlugins();
+  }, []);
 
   // Handle opening directory selector
   const handleSelectDirectory = async () => {
@@ -130,6 +146,16 @@ export function ProjectsTab({ status, onRefresh, selectedProjectPath, onSelected
       onRefresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to toggle server state");
+    }
+  };
+
+  const handleTogglePlugin = async (plugin: ManagedPlugin, effectiveEnabled: boolean) => {
+    if (!selectedProject) return;
+    try {
+      await window.mcpx.plugins.setProjectOverride(plugin.id, selectedProject.path, { enabled: !effectiveEnabled });
+      await loadPlugins();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to toggle plugin state");
     }
   };
 
@@ -227,6 +253,56 @@ export function ProjectsTab({ status, onRefresh, selectedProjectPath, onSelected
                                   id={`toggle-${server.name}`}
                                   checked={effectiveEnabled}
                                   onChange={() => handleToggleServer(server.name, effectiveEnabled)}
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              <div className="project-mcp-section">
+                <h3>Plugins</h3>
+                <p className="section-description">
+                  These are your installed plugins. Toggle each one on or off for this project specifically.
+                  Changing it here only affects this project — the plugin stays as configured globally for other directories.
+                </p>
+
+                {plugins.length === 0 ? (
+                  <div className="empty-mcp-placeholder">
+                    <span className="material-symbols-outlined">info</span>
+                    <p>No plugins installed.</p>
+                    <p className="hint">
+                      Install plugins from the Plugins tab.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="project-mcp-list">
+                    {plugins.map((plugin) => {
+                      const effectiveEnabled = plugin.projectOverrides?.[selectedProject.path]?.enabled ?? plugin.enabled;
+                      return (
+                        <div key={plugin.id} className="project-mcp-row">
+                          <div className="project-mcp-info">
+                            <div className="project-mcp-name-row">
+                              <span className="mcp-name">{plugin.name}</span>
+                              <span className="mcp-transport-badge">v{plugin.version}</span>
+                            </div>
+                            <span className="mcp-target-command mono-text" title={plugin.source}>
+                              {plugin.source}
+                            </span>
+                          </div>
+
+                          <div className="project-mcp-controls">
+                            <div className="toggle-container">
+                              <span className="toggle-status-label">
+                                {effectiveEnabled ? "Enabled" : "Disabled"}
+                              </span>
+                              <Toggle
+                                  id={`toggle-plugin-${plugin.id}`}
+                                  checked={effectiveEnabled}
+                                  onChange={() => handleTogglePlugin(plugin, effectiveEnabled)}
                               />
                             </div>
                           </div>

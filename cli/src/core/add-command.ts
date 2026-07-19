@@ -111,7 +111,9 @@ export function parseCliAddCommand(command: string): { name: string; spec: Upstr
     return parseStandardAdd(parts.slice(1));
   }
 
-  return parseStandardAdd(parts);
+  throw new Error(
+    'Unrecognized command. Supported forms: "add <name> <url|command>", "claude mcp add ...", "codex mcp add ...", "qwen mcp add ...", "code --add-mcp ...", "openclaw mcp add ...", "hermes mcp add ...".'
+  );
 }
 
 function parseStandardAdd(args: string[]): { name: string; spec: UpstreamServerSpec } {

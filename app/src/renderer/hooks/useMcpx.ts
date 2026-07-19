@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { StatusReport } from "@mcpx/core";
 
 let inFlight: Promise<unknown> | null = null;
 
 export function useStatus() {
-  const [status, setStatus] = useState<unknown>(null);
+  const [status, setStatus] = useState<StatusReport | null>(null);
   const [loading, setLoading] = useState(true);
   const hasStatus = useRef(false);
 

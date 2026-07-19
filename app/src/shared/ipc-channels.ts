@@ -41,6 +41,7 @@ export const IPC = {
   PLUGIN_UNINSTALL: "mcpx:plugin-uninstall",
   PLUGIN_ENABLE: "mcpx:plugin-enable",
   PLUGIN_DISABLE: "mcpx:plugin-disable",
+  PLUGIN_SET_PROJECT_OVERRIDE: "mcpx:plugin-set-project-override",
   PLUGIN_APPROVE: "mcpx:plugin-approve",
   PLUGIN_CONFIG_SET: "mcpx:plugin-config-set",
   PLUGIN_SYNC: "mcpx:plugin-sync",

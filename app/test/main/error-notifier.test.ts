@@ -20,6 +20,7 @@ vi.mock("../../src/main/dashboard", () => ({
 }));
 
 const { computeErrorNotifications } = await import("../../src/main/error-notifier");
+const { GATEWAY_FETCH_TIMEOUT_MS } = await import("../../src/shared/timeouts");
 
 describe("computeErrorNotifications", () => {
   it("fires once on a new runtimeError", () => {
@@ -112,5 +113,11 @@ describe("computeErrorNotifications", () => {
     const second = computeErrorNotifications(empty, first.nextNotified);
     expect(second.toNotify).toHaveLength(0);
     expect(second.nextNotified.has("Railway")).toBe(false);
+  });
+});
+
+describe("shared timeout constant", () => {
+  it("GATEWAY_FETCH_TIMEOUT_MS is 5000ms", () => {
+    expect(GATEWAY_FETCH_TIMEOUT_MS).toBe(5000);
   });
 });

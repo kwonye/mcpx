@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
+import type { Skill } from "@mcpx/core";
 
 export function useSkills() {
-  const [skills, setSkills] = useState<any[]>([]);
+  const [skills, setSkills] = useState<Skill[]>([]);
   const [loading, setLoading] = useState(true);
 
   const refresh = useCallback(async () => {

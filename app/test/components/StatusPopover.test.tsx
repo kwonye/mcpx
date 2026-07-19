@@ -4,12 +4,15 @@ import { StatusPopover } from "../../src/renderer/components/StatusPopover";
 
 const mockMcpx = {
   getStatus: vi.fn().mockResolvedValue({
+    gatewayUrl: "http://127.0.0.1:37373",
     daemon: { running: true, pid: 1234, pidFile: "", logFile: "", port: 37373 },
     upstreamCount: 3,
     servers: [
-      { name: "vercel", enabled: true, transport: "http", target: "https://mcp.vercel.com", authBindings: [], clients: [{ clientId: "claude", status: "ERROR", managed: true }] },
+      { name: "vercel", enabled: true, transport: "http", target: "https://mcp.vercel.com", authBindings: [], clients: [{ clientId: "claude", status: "ERROR", managed: true }], tokenCount: { tools: 12, resources: 0, prompts: 0, total: 1200 } },
       { name: "github", enabled: false, transport: "http", target: "https://mcp.github.com", authBindings: [], clients: [{ clientId: "claude", status: "SYNCED", managed: true }] }
-    ]
+    ],
+    clients: {},
+    totalGlobalTokens: 5000
   }),
   syncAll: vi.fn(),
   daemonStart: vi.fn().mockResolvedValue(undefined),
@@ -56,9 +59,11 @@ describe("StatusPopover", () => {
 
   it("shows daemon toggle button in footer when stopped", async () => {
     mockMcpx.getStatus.mockResolvedValueOnce({
+      gatewayUrl: "http://127.0.0.1:37373",
       daemon: { running: false, pid: undefined, pidFile: "", logFile: "", port: 37373 },
       upstreamCount: 3,
-      servers: []
+      servers: [],
+      clients: {}
     });
 
     render(<StatusPopover />);
@@ -113,6 +118,15 @@ describe("StatusPopover", () => {
     fireEvent.click(await screen.findByLabelText(/Disable vercel/i));
 
     expect(mockMcpx.setServerEnabled).toHaveBeenCalledWith("vercel", false);
+  });
+
+  it("renders global and per-server token counts from the typed status report", async () => {
+    render(<StatusPopover />);
+
+    // Global total from report.totalGlobalTokens, shown in the header subtitle.
+    expect(await screen.findByText(/~5k Tokens/)).toBeDefined();
+    // Per-server badge from server.tokenCount.total (vercel only; github has no tokenCount).
+    expect(await screen.findByText("~1k")).toBeDefined();
   });
 
   it("renders the CliCommandInput (Add Server) panel inside the popover", async () => {

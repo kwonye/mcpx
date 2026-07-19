@@ -3,6 +3,8 @@ import type { IpcRendererEvent } from "electron";
 import { IPC } from "../shared/ipc-channels";
 import type { DesktopSettingsPatch } from "../shared/desktop-settings";
 
+const ALLOWED_CHANNELS = new Set<string>(Object.values(IPC));
+
 const api = {
   getStatus: () => ipcRenderer.invoke(IPC.GET_STATUS),
   getServers: () => ipcRenderer.invoke(IPC.GET_SERVERS),
@@ -41,6 +43,8 @@ const api = {
     uninstall: (name: string, options?: unknown) => ipcRenderer.invoke(IPC.PLUGIN_UNINSTALL, name, options),
     enable: (name: string) => ipcRenderer.invoke(IPC.PLUGIN_ENABLE, name),
     disable: (name: string) => ipcRenderer.invoke(IPC.PLUGIN_DISABLE, name),
+    setProjectOverride: (name: string, projectPath: string, override: { enabled?: boolean; components?: Partial<Record<string, boolean>> }) =>
+      ipcRenderer.invoke(IPC.PLUGIN_SET_PROJECT_OVERRIDE, name, projectPath, override),
     approve: (name: string, component: string) => ipcRenderer.invoke(IPC.PLUGIN_APPROVE, name, component),
     configSet: (name: string, key: string, value: string, options?: unknown) =>
       ipcRenderer.invoke(IPC.PLUGIN_CONFIG_SET, name, key, value, options),
@@ -53,7 +57,12 @@ const api = {
   setProjectServerEnabled: (projectPath: string, serverName: string, enabled: boolean) =>
     ipcRenderer.invoke(IPC.PROJECT_SET_SERVER_ENABLED, projectPath, serverName, enabled),
   selectDirectory: () => ipcRenderer.invoke(IPC.SELECT_DIRECTORY) as Promise<string | null>,
-  invoke: (channel: string, ...args: unknown[]) => ipcRenderer.invoke(channel, ...args)
+  invoke: (channel: string, ...args: unknown[]) => {
+    if (!ALLOWED_CHANNELS.has(channel)) {
+      throw new Error(`Unknown IPC channel: ${channel}`);
+    }
+    return ipcRenderer.invoke(channel, ...args);
+  }
 };
 
 contextBridge.exposeInMainWorld("mcpx", api);

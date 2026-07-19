@@ -1,6 +1,7 @@
 import { Notification } from "electron";
 import { loadConfig, getDaemonStatus, SecretsManager, ensureGatewayToken } from "@mcpx/core";
 import { describeTokenError } from "../shared/token-error";
+import { GATEWAY_FETCH_TIMEOUT_MS } from "../shared/timeouts";
 import { loadDesktopSettings } from "./settings-store";
 import { openDashboard } from "./dashboard";
 
@@ -25,7 +26,6 @@ export interface ComputeResult {
 }
 
 const CHECK_INTERVAL_MS = 45_000;
-const FETCH_TIMEOUT_MS = 5000;
 
 function deriveKind(count: TokenCountEntry): ErrorKind | null {
   // Prefer structured codes when available
@@ -128,7 +128,7 @@ async function pollOnce(): Promise<void> {
   }
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  const timeout = setTimeout(() => controller.abort(), GATEWAY_FETCH_TIMEOUT_MS);
   try {
     const res = await fetch(`http://127.0.0.1:${config.gateway.port}/mcp`, {
       method: "POST",

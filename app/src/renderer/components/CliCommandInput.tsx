@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { IPC } from "../../shared/ipc-channels";
+import { AUTO_DISMISS_DELAY_MS, useAutoDismiss } from "../hooks/useAutoDismiss";
 
 interface CliCommandInputProps {
   onServerAdded: () => void;
@@ -8,8 +9,8 @@ interface CliCommandInputProps {
 export function CliCommandInput({ onServerAdded }: CliCommandInputProps) {
   const [command, setCommand] = useState("");
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
+  const [error, setError] = useAutoDismiss<string>(AUTO_DISMISS_DELAY_MS);
+  const [success, setSuccess] = useAutoDismiss<string>(AUTO_DISMISS_DELAY_MS);
   const supportedCommands = [
     "claude mcp add",
     "codex mcp add",

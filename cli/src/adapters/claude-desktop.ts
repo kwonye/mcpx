@@ -2,8 +2,9 @@ import { execFileSync } from "node:child_process";
 import { homeDir } from "../core/paths.js";
 import path from "node:path";
 import { z } from "zod";
-import type { ClientAdapter, ManagedIndex, ManagedGatewayEntry, McpxConfig, SyncClientOptions, SyncResult, PluginSyncInput, PluginSyncResult } from "../types.js";
+import type { ClientAdapter, ManagedIndex, ManagedGatewayEntry, McpxConfig, Skill, SyncClientOptions, SyncResult, PluginSyncInput, PluginSyncResult } from "../types.js";
 import { syncPluginsToClient } from "../core/plugin-projections.js";
+import { projectSkillsToDir } from "../core/skill-projections.js";
 import { readJsonFile, writeJsonAtomic } from "../util/fs.js";
 import {
   buildImportSkip,
@@ -68,6 +69,14 @@ export class ClaudeDesktopAdapter implements ClientAdapter {
 
   syncPlugins(plugins: PluginSyncInput[]): PluginSyncResult {
     return syncPluginsToClient(this.id, plugins);
+  }
+
+  syncSkills(skills: Skill[]): void {
+    const configPath = this.detectConfigPath();
+    if (!configPath) {
+      return;
+    }
+    projectSkillsToDir(path.join(path.dirname(configPath), "skills"), skills, "dir");
   }
 
   scanForImports(_config: McpxConfig, managedIndex: ManagedIndex) {

@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import {
   loadConfig,
-  saveConfig,
+  mutateConfig,
   loadMergedConfig,
   registerProject,
   unregisterProject,
@@ -18,7 +18,6 @@ import {
   removeServer,
   setServerEnabled,
   updateServer,
-  listAuthBindings,
   listSkills,
   getSkill,
   saveSkill,
@@ -34,12 +33,12 @@ import {
   parseCliAddCommand,
   tokenizeCommandLine,
   runOAuthLogin,
-  PluginManager,
   ensureGatewayToken
 } from "@mcpx/core";
 import type { HttpServerSpec, StdioServerSpec, UpstreamServerSpec } from "@mcpx/core";
 import { IPC } from "../shared/ipc-channels";
 import type { DesktopSettingsPatch } from "../shared/desktop-settings";
+import { GATEWAY_FETCH_TIMEOUT_MS } from "../shared/timeouts";
 import { openDashboard } from "./dashboard";
 import { loadDesktopSettings, updateDesktopSettings } from "./settings-store";
 import { applyStartOnLoginSetting } from "./login-item";
@@ -62,7 +61,7 @@ async function refreshTokenCountsSoon(): Promise<void> {
   }
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 2000);
+  const timeout = setTimeout(() => controller.abort(), GATEWAY_FETCH_TIMEOUT_MS);
   try {
     await fetch(`http://127.0.0.1:${config.gateway.port}/mcp`, {
       method: "POST",
@@ -153,13 +152,15 @@ export function registerIpcHandlers(): void {
   });
 
   ipcMain.handle(IPC.ADD_SERVER, async (_event, name: string, spec: UpstreamServerSpec) => {
-    const config = loadConfig();
-    addServer(config, name, spec, true);
-    saveConfig(config);
+    await mutateConfig((config) => {
+      addServer(config, name, spec, true);
+    });
     const secrets = new SecretsManager();
+    const config = loadConfig();
     const summary = syncAllClients(config, secrets);
-    persistSyncState(summary, config);
-    saveConfig(config);
+    await mutateConfig((freshConfig) => {
+      persistSyncState(summary, freshConfig);
+    });
     queueTokenCountRefresh();
 
     const result: { added: string; sync: typeof summary; authRequired?: boolean; authStatus?: number; oauthLikely?: boolean } = { added: name, sync: summary };
@@ -188,12 +189,17 @@ export function registerIpcHandlers(): void {
     const finalValue = maybePrefixBearer(target, authValue, raw ?? false);
     secrets.setSecret(resolvedSecretName, finalValue);
 
-    applyAuthReference(spec, target, toSecretRef(resolvedSecretName));
-    saveConfig(config);
+    await mutateConfig((freshConfig) => {
+      const freshSpec = freshConfig.servers[serverName];
+      if (!freshSpec) throw new Error(`Server "${serverName}" not found`);
+      applyAuthReference(freshSpec, target, toSecretRef(resolvedSecretName));
+    });
 
-    const summary = syncAllClients(config, secrets);
-    persistSyncState(summary, config);
-    saveConfig(config);
+    const syncSourceConfig = loadConfig();
+    const summary = syncAllClients(syncSourceConfig, secrets);
+    await mutateConfig((freshConfig) => {
+      persistSyncState(summary, freshConfig);
+    });
     queueTokenCountRefresh();
 
     dismissPendingAuth(serverName);
@@ -231,43 +237,49 @@ export function registerIpcHandlers(): void {
     return result;
   });
 
-  ipcMain.handle(IPC.REMOVE_SERVER, (_event, name: string) => {
-    const config = loadConfig();
-    removeServer(config, name, false);
-    saveConfig(config);
+  ipcMain.handle(IPC.REMOVE_SERVER, async (_event, name: string) => {
+    await mutateConfig((config) => {
+      removeServer(config, name, false);
+    });
     const secrets = new SecretsManager();
+    const config = loadConfig();
     const summary = syncAllClients(config, secrets);
-    persistSyncState(summary, config);
-    saveConfig(config);
+    await mutateConfig((freshConfig) => {
+      persistSyncState(summary, freshConfig);
+    });
     queueTokenCountRefresh();
     return { removed: name, sync: summary };
   });
 
-  ipcMain.handle(IPC.SET_SERVER_ENABLED, (_event, name: string, enabled: boolean) => {
-    const config = loadConfig();
-    setServerEnabled(config, name, enabled);
-    saveConfig(config);
+  ipcMain.handle(IPC.SET_SERVER_ENABLED, async (_event, name: string, enabled: boolean) => {
+    await mutateConfig((config) => {
+      setServerEnabled(config, name, enabled);
+    });
     const secrets = new SecretsManager();
+    const config = loadConfig();
     const summary = syncAllClients(config, secrets);
-    persistSyncState(summary, config);
-    saveConfig(config);
+    await mutateConfig((freshConfig) => {
+      persistSyncState(summary, freshConfig);
+    });
     queueTokenCountRefresh();
     return { updated: name, enabled, sync: summary };
   });
 
-  ipcMain.handle(IPC.PROJECT_SET_SERVER_ENABLED, (_event, projectPath: string, serverName: string, enabled: boolean) => {
-    const config = loadConfig();
-    const result = setProjectServerEnabled(config, projectPath, serverName, enabled);
-    saveConfig(config);
+  ipcMain.handle(IPC.PROJECT_SET_SERVER_ENABLED, async (_event, projectPath: string, serverName: string, enabled: boolean) => {
+    const result = await mutateConfig((config) => {
+      return setProjectServerEnabled(config, projectPath, serverName, enabled);
+    });
     const secrets = new SecretsManager();
+    const config = loadConfig();
     const summary = syncAllClients(config, secrets);
-    persistSyncState(summary, config);
-    saveConfig(config);
+    await mutateConfig((freshConfig) => {
+      persistSyncState(summary, freshConfig);
+    });
     queueTokenCountRefresh();
     return { updated: serverName, projectPath, enabled, sync: summary, effective: result.effective, reason: result.reason };
   });
 
-  ipcMain.handle(IPC.UPDATE_SERVER, (_event, name: string, spec: UpstreamServerSpec, resolvedSecrets?: Record<string, string>) => {
+  ipcMain.handle(IPC.UPDATE_SERVER, async (_event, name: string, spec: UpstreamServerSpec, resolvedSecrets?: Record<string, string>) => {
     const secrets = new SecretsManager();
     
     // Store any new secret values before updating the server
@@ -307,48 +319,55 @@ export function registerIpcHandlers(): void {
       }
     }
     
+    await mutateConfig((config) => {
+      updateServer(config, name, spec);
+    });
     const config = loadConfig();
-    updateServer(config, name, spec);
-    saveConfig(config);
     const summary = syncAllClients(config, secrets);
-    persistSyncState(summary, config);
-    saveConfig(config);
+    await mutateConfig((freshConfig) => {
+      persistSyncState(summary, freshConfig);
+    });
     queueTokenCountRefresh();
     return { updated: name, sync: summary };
   });
 
-  ipcMain.handle(IPC.SYNC_ALL, () => {
+  ipcMain.handle(IPC.SYNC_ALL, async () => {
     const config = loadConfig();
     const secrets = new SecretsManager();
     const summary = syncAllClients(config, secrets);
-    persistSyncState(summary, config);
-    saveConfig(config);
+    await mutateConfig((freshConfig) => {
+      persistSyncState(summary, freshConfig);
+    });
     queueTokenCountRefresh();
     return summary;
   });
 
-  ipcMain.handle(IPC.PROJECT_INIT, (_event, projectPath: string, name: string) => {
-    const config = loadConfig();
-    registerProject(config, projectPath, name);
-    saveConfig(config);
+  ipcMain.handle(IPC.PROJECT_INIT, async (_event, projectPath: string, name: string) => {
+    await mutateConfig((config) => {
+      registerProject(config, projectPath, name);
+    });
 
     const secrets = new SecretsManager();
+    const config = loadConfig();
     const summary = syncAllClients(config, secrets);
-    persistSyncState(summary, config);
-    saveConfig(config);
+    await mutateConfig((freshConfig) => {
+      persistSyncState(summary, freshConfig);
+    });
     queueTokenCountRefresh();
     return { success: true, sync: summary };
   });
 
-  ipcMain.handle(IPC.PROJECT_REMOVE, (_event, projectPath: string) => {
-    const config = loadConfig();
-    unregisterProject(config, projectPath);
-    saveConfig(config);
-    
+  ipcMain.handle(IPC.PROJECT_REMOVE, async (_event, projectPath: string) => {
+    await mutateConfig((config) => {
+      unregisterProject(config, projectPath);
+    });
+
     const secrets = new SecretsManager();
+    const config = loadConfig();
     const summary = syncAllClients(config, secrets);
-    persistSyncState(summary, config);
-    saveConfig(config);
+    await mutateConfig((freshConfig) => {
+      persistSyncState(summary, freshConfig);
+    });
     queueTokenCountRefresh();
     return { success: true, sync: summary };
   });
@@ -396,33 +415,37 @@ export function registerIpcHandlers(): void {
   });
 
   ipcMain.handle(IPC.EXECUTE_CLI_COMMAND, async (_event, command: string) => {
+    let parsed: ReturnType<typeof parseCliAddCommand>;
     try {
-      const { name, spec } = parseCliAddCommand(command);
-      const config = loadConfig();
-      addServer(config, name, spec, true);
-      saveConfig(config);
-      const secrets = new SecretsManager();
-      const summary = syncAllClients(config, secrets);
-      persistSyncState(summary, config);
-      saveConfig(config);
-      queueTokenCountRefresh();
-
-      const result: { added: string; sync: typeof summary; authRequired?: boolean; authStatus?: number; oauthLikely?: boolean } = { added: name, sync: summary };
-
-      if (spec.transport === "http") {
-        const probe = await probeHttpAuthRequirement(spec, secrets);
-        if (probe.authRequired) {
-          result.authRequired = true;
-          result.authStatus = probe.status;
-          result.oauthLikely = probe.oauthLikely;
-          queuePendingAuth({ serverName: name, oauthLikely: probe.oauthLikely, status: probe.status });
-        }
-      }
-
-      return result;
+      parsed = parseCliAddCommand(command);
     } catch (error) {
       throw new Error(`Failed to parse command: ${error instanceof Error ? error.message : String(error)}`);
     }
+    const { name, spec } = parsed;
+    await mutateConfig((config) => {
+      addServer(config, name, spec, true);
+    });
+    const secrets = new SecretsManager();
+    const config = loadConfig();
+    const summary = syncAllClients(config, secrets);
+    await mutateConfig((freshConfig) => {
+      persistSyncState(summary, freshConfig);
+    });
+    queueTokenCountRefresh();
+
+    const result: { added: string; sync: typeof summary; authRequired?: boolean; authStatus?: number; oauthLikely?: boolean } = { added: name, sync: summary };
+
+    if (spec.transport === "http") {
+      const probe = await probeHttpAuthRequirement(spec, secrets);
+      if (probe.authRequired) {
+        result.authRequired = true;
+        result.authStatus = probe.status;
+        result.oauthLikely = probe.oauthLikely;
+        queuePendingAuth({ serverName: name, oauthLikely: probe.oauthLikely, status: probe.status });
+      }
+    }
+
+    return result;
   });
 
   // Skills
@@ -482,6 +505,12 @@ export function registerIpcHandlers(): void {
     const { disablePlugin } = await import("@mcpx/core");
     await disablePlugin(name);
     return { name, success: true };
+  });
+
+  ipcMain.handle(IPC.PLUGIN_SET_PROJECT_OVERRIDE, async (_event, name: string, projectPath: string, override: { enabled?: boolean; components?: Partial<Record<string, boolean>> }) => {
+    const { setPluginProjectOverride } = await import("@mcpx/core");
+    await setPluginProjectOverride(name, projectPath, override);
+    return { name, projectPath, override, success: true };
   });
 
   ipcMain.handle(IPC.PLUGIN_APPROVE, async (_event, name: string, component: string) => {
