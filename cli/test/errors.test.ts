@@ -48,6 +48,27 @@ describe("upstream error taxonomy", () => {
     expect(classified.code).toBe("unreachable");
   });
 
+  it("classifies Bun connection-refused errors as unreachable", () => {
+    // Actual shape thrown by Bun's native fetch for a refused connection (or DNS failure)
+    const err = Object.assign(new Error("Unable to connect. Is the computer able to access the url?"), {
+      code: "ConnectionRefused"
+    });
+    const classified = classifyUpstreamError("test-server", err);
+    expect(classified.code).toBe("unreachable");
+  });
+
+  it("classifies a ConnectionRefused error code as unreachable regardless of message", () => {
+    const err = Object.assign(new Error("some other wording"), { code: "ConnectionRefused" });
+    const classified = classifyUpstreamError("test-server", err);
+    expect(classified.code).toBe("unreachable");
+  });
+
+  it("classifies a Bun unable-to-connect message as unreachable without an error code", () => {
+    const err = new Error("Unable to connect. Is the computer able to access the url?");
+    const classified = classifyUpstreamError("test-server", err);
+    expect(classified.code).toBe("unreachable");
+  });
+
   it("classifies unknown errors as upstream_error", () => {
     const err = new Error("Internal server error");
     const classified = classifyUpstreamError("test-server", err);

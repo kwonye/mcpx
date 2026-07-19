@@ -42,7 +42,12 @@ const UNREACHABLE_PATTERNS = [
   /socket hang up/,
   /ENOENT/,
   /connect econnrefused/i,
+  /unable to connect/i,
 ];
+// Bun's native fetch reports connection-level failures with a string `code`
+// instead of a Node-style message; "ConnectionRefused" covers both refused
+// connections and DNS failures (verified on Bun 1.3).
+const UNREACHABLE_ERROR_CODES = new Set(["ConnectionRefused"]);
 
 export function classifyUpstreamError(
   upstream: string,
@@ -57,7 +62,7 @@ export function classifyUpstreamError(
   const message = error instanceof Error ? error.message : String(error);
 
   // StreamableHTTPError check (duck-typing since SDK may not export it)
-  const maybeHttpError = error as { code?: number; message?: string } | undefined;
+  const maybeHttpError = error as { code?: number | string; message?: string } | undefined;
   if (maybeHttpError?.code && (maybeHttpError.code === 401 || maybeHttpError.code === 403)) {
     return new UpstreamError(upstream, "auth_required", message, {
       status: maybeHttpError.code,
@@ -69,7 +74,10 @@ export function classifyUpstreamError(
     return new UpstreamError(upstream, "timeout", message);
   }
 
-  if (UNREACHABLE_PATTERNS.some((p) => p.test(message))) {
+  if (
+    (typeof maybeHttpError?.code === "string" && UNREACHABLE_ERROR_CODES.has(maybeHttpError.code)) ||
+    UNREACHABLE_PATTERNS.some((p) => p.test(message))
+  ) {
     return new UpstreamError(upstream, "unreachable", message);
   }
 
