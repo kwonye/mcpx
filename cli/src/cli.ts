@@ -1903,18 +1903,136 @@ function registerPluginCommands(program: Command, _cliPath: string): void {
     .command("install <source>")
     .option("--name <name>", "Plugin name")
     .option("--no-enable", "Don't enable plugin after install")
+    .option("-y, --yes", "Confirm marketplace plugin installation")
     .description("Install plugin")
-    .action(async (source: string, options: { name?: string; noEnable?: boolean }) => {
-      const { installPlugin } = await import("./core/plugin-manager.js");
+    .action(async (source: string, options: { name?: string; enable?: boolean; yes?: boolean }) => {
       try {
-        const p = await installPlugin(source, {
-          name: options.name,
-          enabled: !options.noEnable,
-        });
+        const config = loadConfig();
+        const marketplaceName = source.includes("@") ? source.slice(source.lastIndexOf("@") + 1) : "";
+        let p;
+        if (config.marketplaces?.[marketplaceName]) {
+          const { inspectMarketplacePlugin, installMarketplacePlugin } = await import("./core/marketplace.js");
+          const detail = await inspectMarketplacePlugin(source);
+          process.stdout.write(`${detail.displayName} (${source})\n`);
+          process.stdout.write(`Will install: ${detail.supportedCapabilities.join(", ") || "nothing compatible"}\n`);
+          if (detail.unsupportedCapabilities.length) process.stdout.write(`Unsupported: ${detail.unsupportedCapabilities.join(", ")}\n`);
+          if (!detail.compatible) throw new Error(`Plugin ${source} has no mcpx-compatible capabilities`);
+          if (!options.yes) {
+            if (!process.stdin.isTTY || !process.stdout.isTTY) throw new Error("Marketplace installation requires --yes in non-interactive mode");
+            const rl = createInterface({ input: process.stdin, output: process.stdout });
+            try {
+              const answer = await promptLine(rl, "Install this plugin? (y/N): ");
+              if (answer.trim().toLowerCase() !== "y" && answer.trim().toLowerCase() !== "yes") {
+                process.stdout.write("Installation cancelled.\n");
+                return;
+              }
+            } finally {
+              rl.close();
+            }
+          }
+          p = await installMarketplacePlugin(source);
+        } else {
+          const { installPlugin } = await import("./core/plugin-manager.js");
+          p = await installPlugin(source, { name: options.name, enabled: options.enable !== false });
+        }
         process.stdout.write(`Plugin installed: ${p.id}\n`);
       } catch (e: any) {
         process.stderr.write(`Error: ${e.message}\n`);
         process.exit(1);
+      }
+    });
+
+  const marketplace = plugin.command("marketplace").description("Manage plugin marketplaces");
+
+  marketplace
+    .command("list")
+    .description("List configured plugin marketplaces")
+    .action(async () => {
+      const { listMarketplaces } = await import("./core/marketplace.js");
+      process.stdout.write(JSON.stringify(await listMarketplaces(), null, 2) + "\n");
+    });
+
+  marketplace
+    .command("add <source>")
+    .option("--manifest <path>", "Marketplace manifest path inside the source")
+    .description("Add a Claude or Codex plugin marketplace")
+    .action(async (source: string, options: { manifest?: string }) => {
+      try {
+        const { addMarketplace } = await import("./core/marketplace.js");
+        const added = await addMarketplace(source, options.manifest);
+        process.stdout.write(`Marketplace added: ${added.name}\n`);
+      } catch (error) {
+        process.stderr.write(`Error: ${error instanceof Error ? error.message : String(error)}\n`);
+        process.exitCode = 1;
+      }
+    });
+
+  marketplace
+    .command("update [name]")
+    .description("Refresh one marketplace, or every configured marketplace")
+    .action(async (name?: string) => {
+      try {
+        const { listMarketplaces, refreshMarketplaceWithPlugins } = await import("./core/marketplace.js");
+        const names = name ? [name] : (await listMarketplaces()).map((entry) => entry.name);
+        for (const marketplaceName of names) {
+          const result = await refreshMarketplaceWithPlugins(marketplaceName);
+          process.stdout.write(`Marketplace updated: ${marketplaceName} (${result.updated.length} plugin update(s))\n`);
+          for (const error of result.errors) process.stderr.write(`Warning: ${error}\n`);
+        }
+      } catch (error) {
+        process.stderr.write(`Error: ${error instanceof Error ? error.message : String(error)}\n`);
+        process.exitCode = 1;
+      }
+    });
+
+  marketplace
+    .command("remove <name>")
+    .option("-y, --yes", "Confirm removal and uninstall marketplace plugins")
+    .description("Remove a custom marketplace and its installed plugins")
+    .action(async (name: string, options: { yes?: boolean }) => {
+      try {
+        if (!options.yes) {
+          if (!process.stdin.isTTY || !process.stdout.isTTY) throw new Error("Marketplace removal requires --yes in non-interactive mode");
+          const rl = createInterface({ input: process.stdin, output: process.stdout });
+          try {
+            const answer = await promptLine(rl, `Remove ${name} and uninstall its plugins? (y/N): `);
+            if (!["y", "yes"].includes(answer.trim().toLowerCase())) return;
+          } finally {
+            rl.close();
+          }
+        }
+        const { removeMarketplace } = await import("./core/marketplace.js");
+        await removeMarketplace(name);
+        process.stdout.write(`Marketplace removed: ${name}\n`);
+      } catch (error) {
+        process.stderr.write(`Error: ${error instanceof Error ? error.message : String(error)}\n`);
+        process.exitCode = 1;
+      }
+    });
+
+  plugin
+    .command("discover [query]")
+    .option("--marketplace <name>", "Filter by marketplace")
+    .option("--category <category>", "Filter by category")
+    .description("Browse available marketplace plugins")
+    .action(async (query: string | undefined, options: { marketplace?: string; category?: string }) => {
+      const { listMarketplacePlugins } = await import("./core/marketplace.js");
+      let listings = await listMarketplacePlugins(query);
+      if (options.marketplace) listings = listings.filter((entry) => entry.marketplace === options.marketplace);
+      if (options.category) listings = listings.filter((entry) => entry.category?.toLowerCase() === options.category!.toLowerCase());
+      process.stdout.write(JSON.stringify(listings, null, 2) + "\n");
+    });
+
+  plugin
+    .command("details <plugin>")
+    .description("Inspect a plugin@marketplace listing")
+    .action(async (qualified: string) => {
+      try {
+        const { inspectMarketplacePlugin } = await import("./core/marketplace.js");
+        process.stdout.write(JSON.stringify(await inspectMarketplacePlugin(qualified), null, 2) + "\n");
+      } catch (error) {
+        process.stderr.write(`Error: ${error instanceof Error ? error.message : String(error)}\n`);
+        process.exitCode = 1;
       }
     });
 

@@ -95,6 +95,18 @@ export function getPluginLogsRoot(): string {
   return path.join(getStateRoot(), "mcpx", "plugins", "logs");
 }
 
+export function getMarketplaceCacheRoot(): string {
+  return path.join(getDataRoot(), "mcpx", "marketplaces", "cache");
+}
+
+export function getMarketplaceUpdateStatePath(): string {
+  return path.join(getStateRoot(), "mcpx", "marketplaces", "update-state.json");
+}
+
+export function getMarketplaceUpdateLockPath(): string {
+  return path.join(getStateRoot(), "mcpx", "marketplaces", ".update.lock");
+}
+
 export function ensureDir(dirPath: string): void {
   fs.mkdirSync(dirPath, { recursive: true });
 }

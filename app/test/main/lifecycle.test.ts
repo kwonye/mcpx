@@ -9,6 +9,7 @@ vi.mock("@mcpx/core", () => ({
   stopDaemon: vi.fn(),
   getDaemonStatus: vi.fn(() => ({ running: false })),
   SecretsManager: vi.fn(),
+  startMarketplaceAutoUpdater: vi.fn(),
 }));
 
 function withPlatform(platform: NodeJS.Platform, run: () => void): void {

@@ -62,7 +62,17 @@ const api = {
       invokeIpc(IPC.PLUGIN_CONFIG_SET, name, key, value, options),
     sync: (name?: string, options?: unknown) => invokeIpc(IPC.PLUGIN_SYNC, name, options),
     status: (name?: string) => invokeIpc(IPC.PLUGIN_STATUS, name),
-    list: () => invokeIpc(IPC.PLUGIN_LIST)
+    list: () => invokeIpc(IPC.PLUGIN_LIST),
+    marketplaces: {
+      list: () => invokeIpc(IPC.MARKETPLACE_LIST),
+      add: (source: string, manifestPath?: string) => invokeIpc(IPC.MARKETPLACE_ADD, source, manifestPath),
+      refresh: (name: string) => invokeIpc(IPC.MARKETPLACE_REFRESH, name),
+      remove: (name: string) => invokeIpc(IPC.MARKETPLACE_REMOVE, name),
+      setAutoUpdate: (name: string, enabled: boolean) => invokeIpc(IPC.MARKETPLACE_SET_AUTO_UPDATE, name, enabled),
+      browse: (query?: string) => invokeIpc(IPC.MARKETPLACE_BROWSE, query),
+      inspectPlugin: (id: string) => invokeIpc(IPC.MARKETPLACE_INSPECT_PLUGIN, id),
+      installPlugin: (id: string) => invokeIpc(IPC.MARKETPLACE_INSTALL_PLUGIN, id)
+    }
   },
   projectInit: (projectPath: string, name: string) => invokeIpc(IPC.PROJECT_INIT, projectPath, name),
   projectRemove: (projectPath: string) => invokeIpc(IPC.PROJECT_REMOVE, projectPath),

@@ -11,6 +11,7 @@ import { syncAllClients, persistSyncState } from "./sync.js";
 import { startBackgroundUpdateCheck } from "./update-manager.js";
 import { withManagedIndexLock } from "./managed-index-lock.js";
 import { getManagedIndexPath } from "./paths.js";
+import { startMarketplaceAutoUpdater } from "./marketplace-updater.js";
 
 export interface DaemonStatus {
   running: boolean;
@@ -297,8 +298,10 @@ export function runDaemonForeground(config: McpxConfig, port: number, secrets: S
       expectedToken: token,
       secrets
     });
+    const stopMarketplaceUpdater = startMarketplaceAutoUpdater();
 
     const cleanup = () => {
+      stopMarketplaceUpdater();
       server.close(() => resolve());
     };
 

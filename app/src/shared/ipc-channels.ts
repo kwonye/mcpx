@@ -47,5 +47,13 @@ export const IPC = {
   PLUGIN_CONFIG_SET: "mcpx:plugin-config-set",
   PLUGIN_SYNC: "mcpx:plugin-sync",
   PLUGIN_STATUS: "mcpx:plugin-status",
-  PLUGIN_LIST: "mcpx:plugin-list"
+  PLUGIN_LIST: "mcpx:plugin-list",
+  MARKETPLACE_LIST: "mcpx:marketplace-list",
+  MARKETPLACE_ADD: "mcpx:marketplace-add",
+  MARKETPLACE_REFRESH: "mcpx:marketplace-refresh",
+  MARKETPLACE_REMOVE: "mcpx:marketplace-remove",
+  MARKETPLACE_SET_AUTO_UPDATE: "mcpx:marketplace-set-auto-update",
+  MARKETPLACE_BROWSE: "mcpx:marketplace-browse",
+  MARKETPLACE_INSPECT_PLUGIN: "mcpx:marketplace-inspect-plugin",
+  MARKETPLACE_INSTALL_PLUGIN: "mcpx:marketplace-install-plugin"
 } as const;

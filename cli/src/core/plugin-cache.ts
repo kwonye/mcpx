@@ -29,6 +29,8 @@ export class PluginCache {
       ? `npm_${source.original.replace(/^npm:/, "").split("@")[0].replace(/[^a-zA-Z0-9_/-]/g, "_")}`
       : source.type === "local"
       ? `local_${source.original.replace(/[^a-zA-Z0-9_/-]/g, "_")}`
+      : source.type === "git-subdir"
+      ? `git_subdir_${`${source.original}/${source.path ?? ""}`.replace(/[^a-zA-Z0-9_./@-]/g, "_")}`
       : `git_${source.original.replace(/[^a-zA-Z0-9_./@-]/g, "_")}`;
     return path.join(this.cacheRoot, key);
   }
@@ -56,7 +58,7 @@ export class PluginCache {
       return sha;
     }
 
-    if (source.type === "git") {
+    if (source.type === "git" || source.type === "git-subdir") {
       const ref = source.ref || "HEAD";
       const output = execFileSync("git", ["ls-remote", source.original, ref], {
         encoding: "utf8",
@@ -96,46 +98,21 @@ export class PluginCache {
 
     ensureDir(srcDir);
 
-    if (source.type === "github") {
-      const repo = source.original.split("@")[0];
+    if (source.type === "github" || source.type === "git" || source.type === "git-subdir") {
+      const remote = source.type === "github"
+        ? `https://github.com/${source.original.split("@")[0]}.git`
+        : source.original;
+      const target = source.resolvedSha || source.ref || "HEAD";
       const tmpDir = fs.mkdtempSync(path.join(this.cacheRoot, TMP_PREFIX));
       try {
-        execFileSync("git", ["clone", "--depth", "1", `https://github.com/${repo}.git`, tmpDir], {
-          stdio: "pipe",
-          timeout: 60000,
-        });
-        const actualSha = execFileSync("git", ["rev-parse", "HEAD"], {
+        execFileSync("git", ["init"], { cwd: tmpDir, stdio: "pipe", timeout: 10000 });
+        execFileSync("git", ["remote", "add", "origin", remote], { cwd: tmpDir, stdio: "pipe", timeout: 10000 });
+        execFileSync("git", ["fetch", "--depth", "1", "origin", target], {
           cwd: tmpDir,
-          encoding: "utf8",
-          timeout: 10000,
-        }).trim();
-
-        // Remove .git for clean cache
-        fs.rmSync(path.join(tmpDir, ".git"), { recursive: true, force: true });
-
-        const finalDest = this.shaDir(srcDir, actualSha);
-        if (fs.existsSync(finalDest)) {
-          fs.rmSync(tmpDir, { recursive: true, force: true });
-          this.updateRef(srcDir, actualSha);
-          return { source: source.original, name: pluginName, sha: actualSha, root: finalDest };
-        }
-
-        fs.renameSync(tmpDir, finalDest);
-        this.updateRef(srcDir, actualSha);
-        return { source: source.original, name: pluginName, sha: actualSha, root: finalDest };
-      } catch (e) {
-        if (fs.existsSync(tmpDir)) fs.rmSync(tmpDir, { recursive: true, force: true });
-        throw e;
-      }
-    }
-
-    if (source.type === "git") {
-      const tmpDir = fs.mkdtempSync(path.join(this.cacheRoot, TMP_PREFIX));
-      try {
-        execFileSync("git", ["clone", "--depth", "1", source.original, tmpDir], {
           stdio: "pipe",
           timeout: 60000,
         });
+        execFileSync("git", ["checkout", "--detach", "FETCH_HEAD"], { cwd: tmpDir, stdio: "pipe", timeout: 10000 });
         const actualSha = execFileSync("git", ["rev-parse", "HEAD"], {
           cwd: tmpDir,
           encoding: "utf8",
@@ -150,7 +127,17 @@ export class PluginCache {
           return { source: source.original, name: pluginName, sha: actualSha, root: finalDest };
         }
 
-        fs.renameSync(tmpDir, finalDest);
+        if (source.type === "git-subdir") {
+          if (!source.path) throw new Error("git-subdir source is missing a path");
+          const subdir = path.resolve(tmpDir, source.path);
+          if (!subdir.startsWith(path.resolve(tmpDir) + path.sep) || !fs.existsSync(subdir)) {
+            throw new Error(`Plugin subdirectory not found: ${source.path}`);
+          }
+          fs.renameSync(subdir, finalDest);
+          fs.rmSync(tmpDir, { recursive: true, force: true });
+        } else {
+          fs.renameSync(tmpDir, finalDest);
+        }
         this.updateRef(srcDir, actualSha);
         return { source: source.original, name: pluginName, sha: actualSha, root: finalDest };
       } catch (e) {

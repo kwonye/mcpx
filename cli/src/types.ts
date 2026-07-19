@@ -54,6 +54,7 @@ export interface McpxConfig {
   clients: Partial<Record<ClientId, ClientSyncState>>;
   projects?: Record<string, ProjectConfig>;
   plugins?: Record<string, ManagedPlugin>;
+  marketplaces?: Record<string, ManagedMarketplace>;
 }
 
 export interface ManagedEntry {
@@ -242,6 +243,7 @@ export interface PluginSource {
   original: string;
   ref?: string;
   resolvedSha?: string;
+  path?: string;
 }
 
 export interface DiscoveredComponent {
@@ -253,10 +255,13 @@ export interface DiscoveredComponent {
 
 export interface DiscoveredMcpServer {
   id: string;
+  transport?: "stdio" | "http";
   command: string;
   args?: string[];
   env?: Record<string, string>;
   cwd?: string;
+  url?: string;
+  oauthResource?: string;
 }
 
 export interface DiscoveredComponents {
@@ -275,6 +280,60 @@ export interface PluginManifest {
   icon?: string;
   assets?: string[];
   entry?: string;
+  author?: { name: string; email?: string; url?: string };
+  homepage?: string;
+  repository?: string;
+  license?: string;
+  keywords?: string[];
+  displayName?: string;
+  category?: string;
+  declaredCapabilities?: string[];
+}
+
+export type MarketplaceFormat = "claude" | "codex";
+export type MarketplaceSourceType = "github" | "git" | "local" | "hosted-json";
+
+export interface ManagedMarketplace {
+  name: string;
+  displayName: string;
+  source: string;
+  sourceType: MarketplaceSourceType;
+  manifestPath?: string;
+  format?: MarketplaceFormat;
+  builtIn: boolean;
+  autoUpdate: boolean;
+  addedAt: string;
+  lastCheckedAt?: string;
+  lastUpdatedAt?: string;
+  resolvedRevision?: string;
+  status: "ready" | "stale" | "error" | "unavailable";
+  error?: string;
+}
+
+export interface MarketplaceListing {
+  id: string;
+  name: string;
+  displayName: string;
+  marketplace: string;
+  description?: string;
+  author?: { name: string; email?: string; url?: string };
+  homepage?: string;
+  version?: string;
+  category?: string;
+  tags: string[];
+  source: unknown;
+  supportedCapabilities: string[];
+  unsupportedCapabilities: string[];
+  compatible: boolean;
+  installed: boolean;
+  authentication?: string;
+}
+
+export interface MarketplacePluginDetail extends MarketplaceListing {
+  manifest: PluginManifest | null;
+  discovered: DiscoveredComponents;
+  resolvedSource?: string;
+  sourceFingerprint?: string;
 }
 
 export interface ManagedPlugin {
@@ -296,6 +355,12 @@ export interface ManagedPlugin {
   projectedClients: string[];
   config?: Record<string, unknown>;
   approvals?: Partial<Record<PluginComponent, boolean>>;
+  marketplace?: {
+    name: string;
+    pluginName: string;
+    sourceFingerprint: string;
+  };
+  updateError?: string;
   projectOverrides?: Record<string, {
     enabled?: boolean;
     components?: Partial<Record<PluginComponent, boolean>>;

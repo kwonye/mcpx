@@ -546,4 +546,45 @@ export function registerIpcHandlers(): void {
     await pluginSync();
     return { success: true };
   });
+
+  ipcMain.handle(IPC.MARKETPLACE_LIST, async () => {
+    const { listMarketplaces } = await import("@mcpx/core");
+    return listMarketplaces();
+  });
+
+  ipcMain.handle(IPC.MARKETPLACE_ADD, async (_event, source: string, manifestPath?: string) => {
+    const { addMarketplace } = await import("@mcpx/core");
+    return addMarketplace(source, manifestPath);
+  });
+
+  ipcMain.handle(IPC.MARKETPLACE_REFRESH, async (_event, name: string) => {
+    const { refreshMarketplaceWithPlugins } = await import("@mcpx/core");
+    return refreshMarketplaceWithPlugins(name);
+  });
+
+  ipcMain.handle(IPC.MARKETPLACE_REMOVE, async (_event, name: string) => {
+    const { removeMarketplace } = await import("@mcpx/core");
+    await removeMarketplace(name);
+    return { name, success: true };
+  });
+
+  ipcMain.handle(IPC.MARKETPLACE_SET_AUTO_UPDATE, async (_event, name: string, enabled: boolean) => {
+    const { setMarketplaceAutoUpdate } = await import("@mcpx/core");
+    return setMarketplaceAutoUpdate(name, enabled);
+  });
+
+  ipcMain.handle(IPC.MARKETPLACE_BROWSE, async (_event, query?: string) => {
+    const { listMarketplacePlugins } = await import("@mcpx/core");
+    return listMarketplacePlugins(query);
+  });
+
+  ipcMain.handle(IPC.MARKETPLACE_INSPECT_PLUGIN, async (_event, id: string) => {
+    const { inspectMarketplacePlugin } = await import("@mcpx/core");
+    return inspectMarketplacePlugin(id);
+  });
+
+  ipcMain.handle(IPC.MARKETPLACE_INSTALL_PLUGIN, async (_event, id: string) => {
+    const { installMarketplacePlugin } = await import("@mcpx/core");
+    return installMarketplacePlugin(id);
+  });
 }

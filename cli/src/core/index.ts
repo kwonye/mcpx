@@ -65,6 +65,19 @@ export { syncPluginsToClient, prunePluginProjections, pruneAllPluginProjections 
 export { PluginLifecycle } from "./plugin-lifecycle.js";
 export { parseSource } from "./plugin-source.js";
 export { readManifest, discoverComponents, hasManifest } from "./plugin-parse.js";
+export {
+  addMarketplace,
+  removeMarketplace,
+  refreshMarketplace,
+  refreshMarketplaceWithPlugins,
+  setMarketplaceAutoUpdate,
+  listMarketplaces,
+  listMarketplacePlugins,
+  inspectMarketplacePlugin,
+  installMarketplacePlugin,
+  updateMarketplaceInstalledPlugin,
+} from "./marketplace.js";
+export { startMarketplaceAutoUpdater, runMarketplaceAutoUpdate } from "./marketplace-updater.js";
 
 // Plugin management functions
 export { inspectPlugin, installPlugin, preparePlugin, updatePlugin, uninstallPlugin, enablePlugin, disablePlugin, setPluginProjectOverride, resetPluginProjectOverride, approvePluginComponent, getPluginStatus, listPlugins, pluginConfigSet, pluginSync, resolvePluginId } from "./plugin-manager.js";
@@ -112,6 +125,10 @@ export type {
   ProjectConfig,
   ProjectScope,
   ManagedPlugin,
+  ManagedMarketplace,
+  MarketplaceListing,
+  MarketplacePluginDetail,
+  MarketplaceFormat,
   PluginManifest,
   PluginComponent,
   PluginSource,

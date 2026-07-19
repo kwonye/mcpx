@@ -55,6 +55,7 @@ describe("crashReporter initialization", () => {
       stopDaemon: vi.fn(),
       getDaemonStatus: vi.fn().mockReturnValue({ running: false }),
       SecretsManager: vi.fn(),
+      startMarketplaceAutoUpdater: vi.fn(),
     }));
 
     vi.doMock("../../src/main/tray", () => ({
@@ -147,6 +148,7 @@ describe("crashReporter initialization", () => {
       stopDaemon: vi.fn(),
       getDaemonStatus: vi.fn(),
       SecretsManager: vi.fn(),
+      startMarketplaceAutoUpdater: vi.fn(),
     }));
 
     vi.doMock("../../src/main/tray", () => ({

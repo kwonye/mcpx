@@ -6,7 +6,8 @@ import {
   startDaemon,
   stopDaemon,
   getDaemonStatus,
-  SecretsManager
+  SecretsManager,
+  startMarketplaceAutoUpdater
 } from "@mcpx/core";
 import { createTray, setStartDaemonHandler, setStopDaemonHandler, updateTrayForDaemonStatus } from "./tray";
 import { buildApplicationMenu } from "./menu";
@@ -157,6 +158,7 @@ async function startMainProcessImpl(): Promise<void> {
 
   // Surface upstream call-time / re-auth errors as macOS notifications.
   startErrorNotifier();
+  startMarketplaceAutoUpdater();
 
   // Set up daemon start/stop handlers from tray
   setStartDaemonHandler(() => {

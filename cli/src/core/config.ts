@@ -5,6 +5,7 @@ import { normalizeServerSpecEnabled, type ClientId, type McpxConfig, type StdioS
 import { getConfigPath, findProjectConfigPath } from "./paths.js";
 import { readJsonFile, writeJsonAtomic } from "../util/fs.js";
 import { repairConfig } from "./config-repair.js";
+import { ensureDefaultMarketplaces } from "./marketplace-defaults.js";
 
 export class ConfigLoadError extends Error {
   readonly configPath: string;
@@ -61,10 +62,13 @@ const discoveredComponentSchema = z.object({
 
 const discoveredMcpServerSchema = z.object({
   id: z.string(),
+  transport: z.enum(["stdio", "http"]).optional(),
   command: z.string(),
   args: z.array(z.string()).optional(),
   env: z.record(z.string(), z.string()).optional(),
   cwd: z.string().optional(),
+  url: z.string().optional(),
+  oauthResource: z.string().optional(),
 });
 
 const discoveredComponentsSchema = z.object({
@@ -99,11 +103,34 @@ const managedPluginSchema = z.object({
     agents: z.boolean().optional(),
     commands: z.boolean().optional(),
   }).optional(),
+  marketplace: z.object({
+    name: z.string(),
+    pluginName: z.string(),
+    sourceFingerprint: z.string(),
+  }).optional(),
+  updateError: z.string().optional(),
   projectOverrides: z.record(z.string(), z.object({
     enabled: z.boolean().optional(),
     components: z.record(pluginComponentSchema, z.boolean()).optional(),
     config: z.record(z.string(), z.unknown()).optional(),
   })).optional(),
+});
+
+const managedMarketplaceSchema = z.object({
+  name: z.string(),
+  displayName: z.string(),
+  source: z.string(),
+  sourceType: z.enum(["github", "git", "local", "hosted-json"]).default("github"),
+  manifestPath: z.string().optional(),
+  format: z.enum(["claude", "codex"]).optional(),
+  builtIn: z.boolean().default(false),
+  autoUpdate: z.boolean().default(false),
+  addedAt: z.string(),
+  lastCheckedAt: z.string().optional(),
+  lastUpdatedAt: z.string().optional(),
+  resolvedRevision: z.string().optional(),
+  status: z.enum(["ready", "stale", "error", "unavailable"]).default("unavailable"),
+  error: z.string().optional(),
 });
 
 const configSchema = z.object({
@@ -120,7 +147,8 @@ const configSchema = z.object({
   servers: z.record(z.string(), serverSchema).default({}),
   clients: z.record(z.string(), clientStateSchema).default({}),
   projects: z.record(z.string(), projectEntrySchema).default({}),
-  plugins: z.record(z.string(), managedPluginSchema).default({})
+  plugins: z.record(z.string(), managedPluginSchema).default({}),
+  marketplaces: z.record(z.string(), managedMarketplaceSchema).default({})
 });
 
 export interface ProjectLocalConfig {
@@ -144,7 +172,8 @@ export function defaultConfig(): McpxConfig {
     servers: {},
     clients: {},
     projects: {},
-    plugins: {}
+    plugins: {},
+    marketplaces: ensureDefaultMarketplaces(undefined)
   };
 }
 
@@ -203,7 +232,8 @@ export function loadConfig(configPath = getConfigPath()): McpxConfig {
     servers,
     clients: clientEntries,
     projects: parsed.data.projects,
-    plugins: parsed.data.plugins
+    plugins: parsed.data.plugins,
+    marketplaces: ensureDefaultMarketplaces(parsed.data.marketplaces)
   });
 }
 

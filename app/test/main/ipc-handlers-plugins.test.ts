@@ -136,6 +136,14 @@ describe("ipc-handlers.ts - plugins group", () => {
   const listPluginsMock = vi.fn();
   const pluginConfigSetMock = vi.fn();
   const pluginSyncMock = vi.fn();
+  const listMarketplacesMock = vi.fn();
+  const addMarketplaceMock = vi.fn();
+  const refreshMarketplaceWithPluginsMock = vi.fn();
+  const removeMarketplaceMock = vi.fn();
+  const setMarketplaceAutoUpdateMock = vi.fn();
+  const listMarketplacePluginsMock = vi.fn();
+  const inspectMarketplacePluginMock = vi.fn();
+  const installMarketplacePluginMock = vi.fn();
 
   let fakeConfig: Record<string, any>;
 
@@ -165,6 +173,14 @@ describe("ipc-handlers.ts - plugins group", () => {
     ]);
     pluginConfigSetMock.mockResolvedValue(undefined);
     pluginSyncMock.mockResolvedValue(undefined);
+    listMarketplacesMock.mockResolvedValue([]);
+    addMarketplaceMock.mockResolvedValue({ name: "team-tools" });
+    refreshMarketplaceWithPluginsMock.mockResolvedValue({ updated: [], errors: [] });
+    removeMarketplaceMock.mockResolvedValue(undefined);
+    setMarketplaceAutoUpdateMock.mockResolvedValue({ name: "team-tools", autoUpdate: true });
+    listMarketplacePluginsMock.mockResolvedValue([]);
+    inspectMarketplacePluginMock.mockResolvedValue({ id: "reviewer@team-tools" });
+    installMarketplacePluginMock.mockResolvedValue({ id: "reviewer@abc123" });
 
     vi.doMock("electron", () => ({
       app: { getAppPath: vi.fn(() => "/fake/app-path") },
@@ -250,7 +266,15 @@ describe("ipc-handlers.ts - plugins group", () => {
       getPluginStatus: getPluginStatusMock,
       listPlugins: listPluginsMock,
       pluginConfigSet: pluginConfigSetMock,
-      pluginSync: pluginSyncMock
+      pluginSync: pluginSyncMock,
+      listMarketplaces: listMarketplacesMock,
+      addMarketplace: addMarketplaceMock,
+      refreshMarketplaceWithPlugins: refreshMarketplaceWithPluginsMock,
+      removeMarketplace: removeMarketplaceMock,
+      setMarketplaceAutoUpdate: setMarketplaceAutoUpdateMock,
+      listMarketplacePlugins: listMarketplacePluginsMock,
+      inspectMarketplacePlugin: inspectMarketplacePluginMock,
+      installMarketplacePlugin: installMarketplacePluginMock
     }));
 
     const { registerIpcHandlers } = await import("../../src/main/ipc-handlers");
@@ -473,6 +497,34 @@ describe("ipc-handlers.ts - plugins group", () => {
       listPluginsMock.mockRejectedValue(new Error("failed to load plugin manifest"));
 
       await expect(invokeHandler(IPC.PLUGIN_LIST)).rejects.toThrow("failed to load plugin manifest");
+    });
+  });
+
+  describe("marketplace IPC", () => {
+    it("lists and browses marketplaces", async () => {
+      listMarketplacesMock.mockResolvedValueOnce([{ name: "openai-curated" }]);
+      listMarketplacePluginsMock.mockResolvedValueOnce([{ id: "figma@openai-curated" }]);
+      expect(await invokeHandler(IPC.MARKETPLACE_LIST)).toEqual([{ name: "openai-curated" }]);
+      expect(await invokeHandler(IPC.MARKETPLACE_BROWSE, "figma")).toEqual([{ id: "figma@openai-curated" }]);
+      expect(listMarketplacePluginsMock).toHaveBeenCalledWith("figma");
+    });
+
+    it("adds, refreshes, toggles, and removes a marketplace", async () => {
+      await invokeHandler(IPC.MARKETPLACE_ADD, "acme/plugins", ".claude-plugin/marketplace.json");
+      await invokeHandler(IPC.MARKETPLACE_REFRESH, "team-tools");
+      await invokeHandler(IPC.MARKETPLACE_SET_AUTO_UPDATE, "team-tools", true);
+      expect(await invokeHandler(IPC.MARKETPLACE_REMOVE, "team-tools")).toEqual({ name: "team-tools", success: true });
+      expect(addMarketplaceMock).toHaveBeenCalledWith("acme/plugins", ".claude-plugin/marketplace.json");
+      expect(refreshMarketplaceWithPluginsMock).toHaveBeenCalledWith("team-tools");
+      expect(setMarketplaceAutoUpdateMock).toHaveBeenCalledWith("team-tools", true);
+      expect(removeMarketplaceMock).toHaveBeenCalledWith("team-tools");
+    });
+
+    it("inspects and installs a marketplace plugin", async () => {
+      await invokeHandler(IPC.MARKETPLACE_INSPECT_PLUGIN, "reviewer@team-tools");
+      await invokeHandler(IPC.MARKETPLACE_INSTALL_PLUGIN, "reviewer@team-tools");
+      expect(inspectMarketplacePluginMock).toHaveBeenCalledWith("reviewer@team-tools");
+      expect(installMarketplacePluginMock).toHaveBeenCalledWith("reviewer@team-tools");
     });
   });
 });

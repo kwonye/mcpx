@@ -11,9 +11,17 @@ import { mutateConfig } from "./config-store.js";
 import { syncAllClients, persistSyncState } from "./sync.js";
 import { SecretsManager } from "./secrets.js";
 import type {
-  ManagedPlugin, PluginComponent, PluginManifest,
+  ManagedPlugin, PluginComponent, PluginManifest, PluginSource,
   DiscoveredComponents
 } from "../types.js";
+
+interface InstallPluginOptions {
+  name?: string;
+  components?: Partial<Record<PluginComponent, boolean>>;
+  enabled?: boolean;
+  approvals?: Partial<Record<PluginComponent, boolean>>;
+  marketplace?: ManagedPlugin["marketplace"];
+}
 
 export class PluginManager {
   private configPath: string;
@@ -38,7 +46,17 @@ export class PluginManager {
     sha: string;
   }> {
     const parsed = parseSource(sourceStr);
-    const sha = await this.cache.resolveSha(parsed);
+    return this.inspectResolvedSource(parsed, sourceStr);
+  }
+
+  async inspectResolvedSource(parsed: PluginSource, sourceLabel = parsed.original): Promise<{
+    manifest: PluginManifest | null;
+    components: DiscoveredComponents;
+    root: string;
+    source: string;
+    sha: string;
+  }> {
+    const sha = parsed.resolvedSha || await this.cache.resolveSha(parsed);
     parsed.resolvedSha = sha;
     const cached = await this.cache.fetch(parsed, "");
 
@@ -60,19 +78,18 @@ export class PluginManager {
 
     const manifest = readManifest(pluginRoot);
     const components = discoverComponents(pluginRoot);
-    return { manifest, components, root: pluginRoot, source: sourceStr, sha };
+    return { manifest, components, root: pluginRoot, source: sourceLabel, sha: cached.sha };
   }
 
   async installPlugin(
     sourceStr: string,
-    options?: {
-      name?: string;
-      components?: Partial<Record<PluginComponent, boolean>>;
-      enabled?: boolean;
-      approvals?: Partial<Record<PluginComponent, boolean>>;
-    }
+    options?: InstallPluginOptions
   ): Promise<ManagedPlugin> {
-    const info = await this.inspectSource(sourceStr);
+    return this.installResolvedPlugin(parseSource(sourceStr), options, sourceStr);
+  }
+
+  async installResolvedPlugin(source: PluginSource, options?: InstallPluginOptions, sourceLabel = source.original): Promise<ManagedPlugin> {
+    const info = await this.inspectResolvedSource(source, sourceLabel);
     const pluginName = options?.name || info.manifest?.name || path.basename(info.root);
     const pluginId = `${pluginName}@${info.sha.slice(0, 8)}`;
 
@@ -86,9 +103,9 @@ export class PluginManager {
     const plugin: ManagedPlugin = {
       id: pluginId,
       name: pluginName,
-      source: sourceStr,
+      source: sourceLabel,
       version: info.manifest?.version || "0.0.0",
-      ref: sourceStr.includes("@") ? sourceStr.split("@")[1] || "latest" : "latest",
+      ref: source.ref || "latest",
       resolvedSha: info.sha,
       installedAt: new Date().toISOString(),
       root: info.root,
@@ -106,6 +123,7 @@ export class PluginManager {
       serverNames,
       projectedClients: [],
       approvals: options?.approvals || {},
+      marketplace: options?.marketplace,
     };
 
     // Read-check-write happens inside the lock, reloaded fresh from disk, so
@@ -139,12 +157,14 @@ export class PluginManager {
       for (const mcp of discovered.mcpServers) {
         const nsName = `${pluginName}__${mcp.id}`;
         const approved = plugin.approvals?.mcpServers !== false;
-        config.servers[nsName] = {
-          transport: "stdio",
-          command: "npx",
-          args: ["-y", "@kwonye/mcpx@latest", "plugin-host", pluginId, mcp.id],
-          enabled: enabled && approved,
-        };
+        config.servers[nsName] = mcp.transport === "http" && mcp.url
+          ? { transport: "http", url: mcp.url, enabled: enabled && approved }
+          : {
+              transport: "stdio",
+              command: "npx",
+              args: ["-y", "@kwonye/mcpx@latest", "plugin-host", pluginId, mcp.id],
+              enabled: enabled && approved,
+            };
       }
     }, this.configPath);
 
@@ -164,21 +184,26 @@ export class PluginManager {
   }
 
   async updatePlugin(pluginId: string): Promise<ManagedPlugin> {
-    // Inspect source outside the lock (slow I/O)
-    let currentPlugin: ManagedPlugin | undefined;
-    let info: Awaited<ReturnType<typeof this.inspectSource>> | undefined;
+    const current = loadConfig(this.configPath).plugins?.[pluginId];
+    if (!current) throw new Error(`Plugin ${pluginId} not found`);
+    const info = await this.inspectSource(current.source);
+    return this.applyPluginUpdate(pluginId, info, undefined, true);
+  }
 
-    await mutateConfig((config) => {
-      if (!config.plugins) throw new Error(`Plugin ${pluginId} not found`);
-      const current = config.plugins[pluginId];
-      if (!current) throw new Error(`Plugin ${pluginId} not found`);
-      currentPlugin = current;
-    }, this.configPath);
+  async updateResolvedPlugin(pluginId: string, source: PluginSource, sourceFingerprint: string, sync = true): Promise<ManagedPlugin> {
+    const info = await this.inspectResolvedSource(source);
+    return this.applyPluginUpdate(pluginId, info, sourceFingerprint, sync);
+  }
 
-    // We know currentPlugin is set because mutateConfig didn't throw
-    const source = currentPlugin!.source;
-    info = await this.inspectSource(source);
-    const pluginName = info.manifest?.name || currentPlugin!.name;
+  private async applyPluginUpdate(
+    pluginId: string,
+    info: Awaited<ReturnType<PluginManager["inspectSource"]>>,
+    sourceFingerprint?: string,
+    sync = true,
+  ): Promise<ManagedPlugin> {
+    const currentSnapshot = loadConfig(this.configPath).plugins?.[pluginId];
+    if (!currentSnapshot) throw new Error(`Plugin ${pluginId} not found`);
+    const pluginName = info.manifest?.name || currentSnapshot.name;
 
     // Now update with freshly-read config inside the lock
     let updatedPlugin: ManagedPlugin | undefined;
@@ -193,37 +218,42 @@ export class PluginManager {
       }
 
       // Update plugin record
-      current.version = info!.manifest?.version || current.version;
-      current.resolvedSha = info!.sha;
-      current.root = info!.root;
-      current.discovered = info!.components;
-      current.serverNames = info!.components.mcpServers.map(s => `${pluginName}__${s.id}`);
+      current.version = info.manifest?.version || current.version;
+      current.resolvedSha = info.sha;
+      current.root = info.root;
+      current.discovered = info.components;
+      current.serverNames = info.components.mcpServers.map(s => `${pluginName}__${s.id}`);
 
       // Re-register MCP servers
       const approved = current.approvals?.mcpServers !== false;
-      for (const mcp of info!.components.mcpServers) {
+      for (const mcp of info.components.mcpServers) {
         const nsName = `${pluginName}__${mcp.id}`;
-        config.servers[nsName] = {
-          transport: "stdio",
-          command: "npx",
-          args: ["-y", "@kwonye/mcpx@latest", "plugin-host", pluginId, mcp.id],
-          enabled: current.enabled && approved,
-        };
+        config.servers[nsName] = mcp.transport === "http" && mcp.url
+          ? { transport: "http", url: mcp.url, enabled: current.enabled && approved }
+          : {
+              transport: "stdio",
+              command: "npx",
+              args: ["-y", "@kwonye/mcpx@latest", "plugin-host", pluginId, mcp.id],
+              enabled: current.enabled && approved,
+            };
       }
 
       // Reset SHA-bound approvals
       current.approvals = {};
+      if (sourceFingerprint && current.marketplace) current.marketplace.sourceFingerprint = sourceFingerprint;
+      delete current.updateError;
 
       config.plugins[pluginId] = current;
       updatedPlugin = current;
     }, this.configPath);
 
-    // Sync outside the lock (slow I/O)
-    const syncConfig = loadConfig(this.configPath);
-    const summary = syncAllClients(syncConfig, this.secrets);
-    await mutateConfig((freshConfig) => {
-      persistSyncState(summary, freshConfig);
-    }, this.configPath);
+    if (sync) {
+      const syncConfig = loadConfig(this.configPath);
+      const summary = syncAllClients(syncConfig, this.secrets);
+      await mutateConfig((freshConfig) => {
+        persistSyncState(summary, freshConfig);
+      }, this.configPath);
+    }
 
     return updatedPlugin!;
   }
@@ -364,6 +394,10 @@ export async function updatePlugin(nameOrId: string): Promise<ManagedPlugin> {
   const manager = new PluginManager();
   const config = loadConfig(manager["configPath"]);
   const id = resolvePluginId(config, nameOrId);
+  if (config.plugins?.[id]?.marketplace) {
+    const { updateMarketplaceInstalledPlugin } = await import("./marketplace.js");
+    return updateMarketplaceInstalledPlugin(id);
+  }
   return manager.updatePlugin(id);
 }
 
@@ -466,6 +500,11 @@ export async function listPlugins(): Promise<ManagedPlugin[]> {
 export function resolvePluginId(config: { plugins?: Record<string, ManagedPlugin> }, nameOrId: string): string {
   const plugins = config.plugins ?? {};
   if (plugins[nameOrId]) return nameOrId;
+  const qualifiedMatches = Object.keys(plugins).filter((id) => {
+    const provenance = plugins[id].marketplace;
+    return provenance && `${provenance.pluginName}@${provenance.name}` === nameOrId;
+  });
+  if (qualifiedMatches.length === 1) return qualifiedMatches[0];
   const matches = Object.keys(plugins).filter((id) => plugins[id].name === nameOrId);
   if (matches.length === 1) return matches[0];
   if (matches.length === 0) {
