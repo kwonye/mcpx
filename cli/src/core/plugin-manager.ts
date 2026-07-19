@@ -412,6 +412,30 @@ export async function setPluginProjectOverride(
   });
 }
 
+export async function resetPluginProjectOverride(nameOrId: string, projectPath: string): Promise<void> {
+  await mutateConfig((config) => {
+    const id = resolvePluginId(config, nameOrId);
+    const plugin = config.plugins?.[id];
+    if (!plugin) throw new Error(`Plugin ${id} not found`);
+    if (!config.projects?.[projectPath]) {
+      throw new Error(`Project "${projectPath}" is not registered. Run "mcpx project init" there first.`);
+    }
+
+    if (!plugin.projectOverrides?.[projectPath]) return;
+    delete plugin.projectOverrides[projectPath];
+    if (Object.keys(plugin.projectOverrides).length === 0) {
+      delete plugin.projectOverrides;
+    }
+  });
+
+  const secrets = new SecretsManager();
+  const syncConfig = loadConfig();
+  const summary = syncAllClients(syncConfig, secrets);
+  await mutateConfig((freshConfig) => {
+    persistSyncState(summary, freshConfig);
+  });
+}
+
 export async function approvePluginComponent(nameOrId: string, component: string): Promise<void> {
   const manager = new PluginManager();
   const config = loadConfig(manager["configPath"]);

@@ -72,6 +72,16 @@ while read LOCAL_REF LOCAL_SHA REMOTE_REF REMOTE_SHA; do
   fi
   echo "  -> desktop tests OK"
 
+  echo "  -> bun run e2e"
+  (cd app && bun run e2e 2>&1)
+  APP_E2E_EXIT=$?
+  if [ $APP_E2E_EXIT -ne 0 ]; then
+    echo ""
+    echo "FAIL: Desktop app end-to-end tests failed (exit $APP_E2E_EXIT). Push rejected."
+    exit 1
+  fi
+  echo "  -> desktop end-to-end tests OK"
+
   echo ""
   echo "=========================================="
   echo "  pre-push: all checks passed"

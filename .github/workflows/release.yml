@@ -181,6 +181,10 @@ jobs:
         run: bun run build
         working-directory: app
 
+      - name: Test desktop end-to-end
+        run: bun run e2e
+        working-directory: app
+
       - name: Determine signing mode
         id: signing_mode
         env:

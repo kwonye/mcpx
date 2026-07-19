@@ -23,7 +23,10 @@ describe("preload IPC channel allowlist", () => {
 
   async function loadExposedApi() {
     await import("../../src/preload/index");
-    const call = exposeInMainWorldMock.mock.calls[0] as [string, { invoke: (channel: string, ...args: unknown[]) => unknown }];
+    const call = exposeInMainWorldMock.mock.calls[0] as [string, {
+      getStatus: () => Promise<unknown>;
+      invoke: (channel: string, ...args: unknown[]) => unknown;
+    }];
     expect(call[0]).toBe("mcpx");
     return call[1];
   }
@@ -45,5 +48,19 @@ describe("preload IPC channel allowlist", () => {
 
     expect(() => api.invoke("bogus:channel")).toThrow("Unknown IPC channel: bogus:channel");
     expect(invokeMock).not.toHaveBeenCalled();
+  });
+
+  it("removes Electron's remote method prefix from IPC errors", async () => {
+    const api = await loadExposedApi();
+    invokeMock.mockRejectedValue(new Error("Error invoking remote method 'mcpx:get-status': Error: config is corrupt"));
+
+    await expect(api.getStatus()).rejects.toMatchObject({ message: "config is corrupt" });
+  });
+
+  it("preserves IPC errors that do not contain Electron's remote method prefix", async () => {
+    const api = await loadExposedApi();
+    invokeMock.mockRejectedValue(new Error("config is corrupt"));
+
+    await expect(api.getStatus()).rejects.toMatchObject({ message: "config is corrupt" });
   });
 });

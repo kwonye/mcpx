@@ -130,6 +130,7 @@ describe("ipc-handlers.ts - plugins group", () => {
   const enablePluginMock = vi.fn();
   const disablePluginMock = vi.fn();
   const setPluginProjectOverrideMock = vi.fn();
+  const resetPluginProjectOverrideMock = vi.fn();
   const approvePluginComponentMock = vi.fn();
   const getPluginStatusMock = vi.fn();
   const listPluginsMock = vi.fn();
@@ -155,6 +156,7 @@ describe("ipc-handlers.ts - plugins group", () => {
     enablePluginMock.mockResolvedValue(undefined);
     disablePluginMock.mockResolvedValue(undefined);
     setPluginProjectOverrideMock.mockResolvedValue(undefined);
+    resetPluginProjectOverrideMock.mockResolvedValue(undefined);
     approvePluginComponentMock.mockResolvedValue(undefined);
     getPluginStatusMock.mockResolvedValue({ name: "stub-plugin", enabled: true });
     listPluginsMock.mockResolvedValue([
@@ -243,6 +245,7 @@ describe("ipc-handlers.ts - plugins group", () => {
       enablePlugin: enablePluginMock,
       disablePlugin: disablePluginMock,
       setPluginProjectOverride: setPluginProjectOverrideMock,
+      resetPluginProjectOverride: resetPluginProjectOverrideMock,
       approvePluginComponent: approvePluginComponentMock,
       getPluginStatus: getPluginStatusMock,
       listPlugins: listPluginsMock,
@@ -369,6 +372,16 @@ describe("ipc-handlers.ts - plugins group", () => {
 
       expect(setPluginProjectOverrideMock).toHaveBeenCalledWith("my-plugin", "/path/to/project", override);
       expect(result).toEqual({ name: "my-plugin", projectPath: "/path/to/project", override, success: true });
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  describe("PLUGIN_RESET_PROJECT_OVERRIDE", () => {
+    it("calls resetPluginProjectOverride with name and projectPath, returns success shape", async () => {
+      const result = await invokeHandler(IPC.PLUGIN_RESET_PROJECT_OVERRIDE, "my-plugin", "/path/to/project");
+
+      expect(resetPluginProjectOverrideMock).toHaveBeenCalledWith("my-plugin", "/path/to/project");
+      expect(result).toEqual({ name: "my-plugin", projectPath: "/path/to/project", success: true });
     });
   });
 

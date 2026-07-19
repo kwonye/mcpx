@@ -348,6 +348,80 @@ describe("ipc-handlers.ts - servers group", () => {
       expect(secretsSetSecretMock).toHaveBeenCalledWith("API_KEY", "shh");
     });
 
+    it("migrates a plain-text secret HTTP header to the encrypted store", async () => {
+      const httpSpec = {
+        transport: "http" as const,
+        url: "https://example.com/mcp",
+        headers: { API_KEY: "shh", "X-Label": "public" }
+      };
+
+      await invokeHandler(IPC.UPDATE_SERVER, "My Server", httpSpec);
+
+      expect(secretsGetSecretMock).toHaveBeenCalledWith("auth_my_server_header_api_key");
+      expect(secretsSetSecretMock).toHaveBeenCalledWith("auth_my_server_header_api_key", "shh");
+      expect(updateServerMock).toHaveBeenCalledWith(fakeConfig, "My Server", {
+        ...httpSpec,
+        headers: {
+          API_KEY: "secret://auth_my_server_header_api_key",
+          "X-Label": "public"
+        }
+      });
+    });
+
+    it("migrates a plain-text secret stdio env value to the encrypted store", async () => {
+      const stdioSpec = {
+        transport: "stdio" as const,
+        command: "node",
+        env: { SERVICE_ROLE_KEY: "shh", NODE_ENV: "production" }
+      };
+
+      await invokeHandler(IPC.UPDATE_SERVER, "my-server", stdioSpec);
+
+      expect(secretsSetSecretMock).toHaveBeenCalledWith("auth_my-server_env_service_role_key", "shh");
+      expect(updateServerMock).toHaveBeenCalledWith(fakeConfig, "my-server", {
+        ...stdioSpec,
+        env: {
+          SERVICE_ROLE_KEY: "secret://auth_my-server_env_service_role_key",
+          NODE_ENV: "production"
+        }
+      });
+    });
+
+    it("reuses an existing stored secret without overwriting it", async () => {
+      secretsGetSecretMock.mockReturnValue("already stored");
+      const httpSpec = {
+        transport: "http" as const,
+        url: "https://example.com/mcp",
+        headers: { API_KEY: "new plain-text value" }
+      };
+
+      await invokeHandler(IPC.UPDATE_SERVER, "my-server", httpSpec);
+
+      expect(secretsSetSecretMock).not.toHaveBeenCalled();
+      expect(updateServerMock).toHaveBeenCalledWith(fakeConfig, "my-server", {
+        ...httpSpec,
+        headers: { API_KEY: "secret://auth_my-server_header_api_key" }
+      });
+    });
+
+    it("leaves empty, referenced, and non-secret values unchanged", async () => {
+      const httpSpec = {
+        transport: "http" as const,
+        url: "https://example.com/mcp",
+        headers: {
+          TOKEN: "secret://existing_token",
+          PASSWORD: "",
+          "X-Label": "public"
+        }
+      };
+
+      await invokeHandler(IPC.UPDATE_SERVER, "my-server", httpSpec);
+
+      expect(secretsGetSecretMock).not.toHaveBeenCalled();
+      expect(secretsSetSecretMock).not.toHaveBeenCalled();
+      expect(updateServerMock).toHaveBeenCalledWith(fakeConfig, "my-server", httpSpec);
+    });
+
     it("rejects when updateServer rejects (e.g. server does not exist)", async () => {
       updateServerMock.mockImplementation(() => {
         throw new Error('Server "my-server" does not exist.');

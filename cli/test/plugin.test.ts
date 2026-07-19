@@ -5,7 +5,7 @@ import os from "node:os";
 import { PluginCache } from "../src/core/plugin-cache.js";
 import { PluginDataManager } from "../src/core/plugin-data.js";
 import { PluginLifecycle } from "../src/core/plugin-lifecycle.js";
-import { PluginManager, setPluginProjectOverride } from "../src/core/plugin-manager.js";
+import { PluginManager, resetPluginProjectOverride, setPluginProjectOverride } from "../src/core/plugin-manager.js";
 import { parseSource } from "../src/core/plugin-source.js";
 import { readManifest, discoverComponents, hasManifest } from "../src/core/plugin-parse.js";
 import { syncPluginsToClient, prunePluginProjections, pruneAllPluginProjections } from "../src/core/plugin-projections.js";
@@ -323,6 +323,39 @@ describe("plugin manager basic", () => {
     const manager = new PluginManager();
     const plugin = await manager.getPluginStatus("non-existent-plugin");
     expect(plugin).toBeNull();
+  });
+
+  it("resets one project override to global settings without removing other overrides", async () => {
+    const pluginRoot = path.join(env.root, "reset-plugin");
+    fs.mkdirSync(path.join(pluginRoot, ".claude-plugin"), { recursive: true });
+    fs.writeFileSync(
+      path.join(pluginRoot, ".claude-plugin", "plugin.json"),
+      JSON.stringify({ name: "reset-plugin", version: "1.0.0" })
+    );
+
+    const manager = new PluginManager();
+    const plugin = await manager.installPlugin(pluginRoot);
+    const firstProject = path.join(env.root, "first-project");
+    const secondProject = path.join(env.root, "second-project");
+    fs.mkdirSync(firstProject);
+    fs.mkdirSync(secondProject);
+    await mutateConfig((config) => {
+      registerProject(config, firstProject, "first-project");
+      registerProject(config, secondProject, "second-project");
+    });
+    await setPluginProjectOverride(plugin.id, firstProject, { enabled: false });
+    await setPluginProjectOverride(plugin.id, secondProject, { enabled: false });
+
+    await resetPluginProjectOverride(plugin.id, firstProject);
+
+    let config = loadConfig(manager["configPath"]);
+    expect(config.plugins?.[plugin.id]?.projectOverrides?.[firstProject]).toBeUndefined();
+    expect(config.plugins?.[plugin.id]?.projectOverrides?.[secondProject]).toEqual({ enabled: false });
+
+    await resetPluginProjectOverride(plugin.id, secondProject);
+
+    config = loadConfig(manager["configPath"]);
+    expect(config.plugins?.[plugin.id]?.projectOverrides).toBeUndefined();
   });
 
   it("rejects plugin install when server name collides with user-added server", async () => {

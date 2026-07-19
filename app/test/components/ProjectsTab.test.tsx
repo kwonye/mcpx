@@ -47,7 +47,8 @@ const pluginWithOverride = {
 const mockMcpx = {
   plugins: {
     list: vi.fn(),
-    setProjectOverride: vi.fn()
+    setProjectOverride: vi.fn(),
+    resetProjectOverride: vi.fn()
   },
   setProjectServerEnabled: vi.fn()
 };
@@ -56,6 +57,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockMcpx.plugins.list.mockResolvedValue([]);
   mockMcpx.plugins.setProjectOverride.mockResolvedValue(undefined);
+  mockMcpx.plugins.resetProjectOverride.mockResolvedValue(undefined);
   mockMcpx.setProjectServerEnabled.mockResolvedValue(undefined);
   Object.defineProperty(window, "mcpx", {
     value: mockMcpx,
@@ -137,6 +139,7 @@ describe("ProjectsTab", () => {
 
     const betaRow = screen.getByText("Beta Plugin").closest(".project-mcp-row") as HTMLElement;
     expect(within(betaRow).getByText("Disabled")).toBeDefined();
+    expect(within(betaRow).getByRole("button", { name: "Use global" })).toBeDefined();
   });
 
   it("toggles a plugin's per-project override and refetches the plugin list", async () => {
@@ -158,6 +161,49 @@ describe("ProjectsTab", () => {
       expect(mockMcpx.plugins.setProjectOverride).toHaveBeenCalledWith("plugin-alpha", project.path, { enabled: false });
       expect(mockMcpx.plugins.list).toHaveBeenCalledTimes(2);
     });
+  });
+
+  it("resets a plugin override to inherit the global setting and refetches the plugin list", async () => {
+    mockMcpx.plugins.list.mockResolvedValue([pluginWithOverride]);
+
+    render(
+      <ProjectsTab
+        status={{ servers: [], projects: { [project.path]: project } }}
+        onRefresh={vi.fn()}
+        selectedProjectPath={project.path}
+        onSelectedProjectPathChange={vi.fn()}
+      />
+    );
+
+    const row = (await screen.findByText("Beta Plugin")).closest(".project-mcp-row") as HTMLElement;
+    fireEvent.click(within(row).getByRole("button", { name: "Use global" }));
+
+    await waitFor(() => {
+      expect(mockMcpx.plugins.resetProjectOverride).toHaveBeenCalledWith("plugin-beta", project.path);
+      expect(mockMcpx.plugins.list).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  it("marks globally disabled plugins as off even if a project override enables them", async () => {
+    mockMcpx.plugins.list.mockResolvedValue([{
+      ...pluginWithOverride,
+      enabled: false,
+      projectOverrides: { [project.path]: { enabled: true } }
+    }]);
+
+    render(
+      <ProjectsTab
+        status={{ servers: [], projects: { [project.path]: project } }}
+        onRefresh={vi.fn()}
+        selectedProjectPath={project.path}
+        onSelectedProjectPathChange={vi.fn()}
+      />
+    );
+
+    const row = (await screen.findByText("Beta Plugin")).closest(".project-mcp-row") as HTMLElement;
+    expect(within(row).getByText("globally off")).toBeDefined();
+    expect(within(row).getByText("Disabled")).toBeDefined();
+    expect((within(row).getByRole("checkbox") as HTMLInputElement).checked).toBe(false);
   });
 
   it("shows an empty state when no plugins are installed", async () => {

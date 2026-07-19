@@ -159,6 +159,16 @@ export function ProjectsTab({ status, onRefresh, selectedProjectPath, onSelected
     }
   };
 
+  const handleResetPlugin = async (plugin: ManagedPlugin) => {
+    if (!selectedProject) return;
+    try {
+      await window.mcpx.plugins.resetProjectOverride(plugin.id, selectedProject.path);
+      await loadPlugins();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to reset plugin state");
+    }
+  };
+
   return (
     <><div className="projects-tab-container">
       {error && <div className="feedback-message error mb-4">{error}</div>}
@@ -281,13 +291,20 @@ export function ProjectsTab({ status, onRefresh, selectedProjectPath, onSelected
                 ) : (
                   <div className="project-mcp-list">
                     {plugins.map((plugin) => {
-                      const effectiveEnabled = plugin.projectOverrides?.[selectedProject.path]?.enabled ?? plugin.enabled;
+                      const projectOverride = plugin.projectOverrides?.[selectedProject.path];
+                      const effectiveEnabled = plugin.enabled && (projectOverride?.enabled ?? true);
+                      const globallyDisabled = !plugin.enabled;
                       return (
                         <div key={plugin.id} className="project-mcp-row">
                           <div className="project-mcp-info">
                             <div className="project-mcp-name-row">
                               <span className="mcp-name">{plugin.name}</span>
                               <span className="mcp-transport-badge">v{plugin.version}</span>
+                              {globallyDisabled && (
+                                <span className="mcp-transport-badge" title="Disabled globally — project overrides cannot enable this plugin">
+                                  globally off
+                                </span>
+                              )}
                             </div>
                             <span className="mcp-target-command mono-text" title={plugin.source}>
                               {plugin.source}
@@ -296,6 +313,15 @@ export function ProjectsTab({ status, onRefresh, selectedProjectPath, onSelected
 
                           <div className="project-mcp-controls">
                             <div className="toggle-container">
+                              {projectOverride && (
+                                <button
+                                  type="button"
+                                  className="btn btn-ghost btn-sm"
+                                  onClick={() => handleResetPlugin(plugin)}
+                                >
+                                  Use global
+                                </button>
+                              )}
                               <span className="toggle-status-label">
                                 {effectiveEnabled ? "Enabled" : "Disabled"}
                               </span>

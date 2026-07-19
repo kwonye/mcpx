@@ -513,6 +513,12 @@ export function registerIpcHandlers(): void {
     return { name, projectPath, override, success: true };
   });
 
+  ipcMain.handle(IPC.PLUGIN_RESET_PROJECT_OVERRIDE, async (_event, name: string, projectPath: string) => {
+    const { resetPluginProjectOverride } = await import("@mcpx/core");
+    await resetPluginProjectOverride(name, projectPath);
+    return { name, projectPath, success: true };
+  });
+
   ipcMain.handle(IPC.PLUGIN_APPROVE, async (_event, name: string, component: string) => {
     const { approvePluginComponent } = await import("@mcpx/core");
     await approvePluginComponent(name, component);
