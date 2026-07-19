@@ -199,6 +199,9 @@ describe("ipc-handlers.ts - daemon + settings + misc group", () => {
     vi.doMock("../../src/main/app-control", () => ({
       quitApp: quitAppMock
     }));
+    vi.doMock("../../src/main/cli-path", () => ({
+      resolveCliDaemonPath: vi.fn(() => "/fake/cli/dist/cli.js")
+    }));
 
     // Full named-export list copied from ipc-handlers.ts's
     // `import { ... } from "@mcpx/core"` block - keep in sync with that file.

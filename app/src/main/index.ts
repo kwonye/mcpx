@@ -1,6 +1,4 @@
 import { app, crashReporter, dialog, Menu } from "electron";
-import fs from "node:fs";
-import path from "node:path";
 import {
   loadConfig,
   startDaemon,
@@ -22,6 +20,7 @@ import { startErrorNotifier } from "./error-notifier";
 import { getDesktopProductName, isDevDesktopApp } from "./app-flavor";
 import { resolveLoginShellPath } from "./shell-env";
 import { hideDashboard } from "./app-control";
+import { resolveCliDaemonPath } from "./cli-path";
 
 let daemonRunning = false;
 
@@ -48,13 +47,7 @@ export function registerLifecycleHandlers(deps: {
 }
 
 function getCliDaemonPath(): string {
-  const resourcesPath = process.resourcesPath ?? app.getAppPath();
-  const cliPath = path.join(resourcesPath, "cli", "dist", "cli.js");
-  if (fs.existsSync(cliPath)) {
-    return cliPath;
-  }
-  // Fallback for development
-  return path.join(app.getAppPath(), "..", "cli", "dist", "cli.js");
+  return resolveCliDaemonPath(process.resourcesPath, app.getAppPath());
 }
 
 async function maybeStartDaemonForLoginLaunch(): Promise<void> {

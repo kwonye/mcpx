@@ -29,6 +29,17 @@ export interface DaemonStartResult {
   message: string;
 }
 
+export function buildDaemonChildEnv(
+  baseEnv: NodeJS.ProcessEnv = process.env,
+  electronDefaultApp = Boolean((process as NodeJS.Process & { defaultApp?: boolean }).defaultApp),
+): NodeJS.ProcessEnv {
+  return {
+    ...baseEnv,
+    MCPX_DAEMON_CHILD: "1",
+    ...(electronDefaultApp ? { ELECTRON_RUN_AS_NODE: "1" } : {}),
+  };
+}
+
 function readPidRecordFromFile(pidPath = getPidPath()): { pid: number; port: number | null } | null {
   if (!fs.existsSync(pidPath)) {
     return null;
@@ -204,10 +215,7 @@ export async function startDaemon(config: McpxConfig, cliPath: string, secrets: 
   const child = spawn(process.execPath, [cliPath, "daemon", "run", "--port", String(port)], {
     detached: true,
     stdio: ["ignore", logFd, logFd],
-    env: {
-      ...process.env,
-      MCPX_DAEMON_CHILD: "1"
-    }
+    env: buildDaemonChildEnv()
   });
 
   child.unref();

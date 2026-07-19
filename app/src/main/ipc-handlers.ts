@@ -1,6 +1,4 @@
 import { app, ipcMain, dialog, shell } from "electron";
-import fs from "node:fs";
-import path from "node:path";
 import {
   loadConfig,
   mutateConfig,
@@ -46,6 +44,7 @@ import { checkForUpdatesNow, setAutoUpdateEnabled } from "./update-manager";
 import { updateTrayForDaemonStatus } from "./tray";
 import { dismissPendingAuth, getPendingAuth, queuePendingAuth } from "./auth-events";
 import { quitApp } from "./app-control";
+import { resolveCliDaemonPath } from "./cli-path";
 
 async function refreshTokenCountsSoon(): Promise<void> {
   let config: ReturnType<typeof loadConfig>;
@@ -89,13 +88,7 @@ function queueTokenCountRefresh(): void {
 }
 
 function getCliDaemonPath(): string {
-  const resourcesPath = process.resourcesPath ?? app.getAppPath();
-  const cliPath = path.join(resourcesPath, "cli", "dist", "cli.js");
-  if (fs.existsSync(cliPath)) {
-    return cliPath;
-  }
-  // Fallback for development
-  return path.join(app.getAppPath(), "..", "cli", "dist", "cli.js");
+  return resolveCliDaemonPath(process.resourcesPath, app.getAppPath());
 }
 
 function normalizeUpdatedSpec(spec: UpstreamServerSpec): UpstreamServerSpec {
