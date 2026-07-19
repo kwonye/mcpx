@@ -31,12 +31,12 @@ export interface DaemonStartResult {
 
 export function buildDaemonChildEnv(
   baseEnv: NodeJS.ProcessEnv = process.env,
-  electronDefaultApp = Boolean((process as NodeJS.Process & { defaultApp?: boolean }).defaultApp),
+  electronRuntime = typeof process.versions.electron === "string",
 ): NodeJS.ProcessEnv {
   return {
     ...baseEnv,
     MCPX_DAEMON_CHILD: "1",
-    ...(electronDefaultApp ? { ELECTRON_RUN_AS_NODE: "1" } : {}),
+    ...(electronRuntime ? { ELECTRON_RUN_AS_NODE: "1" } : {}),
   };
 }
 

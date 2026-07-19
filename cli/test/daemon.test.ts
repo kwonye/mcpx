@@ -38,7 +38,7 @@ describe("daemon utilities", () => {
     }
   });
 
-  it("runs detached CLI children as Node when the parent is the default Electron app", () => {
+  it("runs detached CLI children as Node when the parent uses Electron", () => {
     expect(buildDaemonChildEnv({ PATH: "/bin" }, true)).toMatchObject({
       PATH: "/bin",
       MCPX_DAEMON_CHILD: "1",
