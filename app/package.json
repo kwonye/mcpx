@@ -90,6 +90,7 @@
   },
   "dependencies": {
     "@iarna/toml": "2.2.5",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "electron-updater": "^6.6.2",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
