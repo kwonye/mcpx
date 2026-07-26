@@ -10,7 +10,7 @@ import {
 import { StreamableHTTPClientTransport, StreamableHTTPError } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { loadMergedConfig } from "../core/config.js";
 import { buildEnrichedPath } from "../core/spawn-env.js";
-import { getOAuthAccessToken, isOAuthReference, oauthReferenceServerName } from "../core/oauth.js";
+import { getOAuthAccessToken, isOAuthReference, oauthReferenceServerName, oauthSecretNames } from "../core/oauth.js";
 import { SecretsManager } from "../core/secrets.js";
 import { UpstreamError, classifyUpstreamError, SecretNotFoundError, type UpstreamErrorCode } from "../core/errors.js";
 import { APP_VERSION } from "../version.js";
@@ -304,7 +304,7 @@ export async function getUpstreamTokenCounts(
   const upstreams = listUpstreams(config);
 
   for (const upstream of upstreams) {
-    const fingerprint = specFingerprint(upstream.spec);
+    const fingerprint = specFingerprint(upstream.spec, secrets);
     const cached = runtime.tokenCache.get(upstream.name);
     if (cached?.fingerprint === fingerprint) {
       const runtimeErr = runtime.upstreamErrors?.get(upstream.name);
@@ -401,7 +401,25 @@ function specFingerprint(spec: UpstreamServerSpec, secrets?: SecretsManager): st
   const collect = (obj?: Record<string, string>) => {
     if (!obj) return;
     for (const [key, value] of Object.entries(obj)) {
-      if (value.startsWith("secret://") || value.startsWith("oauth://")) {
+      if (isOAuthReference(value)) {
+        // resolveMaybeSecret only understands secret:// refs -- for an
+        // oauth:// reference it just returns the value unchanged, and that
+        // reference string never changes across a re-login or a token
+        // refresh. Without this, the fingerprint stays identical after
+        // re-authenticating, the cached upstream connection (with the old
+        // bearer token baked into its transport) never gets evicted, and
+        // re-auth silently appears to do nothing until an unrelated call
+        // happens to invalidate the connection. Use the stored token's
+        // obtainedAt instead, which changes on every login and refresh.
+        try {
+          const serverName = oauthReferenceServerName(value);
+          const storedTokens = secrets.getSecret(oauthSecretNames(serverName).tokens);
+          const obtainedAt = storedTokens ? (JSON.parse(storedTokens) as { obtainedAt?: number }).obtainedAt : undefined;
+          resolvedMarkers[key] = obtainedAt != null ? `oauth:${serverName}:${obtainedAt}` : value;
+        } catch {
+          resolvedMarkers[key] = value;
+        }
+      } else if (value.startsWith("secret://")) {
         try { resolvedMarkers[key] = secrets.resolveMaybeSecret(value); } catch { resolvedMarkers[key] = value; }
       }
     }
@@ -409,6 +427,18 @@ function specFingerprint(spec: UpstreamServerSpec, secrets?: SecretsManager): st
   if (spec.transport === "stdio") collect(spec.env);
   if (spec.transport === "http") collect(spec.headers);
   return JSON.stringify({ spec, resolvedMarkers });
+}
+
+/**
+ * The passthrough connection cache key used to be a constant "<name>:passthrough"
+ * suffix that didn't depend on the actual token -- so two clients passing
+ * different Authorization headers to the same upstream shared one cached
+ * connection, and the second one silently executed under the first client's
+ * credentials for the life of that connection. Hashed (not raw) so a client's
+ * bearer token never ends up sitting in a Map key.
+ */
+function passthroughCacheSuffix(passthroughAuthorizationHeader: string): string {
+  return `passthrough:${crypto.createHash("sha256").update(passthroughAuthorizationHeader).digest("hex").slice(0, 16)}`;
 }
 
 const EXTRA_INHERITED_ENV = ["TMPDIR", "LANG"] as const;
@@ -472,11 +502,11 @@ async function closeUpstreamConnection(entry: UpstreamConnectionEntry): Promise<
   }
 }
 
-async function reconcileUpstreamConnections(config: McpxConfig, runtime: GatewayRuntimeState): Promise<void> {
+async function reconcileUpstreamConnections(config: McpxConfig, secrets: SecretsManager, runtime: GatewayRuntimeState): Promise<void> {
   const activeSpecs = new Map(
     Object.entries(config.servers)
       .filter(([, spec]) => isServerEnabled(spec))
-      .map(([name, spec]) => [name, specFingerprint(spec)])
+      .map(([name, spec]) => [name, specFingerprint(spec, secrets)])
   );
 
   const staleKeys: string[] = [];
@@ -504,7 +534,7 @@ function invalidateUpstreamConnection(
   passthroughAuthorizationHeader: string | undefined,
   runtime: GatewayRuntimeState
 ): void {
-  const key = passthroughAuthorizationHeader ? `${upstreamName}:passthrough` : upstreamName;
+  const key = passthroughAuthorizationHeader ? `${upstreamName}:${passthroughCacheSuffix(passthroughAuthorizationHeader)}` : upstreamName;
   const existing = runtime.upstreamConnections.get(key);
   if (!existing) {
     return;
@@ -520,8 +550,8 @@ async function getUpstreamConnection(
   options: { forceOAuthRefresh?: boolean; passthroughAuthorizationHeader?: string } = {}
 ): Promise<UpstreamConnection> {
   const { forceOAuthRefresh = false, passthroughAuthorizationHeader } = options;
-  const cacheKey = passthroughAuthorizationHeader ? `${upstream.name}:passthrough` : upstream.name;
-  const fingerprint = specFingerprint(upstream.spec);
+  const cacheKey = passthroughAuthorizationHeader ? `${upstream.name}:${passthroughCacheSuffix(passthroughAuthorizationHeader)}` : upstream.name;
+  const fingerprint = specFingerprint(upstream.spec, secrets);
 
   if (!forceOAuthRefresh) {
     const existing = runtime.upstreamConnections.get(cacheKey);
@@ -718,11 +748,11 @@ async function handleListTools(
         runtime.tokenCache = new Map();
       }
       const cached = runtime.tokenCache.get(upstream.name);
-      const existing = cached?.fingerprint === specFingerprint(upstream.spec) ? cached.count : { tools: 0, resources: 0, prompts: 0, total: 0 };
+      const existing = cached?.fingerprint === specFingerprint(upstream.spec, secrets) ? cached.count : { tools: 0, resources: 0, prompts: 0, total: 0 };
       existing.tools = Math.ceil(JSON.stringify(result.tools ?? []).length / 4);
       existing.total = existing.tools + existing.resources + existing.prompts;
       delete existing.error;
-      runtime.tokenCache.set(upstream.name, { fingerprint: specFingerprint(upstream.spec), count: existing });
+      runtime.tokenCache.set(upstream.name, { fingerprint: specFingerprint(upstream.spec, secrets), count: existing });
 
       for (const tool of result.tools ?? []) {
         const name = typeof tool.name === "string" ? tool.name : "tool";
@@ -780,11 +810,11 @@ async function handleListResources(
         runtime.tokenCache = new Map();
       }
       const cached = runtime.tokenCache.get(upstream.name);
-      const existing = cached?.fingerprint === specFingerprint(upstream.spec) ? cached.count : { tools: 0, resources: 0, prompts: 0, total: 0 };
+      const existing = cached?.fingerprint === specFingerprint(upstream.spec, secrets) ? cached.count : { tools: 0, resources: 0, prompts: 0, total: 0 };
       existing.resources = Math.ceil(JSON.stringify(result.resources ?? []).length / 4);
       existing.total = existing.tools + existing.resources + existing.prompts;
       delete existing.error;
-      runtime.tokenCache.set(upstream.name, { fingerprint: specFingerprint(upstream.spec), count: existing });
+      runtime.tokenCache.set(upstream.name, { fingerprint: specFingerprint(upstream.spec, secrets), count: existing });
 
       for (const resource of result.resources ?? []) {
         const originalUri = typeof resource.uri === "string" ? resource.uri : "";
@@ -844,11 +874,11 @@ async function handleListPrompts(
         runtime.tokenCache = new Map();
       }
       const cached = runtime.tokenCache.get(upstream.name);
-      const existing = cached?.fingerprint === specFingerprint(upstream.spec) ? cached.count : { tools: 0, resources: 0, prompts: 0, total: 0 };
+      const existing = cached?.fingerprint === specFingerprint(upstream.spec, secrets) ? cached.count : { tools: 0, resources: 0, prompts: 0, total: 0 };
       existing.prompts = Math.ceil(JSON.stringify(result.prompts ?? []).length / 4);
       existing.total = existing.tools + existing.resources + existing.prompts;
       delete existing.error;
-      runtime.tokenCache.set(upstream.name, { fingerprint: specFingerprint(upstream.spec), count: existing });
+      runtime.tokenCache.set(upstream.name, { fingerprint: specFingerprint(upstream.spec, secrets), count: existing });
 
       for (const prompt of result.prompts ?? []) {
         const name = typeof prompt.name === "string" ? prompt.name : "prompt";
@@ -1053,7 +1083,7 @@ async function handleRequestObject(
   if (upstreamFilter && listUpstreams(config, upstreamFilter).length === 0) {
     return makeError(id, -32602, `Unknown upstream: ${upstreamFilter}`);
   }
-  await reconcileUpstreamConnections(config, runtime);
+  await reconcileUpstreamConnections(config, secrets, runtime);
 
   if (request.method === "custom/tokenCounts") {
     const result = await getUpstreamTokenCounts(config, secrets, runtime);
@@ -1190,6 +1220,18 @@ async function maybeHandleWellKnownOAuthRequest(
   return true;
 }
 
+const SENSITIVE_HEADER_NAMES = new Set(["authorization", "x-mcpx-local-token"]);
+
+function redactSensitiveHeaders(headers: http.IncomingHttpHeaders): http.IncomingHttpHeaders {
+  const redacted: http.IncomingHttpHeaders = { ...headers };
+  for (const name of Object.keys(redacted)) {
+    if (SENSITIVE_HEADER_NAMES.has(name.toLowerCase())) {
+      redacted[name] = "[redacted]";
+    }
+  }
+  return redacted;
+}
+
 export function createGatewayServer(options: GatewayServerOptions): http.Server {
   const debug = process.env.MCPX_GATEWAY_DEBUG === "1";
   const runtime: GatewayRuntimeState = {
@@ -1204,7 +1246,11 @@ export function createGatewayServer(options: GatewayServerOptions): http.Server 
       const upstreamFilter = getRequestedUpstream(requestUrl);
       if (debug) {
         console.error(`[mcpx gateway] ${request.method ?? "?"} ${requestUrl.pathname} auth=${request.headers.authorization ? "yes" : "no"} accept=${request.headers.accept ?? ""}`);
-        console.error(`[mcpx gateway] headers=${JSON.stringify(request.headers)}`);
+        // Redact credential-bearing headers -- MCPX_GATEWAY_DEBUG dumps every
+        // request to the daemon log, which is exactly the file a user attaches
+        // to a bug report. The local gateway token and any passthrough
+        // upstream OAuth token must never land there in cleartext.
+        console.error(`[mcpx gateway] headers=${JSON.stringify(redactSensitiveHeaders(request.headers))}`);
       }
 
       if (await maybeHandleWellKnownOAuthRequest(request, response, requestUrl, options.secrets)) {

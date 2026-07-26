@@ -1435,4 +1435,161 @@ describe("gateway passthrough", () => {
     expect(events[1]?.id).toBe(2);
     expect(events[1]?.result).toEqual({ ok: true });
   });
+
+  it("picks up a re-authenticated OAuth token on the very next call, without needing an intervening 401", async () => {
+    // Regression test: specFingerprint() used to be called with no `secrets`
+    // argument anywhere in the file, so the "has this upstream's resolved
+    // credential changed?" check always fell back to JSON.stringify(spec) --
+    // which is identical before and after a re-login, since bindOAuthReference
+    // writes a constant "oauth://<name>" string. The gateway kept serving
+    // requests through the connection cached with the OLD access token baked
+    // into its transport until some unrelated event happened to evict it, so
+    // re-authenticating looked like it silently did nothing.
+    const env = setupTempEnv("mcpx-gateway-reauth-fingerprint-");
+    cleanups.push(env.restore);
+
+    const receivedTokens: string[] = [];
+    const upstream = await startServer(async (req, res) => {
+      receivedTokens.push(req.headers.authorization ?? "");
+      const chunks: Buffer[] = [];
+      for await (const chunk of req) {
+        chunks.push(Buffer.from(chunk));
+      }
+      const payload = JSON.parse(Buffer.concat(chunks).toString("utf8")) as { method: string; id: string | number | null };
+      if (payload.method === "initialize") {
+        respondWithInit(res, payload.id);
+        return;
+      }
+      if (!payload.id) {
+        res.statusCode = 202;
+        res.end();
+        return;
+      }
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ jsonrpc: "2.0", id: payload.id, result: { tools: [{ name: "echo", inputSchema: { type: "object" } }] } }));
+    });
+    cleanups.push(() => closeServer(upstream.server));
+
+    const config = defaultConfig();
+    config.servers.vercel = {
+      transport: "http",
+      url: `http://127.0.0.1:${upstream.port}/mcp`,
+      headers: { Authorization: "oauth://vercel" }
+    };
+    saveConfig(config);
+
+    const secrets = new MemorySecrets();
+    secrets.setSecret("oauth_vercel_client", JSON.stringify({ client_id: "client-id", token_endpoint_auth_method: "none" }));
+    secrets.setSecret("oauth_vercel_tokens", JSON.stringify({
+      tokens: { access_token: "token-a", token_type: "Bearer", expires_in: 3600 },
+      obtainedAt: Date.now()
+    }));
+
+    const gateway = createGatewayServer({ port: 0, expectedToken: "test-local-token", secrets });
+    await waitForListening(gateway);
+    cleanups.push(() => closeServer(gateway));
+
+    const address = gateway.address();
+    if (!address || typeof address === "string") {
+      throw new Error("Failed to resolve gateway address.");
+    }
+
+    const call = () =>
+      fetch(`http://127.0.0.1:${address.port}/mcp`, {
+        method: "POST",
+        headers: { "content-type": "application/json", Authorization: "Bearer test-local-token" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} })
+      });
+
+    const first = await call();
+    expect(first.status).toBe(200);
+    expect(receivedTokens.at(-1)).toBe("Bearer token-a");
+
+    // Simulate `mcpx auth login vercel` completing out-of-band (e.g. in a
+    // separate mcpx process) -- a fresh token with no 401 ever occurring.
+    secrets.setSecret("oauth_vercel_tokens", JSON.stringify({
+      tokens: { access_token: "token-b", token_type: "Bearer", expires_in: 3600 },
+      obtainedAt: Date.now() + 1000
+    }));
+
+    const second = await call();
+    expect(second.status).toBe(200);
+    expect(receivedTokens.at(-1)).toBe("Bearer token-b");
+  });
+
+  it("does not let two clients' different passthrough tokens for the same upstream share a cached connection", async () => {
+    // Regression test: the passthrough connection cache key used to be a
+    // constant "<name>:passthrough" that didn't depend on the token itself,
+    // so whichever client connected first "won" and the second client's
+    // calls silently executed under the first client's credentials for the
+    // life of that cached connection.
+    const env = setupTempEnv("mcpx-gateway-passthrough-isolation-");
+    cleanups.push(env.restore);
+
+    const toolsListTokens: string[] = [];
+    const upstream = await startServer(async (req, res) => {
+      const chunks: Buffer[] = [];
+      for await (const chunk of req) {
+        chunks.push(Buffer.from(chunk));
+      }
+      const payload = JSON.parse(Buffer.concat(chunks).toString("utf8")) as { method: string; id: string | number | null };
+      if (payload.method === "initialize") {
+        respondWithInit(res, payload.id);
+        return;
+      }
+      if (!payload.id) {
+        res.statusCode = 202;
+        res.end();
+        return;
+      }
+      if (payload.method === "tools/list") {
+        toolsListTokens.push(req.headers.authorization ?? "");
+      }
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ jsonrpc: "2.0", id: payload.id, result: { tools: [] } }));
+    });
+    cleanups.push(() => closeServer(upstream.server));
+
+    // No auth header configured on the upstream at all -- the gateway's own
+    // credential resolution stays out of the way, and passthrough (any
+    // client Authorization that isn't the local gateway token) is the only
+    // auth mechanism in play, which is exactly what this test targets.
+    const config = defaultConfig();
+    config.servers.vercel = {
+      transport: "http",
+      url: `http://127.0.0.1:${upstream.port}/mcp`
+    };
+    saveConfig(config);
+
+    const gateway = createGatewayServer({ port: 0, expectedToken: "test-local-token", secrets: new SecretsManager() });
+    await waitForListening(gateway);
+    cleanups.push(() => closeServer(gateway));
+
+    const address = gateway.address();
+    if (!address || typeof address === "string") {
+      throw new Error("Failed to resolve gateway address.");
+    }
+
+    // x-mcpx-local-token authenticates to the gateway itself; Authorization
+    // carries the per-client credential forwarded to the upstream (passthrough
+    // is any Authorization value that isn't the local gateway token).
+    const callAs = (clientToken: string) =>
+      fetch(`http://127.0.0.1:${address.port}/mcp`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-mcpx-local-token": "test-local-token",
+          Authorization: `Bearer ${clientToken}`
+        },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} })
+      });
+
+    await callAs("client-a-token");
+    await callAs("client-b-token");
+    // Repeat client A -- if the cache were keyed only by upstream name, this
+    // third call could reuse client B's cached connection instead of A's own.
+    await callAs("client-a-token");
+
+    expect(toolsListTokens).toEqual(["Bearer client-a-token", "Bearer client-b-token", "Bearer client-a-token"]);
+  });
 });

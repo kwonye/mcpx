@@ -27,22 +27,24 @@ export function EditServerForm({
   const [command, setCommand] = useState(transport === "stdio" ? target : "");
   const [url, setUrl] = useState(transport === "http" ? target : "");
   const [args, setArgs] = useState("");
-  const [envVars, setEnvVars] = useState<Array<{ key: string; value: string; isSecret: boolean }>>(
+  const [envVars, setEnvVars] = useState<Array<{ key: string; value: string; isSecret: boolean; originalRef?: string }>>(
     authBindings
       .filter((b) => b.kind === "env")
       .map((b) => ({
         key: b.key,
         value: b.value?.startsWith("secret://") ? "" : (b.value ?? ""),
-        isSecret: b.value?.startsWith("secret://") ?? false
+        isSecret: b.value?.startsWith("secret://") ?? false,
+        originalRef: b.value?.startsWith("secret://") ? b.value : undefined
       }))
   );
-  const [headers, setHeaders] = useState<Array<{ key: string; value: string; isSecret: boolean }>>(
+  const [headers, setHeaders] = useState<Array<{ key: string; value: string; isSecret: boolean; originalRef?: string }>>(
     authBindings
       .filter((b) => b.kind === "header")
       .map((b) => ({
         key: b.key,
         value: b.value?.startsWith("secret://") ? "" : (b.value ?? ""),
-        isSecret: b.value?.startsWith("secret://") ?? false
+        isSecret: b.value?.startsWith("secret://") ?? false,
+        originalRef: b.value?.startsWith("secret://") ? b.value : undefined
       }))
   );
 
@@ -75,10 +77,16 @@ export function EditServerForm({
 
     const resolvedSecrets: Record<string, string> = {};
 
-    // Build secret refs and collect resolved values
-    const buildSecretRef = (kind: "env" | "header", key: string, value: string, isSecret: boolean): string => {
-      if (!value) return "";
-      
+    // Build secret refs and collect resolved values. A blank value on a row
+    // that's marked as a secret does NOT mean "delete this binding" -- the
+    // renderer never receives the actual secret value, so existing
+    // secret-backed rows are always initialized blank (see useState above).
+    // Only an explicitly-removed row (via the "x" button, which drops it from
+    // the envVars/headers array entirely) should result in a deleted binding;
+    // an untouched row must keep pointing at its original secret.
+    const buildSecretRef = (kind: "env" | "header", key: string, value: string, isSecret: boolean, originalRef?: string): string => {
+      if (!value) return originalRef ?? "";
+
       if (isSecret) {
         const secretName = `auth_${serverName.toLowerCase().replace(/[^a-z0-9._-]/g, "_")}_${kind}_${key.toLowerCase().replace(/[^a-z0-9._-]/g, "_")}`;
         resolvedSecrets[secretName] = value;
@@ -93,8 +101,10 @@ export function EditServerForm({
     if (transport === "http") {
       const headersObj: Record<string, string> = {};
       headers.forEach((h) => {
-        if (h.key && h.value) {
-          headersObj[h.key] = buildSecretRef("header", h.key, h.value, h.isSecret);
+        if (!h.key) return;
+        const ref = buildSecretRef("header", h.key, h.value, h.isSecret, h.originalRef);
+        if (ref) {
+          headersObj[h.key] = ref;
         }
       });
 
@@ -106,8 +116,10 @@ export function EditServerForm({
     } else {
       const envObj: Record<string, string> = {};
       envVars.forEach((e) => {
-        if (e.key && e.value) {
-          envObj[e.key] = buildSecretRef("env", e.key, e.value, e.isSecret);
+        if (!e.key) return;
+        const ref = buildSecretRef("env", e.key, e.value, e.isSecret, e.originalRef);
+        if (ref) {
+          envObj[e.key] = ref;
         }
       });
 
