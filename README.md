@@ -216,6 +216,11 @@ mcpx auth set next-devtools --env NEXT_DEVTOOLS_TOKEN --value "<token>"
 mcpx auth show
 mcpx auth rm vercel --header Authorization --delete-secret
 mcpx auth rotate-local-token
+
+# OAuth
+mcpx auth login vercel     # browser sign-in for an HTTP upstream that supports OAuth
+mcpx auth status           # sign-in state, token expiry, and secret-binding status (offline)
+mcpx auth logout vercel    # clear stored OAuth credentials and the Authorization binding
 ```
 
 ### Daemon lifecycle
