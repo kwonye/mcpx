@@ -496,9 +496,9 @@ async function maybeConfigureStdioAuth(
   });
 
   try {
-    const shouldMigrate = await promptLine(rl, "Store them in the system keychain instead? (Y/n): ");
+    const shouldMigrate = await promptLine(rl, "Store them in the encrypted secret store instead? (Y/n): ");
     if (isNegativeChoice(shouldMigrate)) {
-      process.stdout.write("Skipping keychain migration.\n");
+      process.stdout.write("Skipping secret migration.\n");
       return;
     }
 
@@ -510,7 +510,7 @@ async function maybeConfigureStdioAuth(
       process.stdout.write(`Stored ${binding.key} as secret://${secretName}\n`);
     }
   } catch (error) {
-    process.stdout.write(`Keychain migration skipped: ${(error as Error).message}\n`);
+    process.stdout.write(`Secret migration skipped: ${(error as Error).message}\n`);
   } finally {
     rl.close();
   }
@@ -937,7 +937,7 @@ async function clearServerAuthInteractively(rl: ReadlineInterface, serverName: s
 
   let shouldDeleteSecret = false;
   if (selected.secretName) {
-    const shouldDelete = (await promptLine(rl, `Delete keychain secret "${selected.secretName}" too? (y/N): `)).toLowerCase();
+    const shouldDelete = (await promptLine(rl, `Delete stored secret "${selected.secretName}" too? (y/N): `)).toLowerCase();
     shouldDeleteSecret = shouldDelete === "y" || shouldDelete === "yes";
   }
 
@@ -1326,7 +1326,7 @@ function registerAddCommand(parent: Command, cliPath: string): void {
 
         let spec = mapRegistryToSpec(shortName, option, resolvedValues) as UpstreamServerSpec;
 
-        // Store secret inputs in keychain
+        // Store secret inputs in the encrypted secret store
         for (const input of requiredInputs) {
           if (!input.isSecret) continue;
           const rawValue = resolvedValues[input.name];
@@ -1673,12 +1673,12 @@ function registerDaemonCommands(program: Command): void {
 }
 
 function registerSecretsCommands(program: Command): void {
-  const secret = program.command("secret").description("Manage keychain-backed secrets");
+  const secret = program.command("secret").description("Manage encrypted secrets");
 
   secret
     .command("set <name>")
     .option("--value <value>", "Secret value")
-    .description("Set secret in OS keychain")
+    .description("Set an encrypted secret")
     .action((name: string, options: { value?: string }) => {
       const value = options.value ?? readSecretValueFromStdin();
       new SecretsManager().setSecret(name, value);
@@ -1687,7 +1687,7 @@ function registerSecretsCommands(program: Command): void {
 
   secret
     .command("rm <name>")
-    .description("Remove secret from OS keychain")
+    .description("Remove an encrypted secret")
     .action((name: string) => {
       new SecretsManager().removeSecret(name);
       process.stdout.write(`Secret removed: ${name}\n`);
@@ -1812,9 +1812,9 @@ function registerAuthCommands(program: Command): void {
     .option("--header <name>", "HTTP header name (default for HTTP servers: Authorization)")
     .option("--env <name>", "Env var name (required for stdio servers)")
     .option("--value <value>", "Auth value/token (if omitted, read from stdin)")
-    .option("--secret-name <name>", "Override keychain secret name")
+    .option("--secret-name <name>", "Override stored secret name")
     .option("--raw", "Do not auto-prefix Authorization values with Bearer")
-    .description("Store auth in keychain and bind it to an upstream server")
+    .description("Store auth as an encrypted secret and bind it to an upstream server")
     .action(async (server: string, options: AuthSetOptions) => {
       const config = loadConfig();
       const spec = getServerSpecOrThrow(config, server);
@@ -1838,7 +1838,7 @@ function registerAuthCommands(program: Command): void {
     .command("rm <server>")
     .option("--header <name>", "HTTP header name (default for HTTP servers: Authorization)")
     .option("--env <name>", "Env var name (required for stdio servers)")
-    .option("--delete-secret", "Delete referenced keychain secret when removing binding")
+    .option("--delete-secret", "Delete the referenced stored secret when removing binding")
     .description("Remove auth binding from an upstream server")
     .action(async (server: string, options: AuthRemoveOptions) => {
       const config = loadConfig();
@@ -1865,7 +1865,7 @@ function registerAuthCommands(program: Command): void {
           process.stdout.write(`Removed binding and deleted ${removed.length} OAuth credential${removed.length === 1 ? "" : "s"}.\n`);
           process.stdout.write(`(Equivalent to \`mcpx auth logout ${server}\`.)\n`);
         } else {
-          process.stdout.write("Removed binding. Value was inline (no keychain secret deleted).\n");
+          process.stdout.write("Removed binding. Value was inline (no stored secret deleted).\n");
         }
       } else {
         process.stdout.write("Removed binding.\n");

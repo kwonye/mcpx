@@ -11,5 +11,5 @@
       "@mcpx/core": ["../cli/src/core/index.ts"]
     }
   },
-  "include": ["src/main/**/*.ts"]
+  "include": ["src/main/**/*.ts", "src/preload/**/*.ts"]
 }

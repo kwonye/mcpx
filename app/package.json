@@ -79,6 +79,7 @@
     "dev:inspect": "electron-vite dev --remoteDebuggingPort 9222",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
+    "typecheck": "tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.web.json --noEmit",
     "test": "bunx vitest run",
     "test:watch": "bunx vitest",
     "e2e": "bunx playwright test",

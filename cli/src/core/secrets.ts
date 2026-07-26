@@ -110,6 +110,14 @@ export class SecretsManager {
   setSecret(name: string, value: string): void {
     let map = this.readStore();
     if (map === null) {
+      // readStore() returns null both when the store simply doesn't exist yet
+      // (normal on first run) and when it exists but failed to decrypt (a
+      // corrupt file, or the encryption key was lost/regenerated) -- only the
+      // latter is destructive enough to warn about: every stored secret
+      // (API keys, OAuth tokens) is about to become unrecoverable.
+      if (fs.existsSync(this.storePath)) {
+        console.error(`[mcpx] Warning: the secrets store at ${this.storePath} could not be read (corrupt, or its encryption key changed) and is being reset. All previously stored secrets will need to be re-entered.`);
+      }
       this.recoverCorruptStore();
       map = {};
     }
