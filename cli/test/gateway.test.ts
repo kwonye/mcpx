@@ -822,6 +822,80 @@ describe("gateway passthrough", () => {
     expect(requestedPath).toBe("/.well-known/oauth-protected-resource/mcp");
   });
 
+  it("returns a clean 502 instead of hanging or crashing when the upstream well-known endpoint is unreachable", async () => {
+    // Regression test: this fetch used to have no AbortController/timeout and
+    // no try/catch, unlike every other outbound fetch in the gateway.
+    const env = setupTempEnv("mcpx-gateway-oauth-wk-unreachable-");
+    cleanups.push(env.restore);
+
+    const config = defaultConfig();
+    config.servers.vercel = {
+      transport: "http",
+      url: "http://127.0.0.1:1/mcp", // reserved port, refuses connections
+      headers: { Authorization: "Bearer test-token" }
+    };
+    saveConfig(config);
+
+    const gateway = createGatewayServer({ port: 0, expectedToken: "test-local-token", secrets: new SecretsManager() });
+    await waitForListening(gateway);
+    cleanups.push(() => closeServer(gateway));
+
+    const gatewayAddress = gateway.address();
+    if (!gatewayAddress || typeof gatewayAddress === "string") {
+      throw new Error("Failed to resolve gateway address.");
+    }
+
+    const response = await fetch(`http://127.0.0.1:${gatewayAddress.port}/.well-known/oauth-protected-resource`);
+
+    expect(response.status).toBe(502);
+    const payload = (await response.json()) as { error: string };
+    expect(payload.error).toBe("upstream_unreachable");
+  });
+
+  it("resolves an oauth:// Authorization binding to a real bearer token when proxying the well-known request", async () => {
+    // Regression test: resolveMaybeSecret only understands secret:// refs, so
+    // an oauth:// binding used to be forwarded to the upstream verbatim as
+    // the literal header value "Authorization: oauth://<name>".
+    const env = setupTempEnv("mcpx-gateway-oauth-wk-oauthref-");
+    cleanups.push(env.restore);
+
+    let receivedAuth = "";
+    const upstream = await startServer(async (req, res) => {
+      receivedAuth = req.headers.authorization ?? "";
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ resource: "https://example.com/" }));
+    });
+    cleanups.push(() => closeServer(upstream.server));
+
+    const config = defaultConfig();
+    config.servers.vercel = {
+      transport: "http",
+      url: `http://127.0.0.1:${upstream.port}/mcp`,
+      headers: { Authorization: "oauth://vercel" }
+    };
+    saveConfig(config);
+
+    const secrets = new MemorySecrets();
+    secrets.setSecret("oauth_vercel_tokens", JSON.stringify({
+      tokens: { access_token: "well-known-token", token_type: "Bearer", expires_in: 3600 },
+      obtainedAt: Date.now()
+    }));
+
+    const gateway = createGatewayServer({ port: 0, expectedToken: "test-local-token", secrets });
+    await waitForListening(gateway);
+    cleanups.push(() => closeServer(gateway));
+
+    const gatewayAddress = gateway.address();
+    if (!gatewayAddress || typeof gatewayAddress === "string") {
+      throw new Error("Failed to resolve gateway address.");
+    }
+
+    const response = await fetch(`http://127.0.0.1:${gatewayAddress.port}/.well-known/oauth-protected-resource`);
+
+    expect(response.status).toBe(200);
+    expect(receivedAuth).toBe("Bearer well-known-token");
+  });
+
   it("rewrites upstream WWW-Authenticate resource_metadata to local gateway endpoint", async () => {
     const env = setupTempEnv("mcpx-gateway-auth-rewrite-");
     cleanups.push(env.restore);

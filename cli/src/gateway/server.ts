@@ -1177,13 +1177,47 @@ async function maybeHandleWellKnownOAuthRequest(
   }
 
   for (const [key, value] of Object.entries(upstream.spec.headers ?? {})) {
-    headers[key] = secrets.resolveMaybeSecret(value);
+    // resolveMaybeSecret only understands secret:// refs; for an oauth://
+    // reference it would return the literal string unchanged, forwarding a
+    // nonsensical "Authorization: oauth://<name>" header upstream. Resolve
+    // it to a real bearer token the same way the MCP call path does.
+    if (key.toLowerCase() === "authorization" && isOAuthReference(value)) {
+      try {
+        const accessToken = await getOAuthAccessToken(oauthReferenceServerName(value), upstream.spec, secrets);
+        headers[key] = `Bearer ${accessToken}`;
+      } catch {
+        // No usable token -- omit the header rather than sending the raw
+        // oauth:// marker; the upstream will respond as it would to any
+        // other unauthenticated well-known request.
+      }
+    } else {
+      headers[key] = secrets.resolveMaybeSecret(value);
+    }
   }
 
-  const upstreamResponse = await fetch(upstreamWellKnownUrl, {
-    method: "GET",
-    headers
-  });
+  const timeoutController = new AbortController();
+  const timeoutHandle = setTimeout(() => timeoutController.abort(), DEFAULT_CONNECT_TIMEOUT_MS);
+  let upstreamResponse: Response;
+  try {
+    upstreamResponse = await fetch(upstreamWellKnownUrl, {
+      method: "GET",
+      headers,
+      signal: timeoutController.signal
+    });
+  } catch (error) {
+    const isAbort = (error as { name?: string }).name === "AbortError";
+    response.statusCode = 502;
+    response.setHeader("content-type", "application/json");
+    response.end(JSON.stringify({
+      error: "upstream_unreachable",
+      message: isAbort
+        ? `Well-known request timed out after ${DEFAULT_CONNECT_TIMEOUT_MS}ms.`
+        : (error instanceof Error ? error.message : String(error))
+    }));
+    return true;
+  } finally {
+    clearTimeout(timeoutHandle);
+  }
   let bodyText = await upstreamResponse.text();
   response.statusCode = upstreamResponse.status;
 
