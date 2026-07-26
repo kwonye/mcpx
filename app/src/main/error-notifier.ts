@@ -11,6 +11,8 @@ export interface TokenCountEntry {
   total: number;
   error?: string;
   runtimeError?: string;
+  errorCode?: string;
+  runtimeErrorCode?: string;
 }
 
 export interface NotificationItem {

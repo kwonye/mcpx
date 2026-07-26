@@ -6,8 +6,7 @@
     "lib": ["ES2022"],
     "strict": true,
     "esModuleInterop": true,
-    "outDir": "out/main",
-    "rootDir": "src/main",
+    "skipLibCheck": true,
     "paths": {
       "@mcpx/core": ["../cli/src/core/index.ts"]
     }

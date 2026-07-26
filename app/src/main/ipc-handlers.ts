@@ -302,9 +302,9 @@ export function registerIpcHandlers(): void {
       }
 
       if (kind === "header") {
-        const headers = { ...(spec.headers ?? {}) };
+        const headers = { ...((spec as HttpServerSpec).headers ?? {}) };
         headers[key] = `secret://${secretName}`;
-        spec.headers = Object.keys(headers).length > 0 ? headers : undefined;
+        (spec as HttpServerSpec).headers = Object.keys(headers).length > 0 ? headers : undefined;
       } else {
         const env = { ...((spec as StdioServerSpec).env ?? {}) };
         env[key] = `secret://${secretName}`;

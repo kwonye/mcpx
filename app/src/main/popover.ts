@@ -117,7 +117,7 @@ function createPopoverWindow(): BrowserWindow {
 
   loadPopoverContent(popover);
 
-  popover.on("blur", (event) => {
+  popover.on("blur", () => {
     // Skip hide while DevTools are focused
     if (popover?.webContents.isDevToolsOpened() && popover?.webContents.isDevToolsFocused()) {
       return;

@@ -2,7 +2,7 @@ import { useState } from "react";
 import { EditServerForm } from "./EditServerForm";
 import { Toggle } from "./ui";
 import { useServerEnabled } from "../hooks/useServerEnabled";
-import type { UpstreamServerSpec } from "@mcpx/core";
+import type { StatusAuthBinding, UpstreamServerSpec } from "@mcpx/core";
 
 interface ServerDetailProps {
   server: {
@@ -10,7 +10,7 @@ interface ServerDetailProps {
     enabled: boolean;
     transport: string;
     target: string;
-    authBindings: Array<{ kind: string; key: string; value: string }>;
+    authBindings: StatusAuthBinding[];
     clients: Array<{ clientId: string; status: string; managed: boolean }>;
   };
   onBack: () => void;

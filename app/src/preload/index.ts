@@ -35,7 +35,9 @@ const api = {
   onAuthRequired: (callback: (entry: { serverName: string; oauthLikely?: boolean; status?: number }) => void) => {
     const listener = (_event: IpcRendererEvent, entry: { serverName: string; oauthLikely?: boolean; status?: number }) => callback(entry);
     ipcRenderer.on(IPC.AUTH_REQUIRED, listener);
-    return () => ipcRenderer.removeListener(IPC.AUTH_REQUIRED, listener);
+    return () => {
+      ipcRenderer.removeListener(IPC.AUTH_REQUIRED, listener);
+    };
   },
   startOauth: (serverName: string) => invokeIpc(IPC.START_OAUTH, serverName),
   dismissAuth: (serverName: string) => invokeIpc(IPC.DISMISS_AUTH, serverName),

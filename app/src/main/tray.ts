@@ -114,19 +114,20 @@ export function createTray(): Tray {
   }
   
   const icon = getStatusIcon(daemonRunning);
-  tray = new Tray(icon);
-  tray.setToolTip(productName);
+  const newTray = new Tray(icon);
+  tray = newTray;
+  newTray.setToolTip(productName);
 
-  tray.on("click", (_event, bounds) => {
-    togglePopover(tray, bounds);
+  newTray.on("click", (_event, bounds) => {
+    togglePopover(newTray, bounds);
   });
 
-  tray.on("right-click", () => {
+  newTray.on("right-click", () => {
     hidePopover();
-    tray!.popUpContextMenu(buildContextMenu(daemonRunning));
+    newTray.popUpContextMenu(buildContextMenu(daemonRunning));
   });
 
-  return tray;
+  return newTray;
 }
 
 export function updateTrayForDaemonStatus(running: boolean): void {

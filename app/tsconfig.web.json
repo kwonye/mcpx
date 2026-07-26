@@ -7,10 +7,11 @@
     "jsx": "react-jsx",
     "strict": true,
     "esModuleInterop": true,
-    "outDir": "out/renderer",
-    "rootDir": "src/renderer",
+    "skipLibCheck": true,
+    "types": ["vite/client"],
     "paths": {
-      "@renderer/*": ["./src/renderer/*"]
+      "@renderer/*": ["./src/renderer/*"],
+      "@mcpx/core": ["../cli/src/core/index.ts"]
     }
   },
   "include": ["src/renderer/**/*.ts", "src/renderer/**/*.tsx"]
