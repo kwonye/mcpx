@@ -7,8 +7,8 @@ export { UpstreamError, SecretNotFoundError, classifyUpstreamError } from "./err
 export type { UpstreamErrorCode } from "./errors.js";
 export { parseCliAddCommand, tokenizeCommandLine } from "./add-command.js";
 export { buildEnrichedPath } from "./spawn-env.js";
-export { runOAuthLogin, getOAuthAccessToken, isOAuthReference, oauthReferenceServerName } from "./oauth.js";
-export type { OAuthCodeReceiver } from "./oauth.js";
+export { runOAuthLogin, getOAuthAccessToken, isOAuthReference, oauthReferenceServerName, probeOAuthSupport, __resetOAuthSupportCache } from "./oauth.js";
+export type { OAuthCodeReceiver, OAuthSupport, OAuthSupportProbe } from "./oauth.js";
 
 // Daemon
 export {

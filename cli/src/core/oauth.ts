@@ -3,6 +3,8 @@ import crypto from "node:crypto";
 import {
   auth,
   discoverOAuthServerInfo,
+  discoverOAuthProtectedResourceMetadata,
+  discoverAuthorizationServerMetadata,
   refreshAuthorization,
   type OAuthClientProvider,
   type OAuthDiscoveryState
@@ -54,6 +56,121 @@ export function oauthReferenceServerName(value: string): string {
     throw new Error(`Not an OAuth reference: ${value}`);
   }
   return decodeURIComponent(value.slice("oauth://".length));
+}
+
+/**
+ * Whether an HTTP MCP server advertises OAuth support, determined by attempting
+ * RFC 9728 / RFC 8414 discovery and inspecting what came back.
+ *
+ * "unknown" vs "unsupported" is a real distinction, not decoration. RFC 9728
+ * protected-resource metadata is checked directly (and independently of RFC 8414)
+ * because its presence alone is authoritative proof of OAuth support — we must
+ * not lose that positive signal just because the authorization server it points
+ * to happens to be unreachable at probe time (discoverOAuthServerInfo's combined
+ * walk would throw in that case and discard the resourceMetadata result it
+ * already had). We track whether we ever received an actual HTTP response during
+ * discovery; if we never did, the probe couldn't reach the server at all and the
+ * verdict must be "unknown" so a flaky network never permanently hides the sign-in
+ * option.
+ */
+export type OAuthSupport = "supported" | "unsupported" | "unknown";
+
+export interface OAuthSupportProbe {
+  support: OAuthSupport;
+  authorizationServerUrl?: string;
+  resourceMetadata: boolean;
+  authorizationServerMetadata: boolean;
+  error?: string;
+}
+
+const DEFAULT_OAUTH_SUPPORT_TIMEOUT_MS = 5000;
+const OAUTH_SUPPORT_SUPPORTED_TTL_MS = 5 * 60_000;
+const OAUTH_SUPPORT_NEGATIVE_TTL_MS = 60_000;
+
+const oauthSupportCache = new Map<string, { at: number; probe: OAuthSupportProbe }>();
+
+/** Test-only: clears the in-memory OAuth support cache. */
+export function __resetOAuthSupportCache(): void {
+  oauthSupportCache.clear();
+}
+
+export async function probeOAuthSupport(
+  serverUrl: string,
+  options: { timeoutMs?: number; force?: boolean } = {}
+): Promise<OAuthSupportProbe> {
+  const cached = oauthSupportCache.get(serverUrl);
+  if (!options.force && cached) {
+    const ttl = cached.probe.support === "unsupported" ? OAUTH_SUPPORT_NEGATIVE_TTL_MS : OAUTH_SUPPORT_SUPPORTED_TTL_MS;
+    if (Date.now() - cached.at < ttl) {
+      return cached.probe;
+    }
+  }
+
+  const timeoutMs = options.timeoutMs ?? DEFAULT_OAUTH_SUPPORT_TIMEOUT_MS;
+  let sawResponse = false;
+  const timeoutFetch: typeof fetch = async (input, init) => {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const response = await fetch(input, { ...init, signal: controller.signal });
+      sawResponse = true;
+      return response;
+    } finally {
+      clearTimeout(timeout);
+    }
+  };
+
+  let resourceMetadataFound = false;
+  let authorizationServerUrl: string | undefined;
+  try {
+    const resourceMetadata = await discoverOAuthProtectedResourceMetadata(serverUrl, {}, timeoutFetch);
+    resourceMetadataFound = true;
+    authorizationServerUrl = resourceMetadata.authorization_servers?.[0];
+  } catch {
+    // Not found, unreachable, or malformed — all fall through to the RFC 8414 check.
+    // sawResponse (set inside timeoutFetch) is what distinguishes "not found" from
+    // "couldn't check" below, not this catch.
+  }
+
+  let authServerMetadataFound = false;
+  if (!resourceMetadataFound) {
+    try {
+      // Legacy fallback per the MCP spec: treat the MCP server's own origin as the
+      // authorization server when RFC 9728 isn't present.
+      const fallbackAuthServerUrl = new URL("/", serverUrl);
+      const metadata = await discoverAuthorizationServerMetadata(fallbackAuthServerUrl, { fetchFn: timeoutFetch });
+      authServerMetadataFound = metadata != null;
+      if (authServerMetadataFound) {
+        authorizationServerUrl = fallbackAuthServerUrl.toString();
+      }
+    } catch {
+      // Same reasoning as above.
+    }
+  }
+
+  let probe: OAuthSupportProbe;
+  if (resourceMetadataFound || authServerMetadataFound) {
+    probe = {
+      support: "supported",
+      authorizationServerUrl,
+      resourceMetadata: resourceMetadataFound,
+      authorizationServerMetadata: authServerMetadataFound
+    };
+  } else if (sawResponse) {
+    // We got at least one real HTTP response somewhere in the discovery chain and
+    // none of it indicated OAuth support — this is a genuine negative result.
+    probe = { support: "unsupported", resourceMetadata: false, authorizationServerMetadata: false };
+  } else {
+    probe = {
+      support: "unknown",
+      resourceMetadata: false,
+      authorizationServerMetadata: false,
+      error: "Could not reach the server to check for OAuth support."
+    };
+  }
+
+  oauthSupportCache.set(serverUrl, { at: Date.now(), probe });
+  return probe;
 }
 
 function tokensAreExpiring(tokens: StoredOAuthTokens): boolean {

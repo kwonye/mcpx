@@ -1,5 +1,6 @@
 import type { HttpServerSpec } from "../types.js";
 import { SecretsManager } from "./secrets.js";
+import { probeOAuthSupport, type OAuthSupport } from "./oauth.js";
 
 const JSON_RPC_VERSION = "2.0";
 const DEFAULT_AUTH_PROBE_TIMEOUT_MS = 8000;
@@ -26,6 +27,8 @@ const AUTH_KEYWORDS = [
 export interface HttpAuthProbeResult {
   authRequired: boolean;
   oauthLikely?: boolean;
+  /** Result of RFC 9728 / RFC 8414 discovery, only populated when authRequired is true. */
+  oauthSupport?: OAuthSupport;
   status?: number;
   wwwAuthenticate?: string;
   error?: string;
@@ -61,10 +64,24 @@ function isOAuthLikelyChallenge(wwwAuthenticate: string | null): boolean {
 export async function probeHttpAuthRequirement(
   spec: HttpServerSpec,
   secrets: SecretsManager,
-  timeoutMs = DEFAULT_AUTH_PROBE_TIMEOUT_MS
+  timeoutMs = DEFAULT_AUTH_PROBE_TIMEOUT_MS,
+  options: { discoverOAuth?: boolean } = {}
 ): Promise<HttpAuthProbeResult> {
   const timeoutController = new AbortController();
   const timeoutHandle = setTimeout(() => timeoutController.abort(), timeoutMs);
+  const discoverOAuth = options.discoverOAuth ?? true;
+
+  async function withOAuthSupport(result: HttpAuthProbeResult): Promise<HttpAuthProbeResult> {
+    if (!discoverOAuth) {
+      return result;
+    }
+    const support = await probeOAuthSupport(spec.url).catch(() => undefined);
+    return {
+      ...result,
+      oauthSupport: support?.support,
+      oauthLikely: result.oauthLikely || support?.support === "supported"
+    };
+  }
 
   try {
     const headers = resolveHeaders(spec, secrets);
@@ -82,12 +99,12 @@ export async function probeHttpAuthRequirement(
 
     if (response.status === 401 || response.status === 403) {
       const wwwAuthenticate = response.headers.get("www-authenticate");
-      return {
+      return await withOAuthSupport({
         authRequired: true,
         oauthLikely: isOAuthLikelyChallenge(wwwAuthenticate),
         status: response.status,
         wwwAuthenticate: wwwAuthenticate ?? undefined
-      };
+      });
     }
 
     if (response.status === 200) {
@@ -104,11 +121,11 @@ export async function probeHttpAuthRequirement(
               ? (err as { message: string }).message
               : "";
           if (message && isAuthRelatedMessage(message)) {
-            return {
+            return await withOAuthSupport({
               authRequired: true,
               status: response.status,
               error: `JSON-RPC error: ${message}`
-            };
+            });
           }
         }
       } catch {
