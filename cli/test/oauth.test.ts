@@ -1,18 +1,28 @@
 import fs from "node:fs";
+import path from "node:path";
 import http from "node:http";
 import { afterEach, describe, expect, it } from "bun:test";
-import { getOAuthAccessToken, isOAuthReference, oauthReferenceServerName, runOAuthLogin } from "../src/core/oauth.js";
+import {
+  getOAuthAccessToken,
+  isOAuthReference,
+  oauthReferenceServerName,
+  oauthSecretNames,
+  runOAuthLogin,
+  OAuthCancelledError,
+  OAuthLoginInProgressError
+} from "../src/core/oauth.js";
 import type { OAuthCodeReceiver } from "../src/core/oauth.js";
 import { SecretsManager } from "../src/core/secrets.js";
 import { UpstreamError } from "../src/core/errors.js";
+import { defaultConfig, loadConfig, saveConfig } from "../src/core/config.js";
 import type { HttpServerSpec } from "../src/types.js";
 import { setupTempEnv } from "./helpers.js";
 
-// Mirrors the private oauthSecretName() naming scheme in src/core/oauth.ts (not
-// exported). Only ever called here with serverName values that are already
-// lowercase and contain no characters that scheme would need to substitute.
+// Thin wrapper around the real oauthSecretNames() export, kept only so the many
+// call sites below can pass a suffix string instead of destructuring — this
+// cannot drift from the actual naming scheme the way a hand-mirrored regex could.
 function secretName(serverName: string, suffix: "client" | "tokens" | "verifier" | "discovery"): string {
-  return `oauth_${serverName}_${suffix}`;
+  return oauthSecretNames(serverName)[suffix];
 }
 
 function seedClientSecret(secrets: SecretsManager, serverName: string, clientId = "test-client"): void {
@@ -397,5 +407,291 @@ describe("runOAuthLogin rollback", () => {
 
     expect(err).toBeInstanceOf(Error);
     expect((err as Error).message).toContain("404");
+  });
+});
+
+// Fixture server whose /token endpoint always succeeds -- used by the success-path
+// and default-loopback-callback-server tests below, where a real "AUTHORIZED"
+// outcome (not just "reached the token exchange") is what's being verified.
+async function startWorkingOAuthUpstream(): Promise<StartedServer & { tokenCalls: () => number }> {
+  let tokenCalls = 0;
+  const upstream = await startServer((req, res) => {
+    if (req.method === "POST" && req.url === "/token") {
+      tokenCalls++;
+      res.statusCode = 200;
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ access_token: "fresh-access-token", token_type: "Bearer", expires_in: 3600, refresh_token: "fresh-refresh-token" }));
+      return;
+    }
+    res.statusCode = 404;
+    res.end();
+  });
+  return { ...upstream, tokenCalls: () => tokenCalls };
+}
+
+function seedConfigWithServer(configPath: string, serverName: string, spec: HttpServerSpec): void {
+  const config = defaultConfig();
+  config.servers[serverName] = spec;
+  fs.mkdirSync(path.dirname(configPath), { recursive: true });
+  saveConfig(config, configPath);
+}
+
+/** Extracts the loopback callback's redirect_uri and state from the authorization URL runOAuthLogin opens. */
+function callbackDetailsFrom(authorizationUrl: string): { redirectUri: string; state: string } {
+  const url = new URL(authorizationUrl);
+  const redirectUri = url.searchParams.get("redirect_uri");
+  const state = url.searchParams.get("state");
+  if (!redirectUri || !state) {
+    throw new Error(`Authorization URL missing redirect_uri/state: ${authorizationUrl}`);
+  }
+  return { redirectUri, state };
+}
+
+describe("runOAuthLogin success", () => {
+  const cleanups: Array<() => Promise<void> | void> = [];
+
+  afterEach(async () => {
+    while (cleanups.length > 0) {
+      const fn = cleanups.pop();
+      if (fn) await fn();
+    }
+  });
+
+  it("completes the full flow: binds oauth:// reference, persists tokens, clears the verifier, reports progress in order", async () => {
+    const env = setupTempEnv("mcpx-oauth-");
+    cleanups.push(env.restore);
+
+    const upstream = await startWorkingOAuthUpstream();
+    cleanups.push(() => closeServer(upstream.server));
+
+    const secrets = new SecretsManager();
+    const serverName = "test-server";
+    seedClientSecret(secrets, serverName);
+
+    const spec: HttpServerSpec = { transport: "http", url: `${upstream.url}/mcp` };
+    const configPath = `${env.root}/config/mcpx/config.json`;
+    seedConfigWithServer(configPath, serverName, spec);
+
+    const codeReceiver: OAuthCodeReceiver = {
+      redirectUrl: "http://127.0.0.1:9/callback",
+      waitForCode: async () => "fake-authorization-code"
+    };
+    const progressPhases: string[] = [];
+
+    const result = await runOAuthLogin(serverName, spec, secrets, async () => {}, configPath, codeReceiver, {
+      onProgress: (event) => progressPhases.push(event.phase)
+    });
+
+    expect(result).toEqual({ serverName, authorized: true });
+    expect(upstream.tokenCalls()).toBe(1);
+    expect(progressPhases).toEqual(["discovering", "awaiting-browser", "exchanging", "syncing"]);
+
+    const names = oauthSecretNames(serverName);
+    expect(secrets.getSecret(names.verifier)).toBeNull();
+    const persistedTokens = JSON.parse(secrets.getSecret(names.tokens)!);
+    expect(persistedTokens.tokens.access_token).toBe("fresh-access-token");
+
+    const finalSpec = loadConfig(configPath).servers[serverName] as HttpServerSpec;
+    expect(finalSpec.headers?.Authorization).toBe(`oauth://${serverName}`);
+  });
+});
+
+describe("runOAuthLogin default loopback callback server", () => {
+  const cleanups: Array<() => Promise<void> | void> = [];
+
+  afterEach(async () => {
+    while (cleanups.length > 0) {
+      const fn = cleanups.pop();
+      if (fn) await fn();
+    }
+  });
+
+  it("resolves the full flow when the browser hits /callback with the correct code and state", async () => {
+    const env = setupTempEnv("mcpx-oauth-");
+    cleanups.push(env.restore);
+    const upstream = await startWorkingOAuthUpstream();
+    cleanups.push(() => closeServer(upstream.server));
+
+    const secrets = new SecretsManager();
+    const serverName = "test-server";
+    seedClientSecret(secrets, serverName);
+    const spec: HttpServerSpec = { transport: "http", url: `${upstream.url}/mcp` };
+    const configPath = `${env.root}/config/mcpx/config.json`;
+    seedConfigWithServer(configPath, serverName, spec);
+
+    const openUrl = async (authorizationUrl: string) => {
+      const { redirectUri, state } = callbackDetailsFrom(authorizationUrl);
+      await fetch(`${redirectUri}?code=fake-code&state=${state}`);
+    };
+
+    const result = await runOAuthLogin(serverName, spec, secrets, openUrl, configPath);
+
+    expect(result).toEqual({ serverName, authorized: true });
+  });
+
+  it("rejects on state mismatch, and a duplicate request afterward gets a plain response instead of re-rejecting", async () => {
+    const env = setupTempEnv("mcpx-oauth-");
+    cleanups.push(env.restore);
+    const upstream = await startWorkingOAuthUpstream();
+    cleanups.push(() => closeServer(upstream.server));
+
+    const secrets = new SecretsManager();
+    const serverName = "test-server";
+    seedClientSecret(secrets, serverName);
+    const spec: HttpServerSpec = { transport: "http", url: `${upstream.url}/mcp` };
+    const configPath = `${env.root}/config/mcpx/config.json`;
+    seedConfigWithServer(configPath, serverName, spec);
+
+    let firstStatus = -1;
+    let secondStatus = -1;
+    const openUrl = async (authorizationUrl: string) => {
+      const { redirectUri } = callbackDetailsFrom(authorizationUrl);
+      const first = await fetch(`${redirectUri}?code=fake-code&state=wrong-state`);
+      firstStatus = first.status;
+      const second = await fetch(`${redirectUri}?code=fake-code&state=wrong-state`);
+      secondStatus = second.status;
+    };
+
+    const err = await expectRejection(runOAuthLogin(serverName, spec, secrets, openUrl, configPath));
+
+    expect((err as Error).message).toContain("state mismatch");
+    expect(firstStatus).toBe(400);
+    // Already settled -- the duplicate must not be treated as a second callback.
+    expect(secondStatus).toBe(404);
+  });
+
+  it("rejects with the upstream's error when the authorization step reports one", async () => {
+    const env = setupTempEnv("mcpx-oauth-");
+    cleanups.push(env.restore);
+    const upstream = await startWorkingOAuthUpstream();
+    cleanups.push(() => closeServer(upstream.server));
+
+    const secrets = new SecretsManager();
+    const serverName = "test-server";
+    seedClientSecret(secrets, serverName);
+    const spec: HttpServerSpec = { transport: "http", url: `${upstream.url}/mcp` };
+    const configPath = `${env.root}/config/mcpx/config.json`;
+    seedConfigWithServer(configPath, serverName, spec);
+
+    const openUrl = async (authorizationUrl: string) => {
+      const { redirectUri } = callbackDetailsFrom(authorizationUrl);
+      await fetch(`${redirectUri}?error=access_denied`);
+    };
+
+    const err = await expectRejection(runOAuthLogin(serverName, spec, secrets, openUrl, configPath));
+
+    expect((err as Error).message).toContain("access_denied");
+  });
+
+  it("204s a favicon request without settling the flow, then still resolves on the real callback", async () => {
+    const env = setupTempEnv("mcpx-oauth-");
+    cleanups.push(env.restore);
+    const upstream = await startWorkingOAuthUpstream();
+    cleanups.push(() => closeServer(upstream.server));
+
+    const secrets = new SecretsManager();
+    const serverName = "test-server";
+    seedClientSecret(secrets, serverName);
+    const spec: HttpServerSpec = { transport: "http", url: `${upstream.url}/mcp` };
+    const configPath = `${env.root}/config/mcpx/config.json`;
+    seedConfigWithServer(configPath, serverName, spec);
+
+    let faviconStatus = -1;
+    const openUrl = async (authorizationUrl: string) => {
+      const { redirectUri, state } = callbackDetailsFrom(authorizationUrl);
+      const base = new URL(redirectUri);
+      const favicon = await fetch(`${base.origin}/favicon.ico`);
+      faviconStatus = favicon.status;
+      await fetch(`${redirectUri}?code=fake-code&state=${state}`);
+    };
+
+    const result = await runOAuthLogin(serverName, spec, secrets, openUrl, configPath);
+
+    expect(faviconStatus).toBe(204);
+    expect(result).toEqual({ serverName, authorized: true });
+  });
+
+  it("times out and stops listening when the browser never returns", async () => {
+    const env = setupTempEnv("mcpx-oauth-");
+    cleanups.push(env.restore);
+    const upstream = await startWorkingOAuthUpstream();
+    cleanups.push(() => closeServer(upstream.server));
+
+    const secrets = new SecretsManager();
+    const serverName = "test-server";
+    seedClientSecret(secrets, serverName);
+    const spec: HttpServerSpec = { transport: "http", url: `${upstream.url}/mcp` };
+    const configPath = `${env.root}/config/mcpx/config.json`;
+    seedConfigWithServer(configPath, serverName, spec);
+
+    const err = await expectRejection(
+      runOAuthLogin(serverName, spec, secrets, async () => {}, configPath, undefined, { timeoutMs: 50 })
+    );
+
+    expect((err as Error).message).toContain("timed out after 50ms");
+  });
+
+  it("rejects with OAuthCancelledError when the caller aborts mid-flight", async () => {
+    const env = setupTempEnv("mcpx-oauth-");
+    cleanups.push(env.restore);
+    const upstream = await startWorkingOAuthUpstream();
+    cleanups.push(() => closeServer(upstream.server));
+
+    const secrets = new SecretsManager();
+    const serverName = "test-server";
+    seedClientSecret(secrets, serverName);
+    const spec: HttpServerSpec = { transport: "http", url: `${upstream.url}/mcp` };
+    const configPath = `${env.root}/config/mcpx/config.json`;
+    seedConfigWithServer(configPath, serverName, spec);
+
+    const controller = new AbortController();
+    const openUrl = async () => {
+      controller.abort();
+    };
+
+    const err = await expectRejection(
+      runOAuthLogin(serverName, spec, secrets, openUrl, configPath, undefined, { signal: controller.signal })
+    );
+
+    expect(err).toBeInstanceOf(OAuthCancelledError);
+  });
+});
+
+describe("runOAuthLogin concurrency", () => {
+  const cleanups: Array<() => Promise<void> | void> = [];
+
+  afterEach(async () => {
+    while (cleanups.length > 0) {
+      const fn = cleanups.pop();
+      if (fn) await fn();
+    }
+  });
+
+  it("rejects a second concurrent login for the same server without disturbing the first", async () => {
+    const env = setupTempEnv("mcpx-oauth-");
+    cleanups.push(env.restore);
+    const upstream = await startWorkingOAuthUpstream();
+    cleanups.push(() => closeServer(upstream.server));
+
+    const secrets = new SecretsManager();
+    const serverName = "test-server";
+    seedClientSecret(secrets, serverName);
+    const spec: HttpServerSpec = { transport: "http", url: `${upstream.url}/mcp` };
+    const configPath = `${env.root}/config/mcpx/config.json`;
+    seedConfigWithServer(configPath, serverName, spec);
+
+    // Never hits the callback -- times out on its own, releasing the lock, once
+    // this test is done asserting on the second call.
+    const first = runOAuthLogin(serverName, spec, secrets, async () => {}, configPath, undefined, { timeoutMs: 300 });
+    first.catch(() => {});
+
+    const second = await expectRejection(
+      runOAuthLogin(serverName, spec, secrets, async () => {}, configPath, undefined, { timeoutMs: 300 })
+    );
+
+    expect(second).toBeInstanceOf(OAuthLoginInProgressError);
+    expect((second as OAuthLoginInProgressError).message).toContain(`${process.pid}`);
+
+    await expectRejection(first);
   });
 });

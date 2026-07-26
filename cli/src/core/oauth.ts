@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import path from "node:path";
 import http from "node:http";
 import crypto from "node:crypto";
 import {
@@ -15,11 +17,13 @@ import type {
   OAuthTokens
 } from "@modelcontextprotocol/sdk/shared/auth.js";
 import { InvalidClientError, InvalidGrantError } from "@modelcontextprotocol/sdk/server/auth/errors.js";
-import type { HttpServerSpec, McpxConfig } from "../types.js";
-import { loadConfig, saveConfig } from "./config.js";
+import type { HttpServerSpec, McpxConfig, UpstreamServerSpec } from "../types.js";
+import { loadConfig } from "./config.js";
+import { mutateConfig } from "./config-store.js";
 import { SecretsManager } from "./secrets.js";
 import { syncAllClients, persistSyncState } from "./sync.js";
 import { UpstreamError } from "./errors.js";
+import { getOAuthLockPath, ensureDir } from "./paths.js";
 
 interface StoredOAuthTokens {
   tokens: OAuthTokens;
@@ -341,14 +345,144 @@ function closeServer(server: http.Server): Promise<void> {
   });
 }
 
-function waitForAuthorizationCode(server: http.Server, expectedState: string, timeoutMs = 120_000): Promise<string> {
+export const OAUTH_LOGIN_TIMEOUT_MS = 120_000;
+
+function renderCallbackPage(kind: "success" | "error", detail?: string): string {
+  const title = kind === "success" ? "Signed in" : "Sign-in failed";
+  const message =
+    kind === "success"
+      ? "You're signed in. You can close this window and return to mcpx."
+      : (detail ?? "Something went wrong. You can close this window and try again in mcpx.");
+  const icon = kind === "success" ? "&#10003;" : "&#10007;";
+  const closeScript = kind === "success" ? "<script>setTimeout(() => window.close(), 1500);</script>" : "";
+
+  return `<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>${title} — mcpx</title>
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: #f5f5f7; color: #1d1d1f;
+  }
+  @media (prefers-color-scheme: dark) {
+    body { background: #1c1c1e; color: #f5f5f7; }
+    .card { background: #2c2c2e !important; box-shadow: none !important; }
+  }
+  .card {
+    background: #fff; border-radius: 16px; padding: 40px 48px; text-align: center;
+    box-shadow: 0 8px 30px rgba(0,0,0,0.12); max-width: 360px;
+  }
+  .icon {
+    width: 48px; height: 48px; border-radius: 50%; margin: 0 auto 16px;
+    display: flex; align-items: center; justify-content: center; font-size: 22px;
+    background: ${kind === "success" ? "#34c759" : "#ff3b30"}; color: #fff;
+  }
+  h1 { font-size: 17px; margin: 0 0 8px; }
+  p { font-size: 14px; margin: 0; opacity: 0.7; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon">${icon}</div>
+    <h1>${title}</h1>
+    <p>${message}</p>
+  </div>
+  ${closeScript}
+</body>
+</html>`;
+}
+
+export class OAuthCancelledError extends Error {
+  readonly code = "oauth_cancelled";
+  constructor(serverName: string) {
+    super(`OAuth login for "${serverName}" was cancelled.`);
+    this.name = "OAuthCancelledError";
+  }
+}
+
+export class OAuthLoginInProgressError extends Error {
+  readonly code = "oauth_in_progress";
+  constructor(serverName: string, holderPid?: number) {
+    super(
+      holderPid
+        ? `OAuth login for "${serverName}" is already in progress (pid ${holderPid}).`
+        : `OAuth login for "${serverName}" is already in progress.`
+    );
+    this.name = "OAuthLoginInProgressError";
+  }
+}
+
+/**
+ * Waits for the browser to redirect back to the local callback server with an
+ * authorization code. Only requests to the exact "/callback" path are treated as
+ * the callback; everything else (favicons, stray retries) is answered without
+ * touching the outcome. A `settled` guard ensures the promise resolves/rejects
+ * exactly once even if the browser (or an IdP that double-redirects) hits the
+ * server again afterward — late requests just get a plain response.
+ */
+function waitForAuthorizationCode(
+  server: http.Server,
+  serverName: string,
+  expectedState: string,
+  options: { timeoutMs?: number; signal?: AbortSignal } = {}
+): Promise<string> {
+  const timeoutMs = options.timeoutMs ?? OAUTH_LOGIN_TIMEOUT_MS;
+  const { signal } = options;
+
   return new Promise((resolve, reject) => {
+    let settled = false;
+
+    function settle(fn: () => void): void {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timeout);
+      signal?.removeEventListener("abort", onAbort);
+      fn();
+    }
+
+    function onAbort(): void {
+      settle(() => reject(new OAuthCancelledError(serverName)));
+    }
+
     const timeout = setTimeout(() => {
-      reject(new Error(`OAuth login timed out after ${timeoutMs}ms.`));
+      settle(() => reject(new Error(`OAuth login timed out after ${timeoutMs}ms.`)));
     }, timeoutMs);
+
+    if (signal) {
+      if (signal.aborted) {
+        settle(() => reject(new OAuthCancelledError(serverName)));
+        return;
+      }
+      signal.addEventListener("abort", onAbort);
+    }
 
     server.on("request", (request, response) => {
       const url = new URL(request.url ?? "/", "http://127.0.0.1");
+
+      if (settled) {
+        response.statusCode = 404;
+        response.end();
+        return;
+      }
+
+      if (url.pathname === "/favicon.ico") {
+        response.statusCode = 204;
+        response.end();
+        return;
+      }
+
+      if (url.pathname !== "/callback") {
+        response.statusCode = 404;
+        response.end();
+        return;
+      }
+
       const code = url.searchParams.get("code");
       const state = url.searchParams.get("state");
       const error = url.searchParams.get("error");
@@ -357,29 +491,26 @@ function waitForAuthorizationCode(server: http.Server, expectedState: string, ti
 
       if (error) {
         response.statusCode = 400;
-        response.end("<html><body><h1>mcpx OAuth failed</h1><p>You can close this window.</p></body></html>");
-        clearTimeout(timeout);
-        reject(new Error(`OAuth authorization failed: ${error}`));
+        response.end(renderCallbackPage("error", `Authorization failed: ${error}`));
+        settle(() => reject(new Error(`OAuth authorization failed: ${error}`)));
         return;
       }
 
       if (!code) {
         response.statusCode = 400;
-        response.end("<html><body><h1>Missing OAuth code</h1><p>You can close this window.</p></body></html>");
+        response.end(renderCallbackPage("error", "Missing authorization code."));
         return;
       }
 
       if (state !== expectedState) {
         response.statusCode = 400;
-        response.end("<html><body><h1>OAuth state mismatch</h1><p>You can close this window.</p></body></html>");
-        clearTimeout(timeout);
-        reject(new Error("OAuth state mismatch."));
+        response.end(renderCallbackPage("error", "This sign-in link is no longer valid."));
+        settle(() => reject(new Error("OAuth state mismatch.")));
         return;
       }
 
-      response.end("<html><body><h1>mcpx OAuth complete</h1><p>You can close this window.</p></body></html>");
-      clearTimeout(timeout);
-      resolve(code);
+      response.end(renderCallbackPage("success"));
+      settle(() => resolve(code));
     });
   });
 }
@@ -404,84 +535,197 @@ export interface OAuthCodeReceiver {
   waitForCode: (expectedState: string, timeoutMs?: number) => Promise<string>;
 }
 
+export type OAuthProgressEvent =
+  | { phase: "discovering" }
+  | { phase: "awaiting-browser"; authorizationUrl: string; expiresAt: number }
+  | { phase: "exchanging" }
+  | { phase: "syncing" };
+
+export interface RunOAuthLoginOptions {
+  signal?: AbortSignal;
+  timeoutMs?: number;
+  onProgress?: (event: OAuthProgressEvent) => void;
+}
+
+const OAUTH_LOCK_STALE_MS = 5 * 60_000;
+
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function releaseOAuthLoginLock(lockPath: string): void {
+  try {
+    fs.unlinkSync(lockPath);
+  } catch {
+    // best effort
+  }
+}
+
+/**
+ * Cross-process guard against two `runOAuthLogin` calls for the same server
+ * running concurrently (e.g. `mcpx auth login` in a terminal while the desktop
+ * app is also mid-flow — the daemon and Electron are separate processes sharing
+ * the same secrets file). Same-process double-clicks are expected to be deduped
+ * by the caller before ever reaching here; this is the last-resort cross-process
+ * net, so it fails fast rather than queuing.
+ */
+function acquireOAuthLoginLock(serverName: string): () => void {
+  const lockPath = getOAuthLockPath(serverName);
+  ensureDir(path.dirname(lockPath));
+
+  const tryCreate = (): boolean => {
+    try {
+      fs.writeFileSync(lockPath, `${process.pid}\n`, { flag: "wx" });
+      return true;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "EEXIST") {
+        throw err;
+      }
+      return false;
+    }
+  };
+
+  if (tryCreate()) {
+    return () => releaseOAuthLoginLock(lockPath);
+  }
+
+  let holderPid: number | undefined;
+  try {
+    const raw = fs.readFileSync(lockPath, "utf8").trim();
+    const pid = Number(raw);
+    const stat = fs.statSync(lockPath);
+    const stale = Date.now() - stat.mtimeMs > OAUTH_LOCK_STALE_MS;
+    const holderAlive = Number.isFinite(pid) && pid > 0 && isProcessAlive(pid);
+
+    if (!holderAlive || stale) {
+      fs.unlinkSync(lockPath);
+      if (tryCreate()) {
+        return () => releaseOAuthLoginLock(lockPath);
+      }
+    }
+    holderPid = holderAlive ? pid : undefined;
+  } catch {
+    // Lock file vanished mid-check or is unreadable — one more attempt to create it.
+    if (tryCreate()) {
+      return () => releaseOAuthLoginLock(lockPath);
+    }
+  }
+
+  throw new OAuthLoginInProgressError(serverName, holderPid);
+}
+
 export async function runOAuthLogin(
   serverName: string,
   spec: HttpServerSpec,
   secrets: SecretsManager,
   openUrl: (url: string) => void | Promise<void>,
   configPath?: string,
-  codeReceiver?: OAuthCodeReceiver
+  codeReceiver?: OAuthCodeReceiver,
+  options: RunOAuthLoginOptions = {}
 ): Promise<{ serverName: string; authorized: true }> {
-  const oauthName = oauthSecretName(serverName, "tokens");
-  const clientName = oauthSecretName(serverName, "client");
+  const { signal, onProgress } = options;
+  const timeoutMs = options.timeoutMs ?? OAUTH_LOGIN_TIMEOUT_MS;
 
-  // Snapshot existing tokens so we can restore them if the flow fails.
-  const backupTokens = secrets.getSecret(oauthName);
-  const backupClient = secrets.getSecret(clientName);
-
-  // Clear verifier and discovery so the fresh flow starts clean (DCR, PKCE, etc.)
-  // but preserve tokens and client secrets — a failed re-auth should not destroy working credentials.
-  new McpxOAuthProvider(serverName, secrets).invalidateCredentials("verifier");
-  new McpxOAuthProvider(serverName, secrets).invalidateCredentials("discovery");
-
-  const state = crypto.randomUUID();
-  let callbackServer: http.Server | undefined;
-  let redirectUrl: string;
-  let codePromise: Promise<string>;
-
-  if (codeReceiver) {
-    redirectUrl = codeReceiver.redirectUrl;
-    codePromise = codeReceiver.waitForCode(state);
-  } else {
-    callbackServer = http.createServer();
-    const port = await listen(callbackServer);
-    redirectUrl = `http://127.0.0.1:${port}/callback`;
-    codePromise = waitForAuthorizationCode(callbackServer, state);
+  if (signal?.aborted) {
+    throw new OAuthCancelledError(serverName);
   }
-  // Mark the rejection as handled immediately so that a codePromise which rejects
-  // before it is awaited below (e.g. discovery/registration fails first) doesn't
-  // crash the process as an unhandled promise rejection. The `await codePromise`
-  // further down still observes and propagates the rejection normally.
-  codePromise.catch(() => {});
 
-  const provider = new InteractiveOAuthProvider(serverName, secrets, redirectUrl, state, openUrl);
+  const releaseLock = acquireOAuthLoginLock(serverName);
 
   try {
-    const initial = await auth(provider, {
-      serverUrl: spec.url
-    });
-    if (initial !== "REDIRECT") {
-      throw new Error(`Expected OAuth redirect for "${serverName}", got ${initial}.`);
-    }
+    const oauthName = oauthSecretName(serverName, "tokens");
+    const clientName = oauthSecretName(serverName, "client");
 
-    const authorizationCode = await codePromise;
+    // Snapshot existing tokens so we can restore them if the flow fails.
+    const backupTokens = secrets.getSecret(oauthName);
+    const backupClient = secrets.getSecret(clientName);
 
-    const result = await auth(provider, {
-      serverUrl: spec.url,
-      authorizationCode
-    });
-    if (result !== "AUTHORIZED") {
-      throw new Error(`OAuth login did not authorize "${serverName}".`);
-    }
-
-    const config = loadConfig(configPath);
-    bindOAuthReference(config, serverName);
-    saveConfig(config, configPath);
-    const summary = syncAllClients(config, secrets);
-    persistSyncState(summary, config);
-    saveConfig(config, configPath);
+    // Clear verifier and discovery so the fresh flow starts clean (DCR, PKCE, etc.)
+    // but preserve tokens and client secrets — a failed re-auth should not destroy working credentials.
     new McpxOAuthProvider(serverName, secrets).invalidateCredentials("verifier");
-    return { serverName, authorized: true };
-  } catch (error) {
-    // Restore tokens on failure so working credentials are never destroyed
-    if (backupTokens) secrets.setSecret(oauthName, backupTokens);
-    if (backupClient) secrets.setSecret(clientName, backupClient);
-    new McpxOAuthProvider(serverName, secrets).invalidateCredentials("verifier");
-    throw error;
+    new McpxOAuthProvider(serverName, secrets).invalidateCredentials("discovery");
+
+    const state = crypto.randomUUID();
+    let callbackServer: http.Server | undefined;
+    let redirectUrl: string;
+    let codePromise: Promise<string>;
+
+    if (codeReceiver) {
+      redirectUrl = codeReceiver.redirectUrl;
+      codePromise = codeReceiver.waitForCode(state, timeoutMs);
+    } else {
+      callbackServer = http.createServer();
+      const port = await listen(callbackServer);
+      redirectUrl = `http://127.0.0.1:${port}/callback`;
+      codePromise = waitForAuthorizationCode(callbackServer, serverName, state, { timeoutMs, signal });
+    }
+    // Mark the rejection as handled immediately so that a codePromise which rejects
+    // before it is awaited below (e.g. discovery/registration fails first) doesn't
+    // crash the process as an unhandled promise rejection. The `await codePromise`
+    // further down still observes and propagates the rejection normally.
+    codePromise.catch(() => {});
+
+    const wrappedOpenUrl = async (url: string): Promise<void> => {
+      onProgress?.({ phase: "awaiting-browser", authorizationUrl: url, expiresAt: Date.now() + timeoutMs });
+      await openUrl(url);
+    };
+
+    const provider = new InteractiveOAuthProvider(serverName, secrets, redirectUrl, state, wrappedOpenUrl);
+
+    try {
+      onProgress?.({ phase: "discovering" });
+      const initial = await auth(provider, {
+        serverUrl: spec.url
+      });
+      if (initial !== "REDIRECT") {
+        throw new Error(`Expected OAuth redirect for "${serverName}", got ${initial}.`);
+      }
+
+      if (signal?.aborted) {
+        throw new OAuthCancelledError(serverName);
+      }
+
+      const authorizationCode = await codePromise;
+
+      onProgress?.({ phase: "exchanging" });
+      const result = await auth(provider, {
+        serverUrl: spec.url,
+        authorizationCode
+      });
+      if (result !== "AUTHORIZED") {
+        throw new Error(`OAuth login did not authorize "${serverName}".`);
+      }
+
+      onProgress?.({ phase: "syncing" });
+      await mutateConfig((config) => {
+        bindOAuthReference(config, serverName);
+      }, configPath);
+      const config = loadConfig(configPath);
+      const summary = syncAllClients(config, secrets);
+      await mutateConfig((freshConfig) => {
+        persistSyncState(summary, freshConfig);
+      }, configPath);
+
+      new McpxOAuthProvider(serverName, secrets).invalidateCredentials("verifier");
+      return { serverName, authorized: true };
+    } catch (error) {
+      // Restore tokens on failure so working credentials are never destroyed
+      if (backupTokens) secrets.setSecret(oauthName, backupTokens);
+      if (backupClient) secrets.setSecret(clientName, backupClient);
+      new McpxOAuthProvider(serverName, secrets).invalidateCredentials("verifier");
+      throw error;
+    } finally {
+      if (callbackServer) {
+        await closeServer(callbackServer);
+      }
+    }
   } finally {
-    if (callbackServer) {
-      await closeServer(callbackServer);
-    }
+    releaseLock();
   }
 }
 
@@ -553,4 +797,75 @@ export async function getOAuthAccessToken(
   }
 
   return stored.tokens.access_token;
+}
+
+export interface OAuthSecretNames {
+  client: string;
+  tokens: string;
+  verifier: string;
+  discovery: string;
+}
+
+export function oauthSecretNames(serverName: string): OAuthSecretNames {
+  return {
+    client: oauthSecretName(serverName, "client"),
+    tokens: oauthSecretName(serverName, "tokens"),
+    verifier: oauthSecretName(serverName, "verifier"),
+    discovery: oauthSecretName(serverName, "discovery")
+  };
+}
+
+/** Removes all stored OAuth credentials for a server. Returns the secret names actually removed. */
+export function clearOAuthCredentials(serverName: string, secrets: SecretsManager): string[] {
+  const removed: string[] = [];
+  for (const name of Object.values(oauthSecretNames(serverName))) {
+    if (secrets.getSecret(name) !== null) {
+      secrets.removeSecret(name);
+      removed.push(name);
+    }
+  }
+  return removed;
+}
+
+export interface OAuthCredentialStatus {
+  /** Whether the server's config currently binds an oauth:// reference to this server name. */
+  bound: boolean;
+  signedIn: boolean;
+  obtainedAt?: number;
+  expiresAt?: number;
+  expired: boolean;
+  hasRefreshToken: boolean;
+  clientRegistered: boolean;
+}
+
+/** Purely local — no network calls. Safe to run offline and cheap enough for `auth status`. */
+export function getOAuthCredentialStatus(
+  serverName: string,
+  spec: UpstreamServerSpec,
+  secrets: SecretsManager
+): OAuthCredentialStatus {
+  const bound =
+    spec.transport === "http" &&
+    Object.values(spec.headers ?? {}).some((value) => isOAuthReference(value) && oauthReferenceServerName(value) === serverName);
+
+  const clientInfo = readJsonSecret<OAuthClientInformationMixed>(secrets, oauthSecretName(serverName, "client"));
+  const clientRegistered = clientInfo != null;
+
+  const stored = readJsonSecret<StoredOAuthTokens>(secrets, oauthSecretName(serverName, "tokens"));
+  if (!stored) {
+    return { bound, signedIn: false, expired: false, hasRefreshToken: false, clientRegistered };
+  }
+
+  const expiresAt = stored.tokens.expires_in ? stored.obtainedAt + stored.tokens.expires_in * 1000 : undefined;
+  const expired = expiresAt != null && Date.now() >= expiresAt;
+
+  return {
+    bound,
+    signedIn: true,
+    obtainedAt: stored.obtainedAt,
+    expiresAt,
+    expired,
+    hasRefreshToken: Boolean(stored.tokens.refresh_token),
+    clientRegistered
+  };
 }

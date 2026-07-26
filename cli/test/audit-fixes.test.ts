@@ -343,19 +343,13 @@ describe("UPD-01: Foreground update lock", () => {
   });
 });
 
-describe("AUTH-01: PKCE verifier cleanup", () => {
-  it("clears verifier after successful login", async () => {
-    // This test verifies the fix is in place by checking the source code
-    const oauthPath = path.join(process.cwd(), "src/core/oauth.ts");
-    const source = fs.readFileSync(oauthPath, "utf8");
-    
-    // Should invalidate verifier in success path
-    expect(source).toMatch(/return \{ serverName, authorized: true \};[\s\S]*?invalidateCredentials\("verifier"\)/);
-    
-    // Should invalidate verifier in failure path
-    expect(source).toMatch(/catch \(error\)[\s\S]*?invalidateCredentials\("verifier"\)/);
-  });
-});
+// AUTH-01 (PKCE verifier cleanup) used to be checked here via a source-text
+// regex, which only verified the string "invalidateCredentials(\"verifier\")"
+// appeared somewhere after "return { serverName, authorized: true };" in the
+// file — trivially true once the failure path (which runs later in the file
+// after any success-path return) calls it too, regardless of whether the
+// success path itself actually does. Real behavioral coverage for both the
+// success and failure paths now lives in test/oauth.test.ts.
 
 describe("GW-06: Background update opt-out", () => {
   it("respects MCPX_NO_UPDATE environment variable", async () => {

@@ -5,7 +5,7 @@
 import { Command } from "commander";
 import fs from "node:fs";
 import path from "node:path";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { emitKeypressEvents } from "node:readline";
 import { createInterface, type Interface as ReadlineInterface } from "node:readline/promises";
@@ -1529,6 +1529,39 @@ function registerSecretsCommands(program: Command): void {
     });
 }
 
+/**
+ * Opens a URL in the user's default browser without blocking the event loop.
+ * execFileSync used to be used here, but on Linux `xdg-open` can block until
+ * the browser process itself exits, which stalls the CLI process and prevents
+ * the loopback OAuth callback server from ever accepting the redirect. Falls
+ * back to printing the URL if the platform opener can't be spawned (e.g. a
+ * headless box with no `xdg-open`), so the flow can still be completed by hand.
+ */
+function openInBrowser(url: string): void {
+  const [command, args] =
+    process.platform === "darwin"
+      ? ["open", [url]]
+      : process.platform === "win32"
+        ? ["cmd", ["/c", "start", "", url]]
+        : ["xdg-open", [url]];
+
+  const printFallback = () => {
+    process.stdout.write(`Could not open a browser automatically. Open this URL to continue:\n${url}\n`);
+  };
+
+  try {
+    const child = spawn(command, args, { detached: true, stdio: "ignore" });
+    // spawn failures (e.g. no `xdg-open` on this system) surface asynchronously via
+    // the "error" event rather than a synchronous throw; an unhandled one would
+    // crash the process, so it must be handled even though we don't otherwise care
+    // about this child process's lifecycle.
+    child.on("error", printFallback);
+    child.unref();
+  } catch {
+    printFallback();
+  }
+}
+
 function registerAuthCommands(program: Command): void {
   const auth = program.command("auth").description("Auth utilities");
 
@@ -1544,15 +1577,8 @@ function registerAuthCommands(program: Command): void {
 
       const secrets = new SecretsManager();
       await runOAuthLogin(server, spec, secrets, (url) => {
-        if (process.platform === "darwin") {
-          execFileSync("open", [url], { stdio: "ignore" });
-          return;
-        }
-        if (process.platform === "win32") {
-          execFileSync("cmd", ["/c", "start", "", url], { stdio: "ignore" });
-          return;
-        }
-        execFileSync("xdg-open", [url], { stdio: "ignore" });
+        process.stdout.write(`Opening browser to sign in to "${server}"...\n`);
+        openInBrowser(url);
       });
       process.stdout.write(`OAuth login complete for "${server}".\n`);
     });

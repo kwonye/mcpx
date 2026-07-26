@@ -79,6 +79,11 @@ export function getUpdateLockPath(): string {
   return path.join(getUpdatesDir(), ".update.lock");
 }
 
+export function getOAuthLockPath(serverName: string): string {
+  const safeName = serverName.toLowerCase().replace(/[^a-z0-9._-]/g, "_");
+  return path.join(getRuntimeDir(), `oauth-${safeName}.lock`);
+}
+
 export function getPluginCacheRoot(): string {
   return path.join(getDataRoot(), "mcpx", "plugins", "cache");
 }
