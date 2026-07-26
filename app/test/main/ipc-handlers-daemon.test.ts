@@ -241,6 +241,7 @@ describe("ipc-handlers.ts - daemon + settings + misc group", () => {
       tokenizeCommandLine: vi.fn(),
       runOAuthLogin: vi.fn(async () => ({ success: true })),
       OAuthCancelledError: class OAuthCancelledError extends Error {},
+      clearOAuthCredentials: vi.fn(() => []),
       PluginManager: vi.fn(),
       ensureGatewayToken: vi.fn()
     }));

@@ -33,6 +33,7 @@ import {
   tokenizeCommandLine,
   runOAuthLogin,
   OAuthCancelledError,
+  clearOAuthCredentials,
   ensureGatewayToken
 } from "@mcpx/core";
 import type { HttpServerSpec, StdioServerSpec, UpstreamServerSpec, OAuthProgressEvent } from "@mcpx/core";
@@ -333,6 +334,9 @@ export function registerIpcHandlers(): void {
       removeServer(config, name, false);
     });
     const secrets = new SecretsManager();
+    // Otherwise a later same-named re-add would silently reuse stale OAuth
+    // tokens/client registration left behind by the removed server.
+    clearOAuthCredentials(name, secrets);
     const config = loadConfig();
     const summary = syncAllClients(config, secrets);
     await mutateConfig((freshConfig) => {

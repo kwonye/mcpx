@@ -46,7 +46,14 @@ import { APP_VERSION } from "./version.js";
 import { getStagedCliPath, getStagedUpdate, clearStagedUpdate, checkForUpdates, shouldUseStagedCli } from "./core/update.js";
 import { performUpdate, performRollback, runBackgroundUpdate } from "./core/update-manager.js";
 import { runStdioProxy } from "./core/proxy.js";
-import { runOAuthLogin } from "./core/oauth.js";
+import {
+  runOAuthLogin,
+  isOAuthReference,
+  oauthReferenceServerName,
+  clearOAuthCredentials,
+  getOAuthCredentialStatus,
+  type OAuthCredentialStatus
+} from "./core/oauth.js";
 
 const VALID_CLIENTS: ClientId[] = STATUS_CLIENTS;
 
@@ -182,6 +189,9 @@ function redactAuthValue(value: string): string {
   if (value.startsWith("secret://")) {
     return value;
   }
+  if (isOAuthReference(value)) {
+    return value;
+  }
 
   return "<inline>";
 }
@@ -294,26 +304,34 @@ function isNegativeChoice(value: string): boolean {
   return normalized === "n" || normalized === "no";
 }
 
+/**
+ * Configures auth for a server that's about to be added. The server spec
+ * hasn't been persisted to config yet at this point (so `mcpx auth login`'s
+ * runOAuthLogin, which requires the server to already exist so it can bind
+ * `oauth://<name>` into it, can't run here) -- when the user picks browser
+ * sign-in, this only records that choice; the caller runs the actual login
+ * after the server has been saved.
+ */
 async function maybeAutoConfigureAuthForAddedServer(
   serverName: string,
   spec: UpstreamServerSpec,
   secrets: SecretsManager
-): Promise<void> {
+): Promise<{ deferredOAuthLogin: boolean }> {
   if (spec.transport === "http") {
-    await maybeConfigureHttpAuth(serverName, spec as HttpServerSpec, secrets);
-  } else {
-    await maybeConfigureStdioAuth(serverName, spec, secrets);
+    return maybeConfigureHttpAuth(serverName, spec as HttpServerSpec, secrets);
   }
+  await maybeConfigureStdioAuth(serverName, spec, secrets);
+  return { deferredOAuthLogin: false };
 }
 
 async function maybeConfigureHttpAuth(
   serverName: string,
   spec: HttpServerSpec,
   secrets: SecretsManager
-): Promise<void> {
+): Promise<{ deferredOAuthLogin: boolean }> {
   const probe = await probeHttpAuthRequirement(spec, secrets);
   if (!probe.authRequired) {
-    return;
+    return { deferredOAuthLogin: false };
   }
 
   process.stdout.write(`Upstream "${serverName}" responded with ${probe.status ?? 401} and appears to require auth.\n`);
@@ -323,7 +341,10 @@ async function maybeConfigureHttpAuth(
 
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
     process.stdout.write(`Run \`mcpx auth set ${serverName} --header Authorization --value \"<token>\"\` to configure auth.\n`);
-    return;
+    if (probe.oauthSupport === "supported") {
+      process.stdout.write(`This server supports OAuth -- run \`mcpx auth login ${serverName}\` to sign in with your browser instead.\n`);
+    }
+    return { deferredOAuthLogin: false };
   }
 
   const rl = createInterface({
@@ -332,10 +353,19 @@ async function maybeConfigureHttpAuth(
   });
 
   try {
-    const shouldConfigure = await promptLine(rl, "Configure auth now? (Y/n): ");
-    if (isNegativeChoice(shouldConfigure)) {
-      process.stdout.write("Skipping auth setup.\n");
-      return;
+    if (probe.oauthSupport === "supported") {
+      process.stdout.write(`This server supports OAuth.\n`);
+      const useOAuth = await promptLine(rl, "Sign in with browser? (Y/n): ");
+      if (!isNegativeChoice(useOAuth)) {
+        process.stdout.write(`Will sign in with your browser once "${serverName}" is added.\n`);
+        return { deferredOAuthLogin: true };
+      }
+    } else {
+      const shouldConfigure = await promptLine(rl, "Configure auth now? (Y/n): ");
+      if (isNegativeChoice(shouldConfigure)) {
+        process.stdout.write("Skipping auth setup.\n");
+        return { deferredOAuthLogin: false };
+      }
     }
 
     const currentHeaderBinding = listAuthBindings(spec)
@@ -343,13 +373,13 @@ async function maybeConfigureHttpAuth(
     const headerName = await promptLineWithDefault(rl, "Header name", currentHeaderBinding?.key ?? "Authorization");
     if (!headerName) {
       process.stdout.write("Skipping auth setup (empty header name).\n");
-      return;
+      return { deferredOAuthLogin: false };
     }
 
     const authValueInput = await promptLine(rl, "Auth value/token (blank to skip): ");
     if (!authValueInput) {
       process.stdout.write("Skipping auth setup.\n");
-      return;
+      return { deferredOAuthLogin: false };
     }
 
     const target = resolveAuthTarget(spec, headerName, undefined);
@@ -361,7 +391,7 @@ async function maybeConfigureHttpAuth(
 
     if (!secretName) {
       process.stdout.write("Skipping auth setup (empty secret name).\n");
-      return;
+      return { deferredOAuthLogin: false };
     }
 
     secrets.setSecret(secretName, authValue);
@@ -369,7 +399,7 @@ async function maybeConfigureHttpAuth(
     process.stdout.write(`Configured auth via ${target.kind}:${target.key} using secret://${secretName}.\n`);
   } catch (error) {
     process.stdout.write(`Auto auth setup skipped: ${(error as Error).message}\n`);
-    return;
+    return { deferredOAuthLogin: false };
   } finally {
     rl.close();
   }
@@ -381,6 +411,63 @@ async function maybeConfigureHttpAuth(
     process.stdout.write(`Auth check after setup could not be completed: ${verify.error}\n`);
   } else {
     process.stdout.write("Auth check passed.\n");
+  }
+  return { deferredOAuthLogin: false };
+}
+
+/**
+ * Clears an OAuth-signed-in server's stored credentials and, if the server's
+ * Authorization header is still bound to that OAuth reference, removes the
+ * binding and re-syncs clients. Shared by `mcpx auth logout` and the
+ * interactive status menu's "Sign out" action.
+ */
+async function performOAuthLogout(
+  serverName: string,
+  spec: UpstreamServerSpec,
+  secrets: SecretsManager
+): Promise<{ removedSecrets: string[]; removedBinding: string | null; sync?: ReturnType<typeof syncAllClients> }> {
+  // Clear credentials first: even if the binding removal below fails for
+  // some reason, a server left pointing at a dangling oauth:// reference
+  // with the old tokens gone is safer than one still holding live tokens.
+  const removedSecrets = clearOAuthCredentials(serverName, secrets);
+
+  let removedBinding: string | null = null;
+  if (spec.transport === "http" && spec.headers?.Authorization && isOAuthReference(spec.headers.Authorization) && oauthReferenceServerName(spec.headers.Authorization) === serverName) {
+    await mutateConfig((freshConfig) => {
+      const freshSpec = getServerSpecOrThrow(freshConfig, serverName);
+      removeAuthReference(freshSpec, { kind: "header", key: "Authorization" });
+    });
+    removedBinding = "Authorization";
+  }
+
+  let sync: ReturnType<typeof syncAllClients> | undefined;
+  if (removedBinding) {
+    const syncSourceConfig = loadConfig();
+    sync = syncAllClients(syncSourceConfig, secrets);
+    await mutateConfig((freshConfig) => {
+      persistSyncState(sync!, freshConfig);
+    });
+  }
+
+  return { removedSecrets, removedBinding, sync };
+}
+
+/** Runs the OAuth login the user opted into during add, now that the server exists in config. */
+async function runDeferredOAuthLogin(
+  serverName: string,
+  spec: HttpServerSpec,
+  secrets: SecretsManager,
+  configPath: string
+): Promise<void> {
+  try {
+    await runOAuthLogin(serverName, spec, secrets, (url) => {
+      process.stdout.write(`Opening browser to sign in to "${serverName}"...\n`);
+      openInBrowser(url);
+    }, configPath);
+    process.stdout.write(`OAuth login complete for "${serverName}".\n`);
+  } catch (error) {
+    process.stdout.write(`OAuth sign-in failed: ${error instanceof Error ? error.message : String(error)}\n`);
+    process.stdout.write(`Run \`mcpx auth login ${serverName}\` to try again.\n`);
   }
 }
 
@@ -877,6 +964,38 @@ async function clearServerAuthInteractively(rl: ReadlineInterface, serverName: s
   }
 }
 
+async function signInWithBrowserInteractively(serverName: string): Promise<void> {
+  const config = loadConfig();
+  const spec = getServerSpecOrThrow(config, serverName);
+  if (spec.transport !== "http") {
+    process.stdout.write("OAuth login only supports HTTP servers.\n");
+    return;
+  }
+
+  const secrets = new SecretsManager();
+  await runOAuthLogin(serverName, spec, secrets, (url) => {
+    process.stdout.write(`Opening browser to sign in to "${serverName}"...\n`);
+    openInBrowser(url);
+  });
+  process.stdout.write(`OAuth login complete for "${serverName}".\n`);
+}
+
+async function signOutInteractively(rl: ReadlineInterface, serverName: string): Promise<void> {
+  const confirmation = await promptLine(rl, `Sign out of "${serverName}"? (y/N): `);
+  if (!["y", "yes"].includes(confirmation.trim().toLowerCase())) {
+    process.stdout.write("Cancelled.\n");
+    return;
+  }
+
+  const config = loadConfig();
+  const spec = getServerSpecOrThrow(config, serverName);
+  const secrets = new SecretsManager();
+  const { removedSecrets, removedBinding } = await performOAuthLogout(serverName, spec, secrets);
+
+  const bindingNote = removedBinding ? ` and the ${removedBinding} binding` : "";
+  process.stdout.write(`Signed out of "${serverName}". Removed ${removedSecrets.length} stored credential${removedSecrets.length === 1 ? "" : "s"}${bindingNote}.\n`);
+}
+
 async function reconnectGatewayAndSync(cliPath: string): Promise<void> {
   const config = loadConfig();
   const secrets = new SecretsManager();
@@ -982,6 +1101,13 @@ function buildServerMenuDetail(server: StatusServerEntry): string {
   return `${authSummary}${syncSummary}${errorSummary}`;
 }
 
+interface ServerMenuAction {
+  label: string;
+  detail: string;
+  /** Return true to close the menu (e.g. after a disable/enable that already re-synced). */
+  run: () => Promise<boolean | void>;
+}
+
 async function runServerActionsMenu(rl: ReadlineInterface, serverName: string, cliPath: string): Promise<void> {
   while (true) {
     const report = await loadStatusReport();
@@ -991,38 +1117,78 @@ async function runServerActionsMenu(rl: ReadlineInterface, serverName: string, c
       return;
     }
 
-    const action = await promptMenuSelection(
+    const isOAuthBound = server.authBindings.some(
+      (binding) => binding.kind === "header" && binding.key === "Authorization" && isOAuthReference(binding.value)
+    );
+
+    // Built as an array of {label, detail, run} rather than matched against a
+    // positional index, since the entries below are conditional -- a fixed
+    // "action === N" chain silently breaks the moment an entry is added or
+    // removed above another one.
+    const actions: ServerMenuAction[] = [
+      {
+        label: "🔐 Configure auth",
+        detail: "Set or update auth binding for this MCP.",
+        run: () => configureServerAuthInteractively(rl, serverName, false)
+      }
+    ];
+
+    if (server.transport === "http" && !isOAuthBound) {
+      actions.push({
+        label: "🌐 Sign in with browser",
+        detail: "Run OAuth login for this MCP.",
+        run: () => signInWithBrowserInteractively(serverName)
+      });
+    }
+
+    actions.push({
+      label: "♻️ Re-authenticate",
+      detail: "Replace token for an existing auth binding.",
+      run: () => configureServerAuthInteractively(rl, serverName, true)
+    });
+
+    if (isOAuthBound) {
+      actions.push({
+        label: "🚪 Sign out",
+        detail: "Clear stored OAuth credentials for this MCP.",
+        run: () => signOutInteractively(rl, serverName)
+      });
+    }
+
+    actions.push(
+      {
+        label: "🧹 Clear authentication",
+        detail: "Remove a specific auth binding.",
+        run: () => clearServerAuthInteractively(rl, serverName)
+      },
+      {
+        label: server.enabled ? "⏸️ Disable" : "▶️ Enable",
+        detail: "Toggle this MCP across mcpx and all synced clients.",
+        run: () => setServerEnabledInteractively(rl, serverName, !server.enabled, cliPath)
+      },
+      {
+        label: "🔄 Reconnect",
+        detail: "Restart daemon and sync all managed client entries.",
+        run: () => reconnectGatewayAndSync(cliPath)
+      }
+    );
+
+    const backIndex = actions.length;
+    const selection = await promptMenuSelection(
       rl,
       buildServerActionTitle(server),
-      [
-        { label: "🔐 Configure auth", detail: "Set or update auth binding for this MCP." },
-        { label: "♻️ Re-authenticate", detail: "Replace token for an existing auth binding." },
-        { label: "🧹 Clear authentication", detail: "Remove a specific auth binding." },
-        { label: server.enabled ? "⏸️ Disable" : "▶️ Enable", detail: "Toggle this MCP across mcpx and all synced clients." },
-        { label: "🔄 Reconnect", detail: "Restart daemon and sync all managed client entries." },
-        { label: "← Back", detail: "Return to MCP list." }
-      ],
+      [...actions.map(({ label, detail }) => ({ label, detail })), { label: "← Back", detail: "Return to MCP list." }],
       "q"
     );
 
-    if (action === null || action === 5) {
+    if (selection === null || selection === backIndex) {
       return;
     }
 
     try {
-      if (action === 0) {
-        await configureServerAuthInteractively(rl, serverName, false);
-      } else if (action === 1) {
-        await configureServerAuthInteractively(rl, serverName, true);
-      } else if (action === 2) {
-        await clearServerAuthInteractively(rl, serverName);
-      } else if (action === 3) {
-        const updated = await setServerEnabledInteractively(rl, serverName, !server.enabled, cliPath);
-        if (updated) {
-          return;
-        }
-      } else if (action === 4) {
-        await reconnectGatewayAndSync(cliPath);
+      const shouldClose = await actions[selection].run();
+      if (shouldClose === true) {
+        return;
       }
     } catch (error) {
       process.stdout.write(`${(error as Error).message}\n`);
@@ -1180,9 +1346,9 @@ function registerAddCommand(parent: Command, cliPath: string): void {
           }
         }
 
-        await maybeAutoConfigureAuthForAddedServer(shortName, spec, secrets);
+        const authSetup = await maybeAutoConfigureAuthForAddedServer(shortName, spec, secrets);
 
-        const { type, projectPath } = await mutateActiveConfig({ global: options.global, local: options.local }, (config) => {
+        const { type, projectPath, configPath } = await mutateActiveConfig({ global: options.global, local: options.local }, (config) => {
           addServer(config, shortName, spec, options.force ?? false);
         });
         if (type === "project" && projectPath) {
@@ -1192,12 +1358,15 @@ function registerAddCommand(parent: Command, cliPath: string): void {
         }
 
         process.stdout.write(`Added server: ${shortName} (${spec.transport}) from registry "${registryName}"${type === "project" ? ` (project: ${projectPath})` : ""}\n`);
+        if (authSetup.deferredOAuthLogin && spec.transport === "http") {
+          await runDeferredOAuthLogin(shortName, spec, secrets, configPath);
+        }
       } else {
         const parsed = parseAddServerSpec(safeValues, options);
 
-        await maybeAutoConfigureAuthForAddedServer(parsed.name, parsed.spec, secrets);
+        const authSetup = await maybeAutoConfigureAuthForAddedServer(parsed.name, parsed.spec, secrets);
 
-        const { type, projectPath } = await mutateActiveConfig({ global: options.global, local: options.local }, (config) => {
+        const { type, projectPath, configPath } = await mutateActiveConfig({ global: options.global, local: options.local }, (config) => {
           addServer(config, parsed.name, parsed.spec, options.force ?? false);
         });
         if (type === "project" && projectPath) {
@@ -1207,6 +1376,9 @@ function registerAddCommand(parent: Command, cliPath: string): void {
         }
 
         process.stdout.write(`Added server: ${parsed.name} (${parsed.spec.transport})${type === "project" ? ` (project: ${projectPath})` : ""}\n`);
+        if (authSetup.deferredOAuthLogin && parsed.spec.transport === "http") {
+          await runDeferredOAuthLogin(parsed.name, parsed.spec, secrets, configPath);
+        }
       }
 
       process.stdout.write("Auto-syncing managed gateway entries across all supported clients...\n");
@@ -1225,6 +1397,14 @@ function registerRemoveCommand(parent: Command, cliPath: string): void {
       const { type, projectPath } = await mutateActiveConfig({ global: options.global, local: options.local }, (config) => {
         removeServer(config, name, options.force ?? false);
       });
+
+      // Only clear OAuth credentials on a true global removal -- a project-local
+      // removal (-l) leaves the server's global definition (and any shared
+      // credentials) untouched, since other projects or the global config may
+      // still reference the same server name.
+      if (type === "global") {
+        clearOAuthCredentials(name, new SecretsManager());
+      }
 
       process.stdout.write(`Removed server: ${name} ${type === "project" ? `from project: ${projectPath}` : "globally"}\n`);
       process.stdout.write("Auto-syncing managed gateway entries across all supported clients...\n");
@@ -1584,6 +1764,50 @@ function registerAuthCommands(program: Command): void {
     });
 
   auth
+    .command("logout <server>")
+    .option("-y, --yes", "Skip confirmation prompt")
+    .option("--json", "Output JSON")
+    .description("Sign out of OAuth for a server and clear stored credentials")
+    .action(async (server: string, options: { yes?: boolean; json?: boolean }) => {
+      const config = loadConfig();
+      const spec = getServerSpecOrThrow(config, server);
+
+      if (!options.yes) {
+        if (!process.stdin.isTTY || !process.stdout.isTTY) {
+          throw new Error("Sign-out requires --yes in non-interactive mode.");
+        }
+        const rl = createInterface({ input: process.stdin, output: process.stdout });
+        try {
+          const answer = await promptLine(rl, `Sign out of "${server}"? (y/N): `);
+          if (!["y", "yes"].includes(answer.trim().toLowerCase())) {
+            return;
+          }
+        } finally {
+          rl.close();
+        }
+      }
+
+      const secrets = new SecretsManager();
+      const { removedSecrets, removedBinding, sync } = await performOAuthLogout(server, spec, secrets);
+
+      if (options.json) {
+        process.stdout.write(`${JSON.stringify({ server, removedSecrets, removedBinding, sync }, null, 2)}\n`);
+        return;
+      }
+
+      if (removedSecrets.length === 0 && !removedBinding) {
+        process.stdout.write(`"${server}" was not signed in with OAuth. Nothing to do.\n`);
+        return;
+      }
+
+      const bindingNote = removedBinding ? ` and the ${removedBinding} binding` : "";
+      process.stdout.write(
+        `Signed out of "${server}". Removed ${removedSecrets.length} stored credential${removedSecrets.length === 1 ? "" : "s"}${bindingNote}.\n`
+      );
+      process.stdout.write(`Re-run \`mcpx auth login ${server}\` to sign back in.\n`);
+    });
+
+  auth
     .command("set <server>")
     .option("--header <name>", "HTTP header name (default for HTTP servers: Authorization)")
     .option("--env <name>", "Env var name (required for stdio servers)")
@@ -1636,6 +1860,10 @@ function registerAuthCommands(program: Command): void {
         if (secretName) {
           new SecretsManager().removeSecret(secretName);
           process.stdout.write(`Removed binding and deleted secret: ${secretName}\n`);
+        } else if (isOAuthReference(removedValue)) {
+          const removed = clearOAuthCredentials(oauthReferenceServerName(removedValue), new SecretsManager());
+          process.stdout.write(`Removed binding and deleted ${removed.length} OAuth credential${removed.length === 1 ? "" : "s"}.\n`);
+          process.stdout.write(`(Equivalent to \`mcpx auth logout ${server}\`.)\n`);
         } else {
           process.stdout.write("Removed binding. Value was inline (no keychain secret deleted).\n");
         }
@@ -1686,6 +1914,82 @@ function registerAuthCommands(program: Command): void {
         for (const binding of serverEntry.bindings) {
           process.stdout.write(`  ${binding.kind}:${binding.key} = ${binding.value}\n`);
         }
+      }
+    });
+
+  auth
+    .command("status [server]")
+    .option("--json", "Output JSON")
+    .description("Show OAuth sign-in and token/secret auth status (offline, no network calls)")
+    .action((server: string | undefined, options: { json?: boolean }) => {
+      const config = loadConfig();
+      const names = server ? [server] : Object.keys(config.servers);
+      const secrets = new SecretsManager();
+
+      const entries = names.map((name) => {
+        const spec = getServerSpecOrThrow(config, name);
+        const oauth = getOAuthCredentialStatus(name, spec, secrets);
+        const bindings = listAuthBindings(spec).map((binding) => {
+          if (isOAuthReference(binding.value)) {
+            return { kind: binding.kind, key: binding.key, source: "oauth" as const, secretName: null as string | null, secretPresent: null as boolean | null };
+          }
+          const secretName = secretRefName(binding.value);
+          if (secretName) {
+            return { kind: binding.kind, key: binding.key, source: "secret" as const, secretName, secretPresent: secrets.getSecret(secretName) !== null };
+          }
+          return { kind: binding.kind, key: binding.key, source: "inline" as const, secretName: null as string | null, secretPresent: null as boolean | null };
+        });
+
+        return { server: name, transport: spec.transport, oauth, bindings };
+      });
+
+      if (options.json) {
+        process.stdout.write(`${JSON.stringify({ servers: entries }, null, 2)}\n`);
+        return;
+      }
+
+      if (entries.length === 0) {
+        process.stdout.write("No upstream servers configured.\n");
+        return;
+      }
+
+      const oauthEntries = entries.filter((e) => e.oauth.bound || e.oauth.signedIn);
+      const secretRows = entries.flatMap((e) => e.bindings.filter((b) => b.source !== "oauth").map((b) => ({ entry: e, binding: b })));
+
+      if (oauthEntries.length > 0) {
+        process.stdout.write("OAuth sign-ins\n");
+        for (const entry of oauthEntries) {
+          process.stdout.write(`- ${entry.server} (${entry.transport})\n`);
+          if (!entry.oauth.signedIn) {
+            process.stdout.write(`    status     bound but not signed in — run \`mcpx auth login ${entry.server}\`\n`);
+            continue;
+          }
+          process.stdout.write(`    status     ${entry.oauth.expired ? "expired" : "signed in"}\n`);
+          if (entry.oauth.expiresAt) {
+            process.stdout.write(`    expires    ${new Date(entry.oauth.expiresAt).toLocaleString()}\n`);
+          }
+          process.stdout.write(
+            `    refresh    ${entry.oauth.hasRefreshToken ? "available" : `none — run \`mcpx auth login ${entry.server}\` to re-authenticate`}\n`
+          );
+          process.stdout.write(`    client     ${entry.oauth.clientRegistered ? "registered" : "not registered"}\n`);
+        }
+        process.stdout.write("\n");
+      }
+
+      if (secretRows.length > 0) {
+        process.stdout.write("Token / secret auth\n");
+        for (const { entry, binding } of secretRows) {
+          const label =
+            binding.source === "secret"
+              ? `secret://${binding.secretName}${binding.secretPresent ? "" : "  MISSING"}`
+              : "<inline>";
+          process.stdout.write(`- ${entry.server} (${entry.transport})  ${binding.kind}:${binding.key}  ${label}\n`);
+        }
+        process.stdout.write("\n");
+      }
+
+      if (oauthEntries.length === 0 && secretRows.length === 0) {
+        process.stdout.write("No auth configured for any server.\n");
       }
     });
 

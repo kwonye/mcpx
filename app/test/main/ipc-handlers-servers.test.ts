@@ -265,6 +265,7 @@ describe("ipc-handlers.ts - servers group", () => {
       tokenizeCommandLine: tokenizeCommandLineMock,
       runOAuthLogin: vi.fn(async () => ({ serverName: "stub", authorized: true })),
       OAuthCancelledError: class OAuthCancelledError extends Error {},
+      clearOAuthCredentials: vi.fn(() => []),
       // Imported by ipc-handlers.ts but never referenced in its body (dead
       // import) - see report. Stubbed only so the mock object's shape
       // matches the real module's.
