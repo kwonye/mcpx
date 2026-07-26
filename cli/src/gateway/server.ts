@@ -12,7 +12,7 @@ import { loadMergedConfig } from "../core/config.js";
 import { buildEnrichedPath } from "../core/spawn-env.js";
 import { getOAuthAccessToken, isOAuthReference, oauthReferenceServerName } from "../core/oauth.js";
 import { SecretsManager } from "../core/secrets.js";
-import { UpstreamError, classifyUpstreamError, SecretNotFoundError } from "../core/errors.js";
+import { UpstreamError, classifyUpstreamError, SecretNotFoundError, type UpstreamErrorCode } from "../core/errors.js";
 import { APP_VERSION } from "../version.js";
 import type {
   HttpServerSpec,
@@ -263,6 +263,34 @@ async function callUpstream(
   return callUpstreamOnce(upstream, method, params, secrets, runtime, passthroughAuthorizationHeader, false);
 }
 
+// When tools/resources/prompts fail with different error codes (e.g. tools/list
+// 401s while prompts/list merely 404s "method not found"), the auth signal is
+// the one the user actually needs to act on -- so it wins regardless of call
+// order.
+const ERROR_CODE_PRIORITY: UpstreamErrorCode[] = [
+  "auth_expired",
+  "auth_required",
+  "secret_missing",
+  "unreachable",
+  "timeout",
+  "upstream_error"
+];
+
+function pickPrimaryErrorCode(errors: Array<{ code?: UpstreamErrorCode }>): string | undefined {
+  let best: UpstreamErrorCode | undefined;
+  let bestRank = Number.POSITIVE_INFINITY;
+  for (const { code } of errors) {
+    if (!code) continue;
+    const rank = ERROR_CODE_PRIORITY.indexOf(code);
+    const effectiveRank = rank === -1 ? ERROR_CODE_PRIORITY.length : rank;
+    if (effectiveRank < bestRank) {
+      bestRank = effectiveRank;
+      best = code;
+    }
+  }
+  return best;
+}
+
 export async function getUpstreamTokenCounts(
   config: McpxConfig,
   secrets: SecretsManager,
@@ -289,7 +317,12 @@ export async function getUpstreamTokenCounts(
     let toolsCount = 0;
     let resourcesCount = 0;
     let promptsCount = 0;
-    const errors: string[] = [];
+    const errors: Array<{ label: string; message: string; code?: UpstreamErrorCode }> = [];
+
+    function recordError(label: string, error: unknown): void {
+      const message = error instanceof Error ? error.message : String(error);
+      errors.push({ label, message, code: error instanceof UpstreamError ? error.code : undefined });
+    }
 
     try {
       const toolsResult = await callUpstream(upstream, "tools/list", {}, "token-tools", secrets, runtime) as { tools?: Array<unknown> };
@@ -297,7 +330,7 @@ export async function getUpstreamTokenCounts(
         toolsCount = Math.ceil(JSON.stringify(toolsResult.tools).length / 4);
       }
     } catch (error) {
-      errors.push(`tools/list: ${error instanceof Error ? error.message : String(error)}`);
+      recordError("tools/list", error);
     }
 
     try {
@@ -306,7 +339,7 @@ export async function getUpstreamTokenCounts(
         resourcesCount = Math.ceil(JSON.stringify(resourcesResult.resources).length / 4);
       }
     } catch (error) {
-      errors.push(`resources/list: ${error instanceof Error ? error.message : String(error)}`);
+      recordError("resources/list", error);
     }
 
     try {
@@ -315,7 +348,7 @@ export async function getUpstreamTokenCounts(
         promptsCount = Math.ceil(JSON.stringify(promptsResult.prompts).length / 4);
       }
     } catch (error) {
-      errors.push(`prompts/list: ${error instanceof Error ? error.message : String(error)}`);
+      recordError("prompts/list", error);
     }
 
     const total = toolsCount + resourcesCount + promptsCount;
@@ -324,7 +357,8 @@ export async function getUpstreamTokenCounts(
       resources: resourcesCount,
       prompts: promptsCount,
       total,
-      error: errors.length > 0 ? errors.join("; ") : undefined
+      error: errors.length > 0 ? errors.map((e) => `${e.label}: ${e.message}`).join("; ") : undefined,
+      errorCode: pickPrimaryErrorCode(errors)
     };
 
     if (errors.length === 0) {
@@ -608,12 +642,24 @@ async function callUpstreamOnce(
   }
 }
 
+/** Constant-time comparison for the local gateway bearer token (a 256-bit secret). */
+function tokensMatch(candidate: string | undefined, expectedToken: string): boolean {
+  if (!candidate) {
+    return false;
+  }
+  const candidateBuf = Buffer.from(candidate);
+  const expectedBuf = Buffer.from(expectedToken);
+  // timingSafeEqual throws on mismatched lengths, so check that first -- a length
+  // mismatch is itself safe to short-circuit on since it isn't secret-dependent.
+  return candidateBuf.length === expectedBuf.length && crypto.timingSafeEqual(candidateBuf, expectedBuf);
+}
+
 function authHeaderIsValid(request: http.IncomingMessage, expectedToken: string): boolean {
   const localTokenHeader = request.headers["x-mcpx-local-token"];
-  if (typeof localTokenHeader === "string" && localTokenHeader === expectedToken) {
+  if (typeof localTokenHeader === "string" && tokensMatch(localTokenHeader, expectedToken)) {
     return true;
   }
-  if (Array.isArray(localTokenHeader) && localTokenHeader.includes(expectedToken)) {
+  if (Array.isArray(localTokenHeader) && localTokenHeader.some((value) => tokensMatch(value, expectedToken))) {
     return true;
   }
 
@@ -623,7 +669,7 @@ function authHeaderIsValid(request: http.IncomingMessage, expectedToken: string)
   }
 
   const [scheme, token] = authHeader.split(" ");
-  return scheme === "Bearer" && token === expectedToken;
+  return scheme === "Bearer" && tokensMatch(token, expectedToken);
 }
 
 function isAuthChallenge(error: unknown): error is UpstreamError {
@@ -637,7 +683,7 @@ function getClientAuthorizationForUpstream(request: http.IncomingMessage, expect
   }
 
   const [scheme, token] = authHeader.split(" ");
-  if (scheme === "Bearer" && token === expectedToken) {
+  if (scheme === "Bearer" && tokensMatch(token, expectedToken)) {
     // Legacy local auth mode: Authorization is the local token, not an upstream OAuth token.
     return undefined;
   }

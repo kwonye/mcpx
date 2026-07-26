@@ -475,6 +475,37 @@ describe("gateway passthrough", () => {
     expect(payload.error.code).toBe(-32001);
   });
 
+  it("rejects a same-length wrong bearer token (exercises the timing-safe comparison path, not just a length mismatch)", async () => {
+    const env = setupTempEnv("mcpx-gateway-auth-samelen-");
+    cleanups.push(env.restore);
+
+    const gateway = createGatewayServer({
+      port: 0,
+      expectedToken: "correct-token",
+      secrets: new SecretsManager()
+    });
+    await waitForListening(gateway);
+    cleanups.push(() => closeServer(gateway));
+
+    const address = gateway.address();
+    if (!address || typeof address === "string") {
+      throw new Error("Failed to resolve gateway address.");
+    }
+
+    const response = await fetch(`http://127.0.0.1:${address.port}/mcp`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        // Same length as "correct-token" (13 chars) so timingSafeEqual actually
+        // runs a byte comparison instead of short-circuiting on length.
+        Authorization: "Bearer wrong-token-x"
+      },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} })
+    });
+
+    expect(response.status).toBe(401);
+  });
+
   it("accepts x-mcpx-local-token for local gateway auth", async () => {
     const env = setupTempEnv("mcpx-gateway-local-header-");
     cleanups.push(env.restore);
@@ -902,6 +933,55 @@ describe("gateway passthrough", () => {
     expect(payload.result.vercel).toBeDefined();
     expect(payload.result.vercel.tools).toBeGreaterThan(0);
     expect(payload.result.vercel.total).toBe(payload.result.vercel.tools);
+  });
+
+  it("populates errorCode on custom/tokenCounts with the classified error, not just the message", async () => {
+    const env = setupTempEnv("mcpx-gateway-tokencounts-errorcode-");
+    cleanups.push(env.restore);
+
+    // Every request -- including the initial MCP handshake -- is rejected as
+    // unauthorized, so each of tools/list, resources/list, and prompts/list
+    // surfaces a classified auth_required UpstreamError.
+    const upstream = await startServer((_req, res) => {
+      res.statusCode = 401;
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ error: "unauthorized" }));
+    });
+    cleanups.push(() => closeServer(upstream.server));
+
+    const config = defaultConfig();
+    config.servers.vercel = {
+      transport: "http",
+      url: `http://127.0.0.1:${upstream.port}/mcp`
+    };
+    saveConfig(config);
+
+    const gateway = createGatewayServer({
+      port: 0,
+      expectedToken: "test-local-token",
+      secrets: new SecretsManager()
+    });
+    await waitForListening(gateway);
+    cleanups.push(() => closeServer(gateway));
+
+    const address = gateway.address();
+    if (!address || typeof address === "string") {
+      throw new Error("Failed to resolve gateway address.");
+    }
+
+    const response = await fetch(`http://127.0.0.1:${address.port}/mcp`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        Authorization: "Bearer test-local-token"
+      },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "custom/tokenCounts", params: {} })
+    });
+
+    expect(response.status).toBe(200);
+    const payload = (await response.json()) as { result: Record<string, { error?: string; errorCode?: string }> };
+    expect(payload.result.vercel.error).toBeTruthy();
+    expect(payload.result.vercel.errorCode).toBe("auth_required");
   });
 
   it("resolves oauth references and refreshes once after an upstream 401", async () => {
