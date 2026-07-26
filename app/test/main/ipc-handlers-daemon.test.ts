@@ -171,7 +171,8 @@ describe("ipc-handlers.ts - daemon + settings + misc group", () => {
       app: { getAppPath: vi.fn(() => "/fake/app-path") },
       ipcMain: { handle: ipcMainHandleMock },
       dialog: { showOpenDialog: vi.fn(async () => ({ canceled: true, filePaths: [] })) },
-      shell: { openExternal: vi.fn(async () => undefined) }
+      shell: { openExternal: vi.fn(async () => undefined) },
+      BrowserWindow: { getAllWindows: vi.fn(() => []) }
     }));
 
     vi.doMock("../../src/main/dashboard", () => ({
@@ -231,6 +232,7 @@ describe("ipc-handlers.ts - daemon + settings + misc group", () => {
       buildStatusReport: buildStatusReportMock,
       loadManagedIndex: loadManagedIndexMock,
       probeHttpAuthRequirement: vi.fn(),
+      probeOAuthSupport: vi.fn(async () => ({ support: "unknown", resourceMetadata: false, authorizationServerMetadata: false })),
       applyAuthReference: vi.fn(),
       resolveAuthTarget: vi.fn(),
       toSecretRef: vi.fn(),
@@ -238,6 +240,7 @@ describe("ipc-handlers.ts - daemon + settings + misc group", () => {
       parseCliAddCommand: vi.fn(),
       tokenizeCommandLine: vi.fn(),
       runOAuthLogin: vi.fn(async () => ({ success: true })),
+      OAuthCancelledError: class OAuthCancelledError extends Error {},
       PluginManager: vi.fn(),
       ensureGatewayToken: vi.fn()
     }));

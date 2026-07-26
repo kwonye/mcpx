@@ -1,20 +1,22 @@
 import { BrowserWindow } from "electron";
 import { IPC } from "../shared/ipc-channels";
+import type { OAuthSupport } from "@mcpx/core";
 
 export interface PendingAuthEntry {
   serverName: string;
   oauthLikely?: boolean;
+  oauthSupport?: OAuthSupport;
   status?: number;
 }
 
 let pendingAuth: PendingAuthEntry[] = [];
 
-function broadcastAuthRequired(entry: PendingAuthEntry): void {
+function broadcastAuthState(): void {
   for (const window of BrowserWindow.getAllWindows()) {
-    // Only send to the main dashboard window, not the popover
-    if (window.webContents.getURL().includes("dashboard")) {
-      window.webContents.send(IPC.AUTH_REQUIRED, entry);
+    if (window.isDestroyed()) {
+      continue;
     }
+    window.webContents.send(IPC.AUTH_STATE_CHANGED, pendingAuth);
   }
 }
 
@@ -23,7 +25,7 @@ export function queuePendingAuth(entry: PendingAuthEntry): void {
     entry,
     ...pendingAuth.filter((existing) => existing.serverName !== entry.serverName)
   ];
-  broadcastAuthRequired(entry);
+  broadcastAuthState();
 }
 
 export function getPendingAuth(): PendingAuthEntry[] {
@@ -31,5 +33,15 @@ export function getPendingAuth(): PendingAuthEntry[] {
 }
 
 export function dismissPendingAuth(serverName: string): void {
-  pendingAuth = pendingAuth.filter((entry) => entry.serverName !== serverName);
+  const next = pendingAuth.filter((entry) => entry.serverName !== serverName);
+  if (next.length === pendingAuth.length) {
+    return;
+  }
+  pendingAuth = next;
+  broadcastAuthState();
+}
+
+/** Test-only: resets in-memory pending-auth state between tests. */
+export function resetPendingAuth(): void {
+  pendingAuth = [];
 }

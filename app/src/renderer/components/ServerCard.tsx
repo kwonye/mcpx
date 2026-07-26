@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Toggle } from "./ui";
+import { ConfirmDialog } from "./ConfirmDialog";
 import { useServerEnabled } from "../hooks/useServerEnabled";
 import { describeTokenError, formatTokenApprox } from "../utils/tokenHelper";
 
@@ -12,7 +13,16 @@ interface ServerCardProps {
   isOAuth: boolean;
   syncedCount: number;
   errorCount: number;
-  tokenCount?: { tools: number; resources: number; prompts: number; total: number; error?: string; runtimeError?: string };
+  tokenCount?: {
+    tools: number;
+    resources: number;
+    prompts: number;
+    total: number;
+    error?: string;
+    errorCode?: string;
+    runtimeError?: string;
+    runtimeErrorCode?: string;
+  };
   onRefresh: () => void;
   onClick: () => void;
   onAuthClick?: () => void;
@@ -20,31 +30,47 @@ interface ServerCardProps {
 
 export function ServerCard(props: ServerCardProps) {
   const [reauthing, setReauthing] = useState(false);
+  const [reauthError, setReauthError] = useState<string | null>(null);
+  const [confirmingReauth, setConfirmingReauth] = useState(false);
   const isHealthy = props.enabled && props.errorCount === 0 && props.syncedCount > 0;
   const isWarning = props.enabled && props.errorCount > 0;
   const { isToggling, handleEnabledChange } = useServerEnabled(props.name, props.onRefresh);
 
-  async function handleReauth(event: React.MouseEvent) {
+  async function runReauth() {
+    setReauthing(true);
+    setReauthError(null);
+    try {
+      await window.mcpx.startOauth(props.name);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to re-authenticate";
+      // A user-initiated cancel (e.g. from another window) isn't a failure worth showing.
+      if (!message.toLowerCase().includes("cancelled")) {
+        setReauthError(message);
+      }
+    } finally {
+      setReauthing(false);
+      props.onRefresh();
+    }
+  }
+
+  function handleReauthClick(event: React.MouseEvent) {
     event.stopPropagation();
     if (props.isOAuth) {
-      const confirmed = window.confirm(
-        `Re-authenticate "${props.name}"? This opens your browser to sign in again.`
-      );
-      if (!confirmed) return;
-      setReauthing(true);
-      try {
-        await window.mcpx.startOauth(props.name);
-      } finally {
-        setReauthing(false);
-        props.onRefresh();
-      }
+      setConfirmingReauth(true);
     } else {
       props.onAuthClick?.();
     }
   }
 
+  const errorEntry = props.tokenCount?.error
+    ? { message: props.tokenCount.error, code: props.tokenCount.errorCode }
+    : props.tokenCount?.runtimeError
+      ? { message: props.tokenCount.runtimeError, code: props.tokenCount.runtimeErrorCode }
+      : null;
+
   return (
-    <div className="glass-card server-card" data-disabled={!props.enabled} onClick={props.onClick}>
+    <>
+      <div className="glass-card server-card" data-disabled={!props.enabled} onClick={props.onClick}>
       <div className="server-card__header">
         <div className="server-card__main">
           <div className="server-card__icon">
@@ -64,8 +90,12 @@ export function ServerCard(props: ServerCardProps) {
                   {formatTokenApprox(props.tokenCount.total)} tokens
                 </span>
               )}
-              {props.enabled && props.tokenCount?.error && (() => {
-                const { label, authLike } = describeTokenError(props.tokenCount.error);
+              {props.enabled && errorEntry && (() => {
+                // Both the "we couldn't list tools/resources/prompts" error and the
+                // call-time runtimeError get the same clickable, re-authenticatable
+                // badge -- previously only the former was a real button; a call-time
+                // auth failure rendered as an inert <span> with no way to act on it.
+                const { label, authLike } = describeTokenError(errorEntry.message, errorEntry.code);
                 const buttonLabel = (authLike || props.isOAuth)
                   ? (reauthing ? "Signing in…" : `${label} — re-authenticate`)
                   : label;
@@ -73,26 +103,20 @@ export function ServerCard(props: ServerCardProps) {
                   <button
                     type="button"
                     className="token-badge token-badge--error token-badge--clickable"
-                    title={props.tokenCount.error}
+                    title={errorEntry.message}
                     disabled={reauthing}
-                    onClick={handleReauth}
+                    onClick={handleReauthClick}
                   >
                     {buttonLabel}
                   </button>
                 );
               })()}
-              {props.enabled && props.tokenCount?.runtimeError && !props.tokenCount?.error && (() => {
-                const { authLike } = describeTokenError(props.tokenCount.runtimeError!);
-                return (
-                  <span
-                    className="token-badge token-badge--error"
-                    title={props.tokenCount.runtimeError}
-                  >
-                    {authLike ? "Sign-in expired" : "call error"}
-                  </span>
-                );
-              })()}
             </div>
+            {reauthError && (
+              <div className="feedback-message error server-card__reauth-error" onClick={(e) => e.stopPropagation()}>
+                {reauthError}
+              </div>
+            )}
           </div>
         </div>
         <div className="server-card__controls" onClick={(event) => event.stopPropagation()}>
@@ -132,6 +156,18 @@ export function ServerCard(props: ServerCardProps) {
           </span>
         </div>
       </div>
-    </div>
+      </div>
+      <ConfirmDialog
+        open={confirmingReauth}
+        title="Re-authenticate?"
+        message={`Re-authenticate "${props.name}"? This opens your browser to sign in again.`}
+        confirmLabel="Sign in"
+        onConfirm={() => {
+          setConfirmingReauth(false);
+          void runReauth();
+        }}
+        onCancel={() => setConfirmingReauth(false)}
+      />
+    </>
   );
 }

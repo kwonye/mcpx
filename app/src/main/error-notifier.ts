@@ -29,18 +29,26 @@ export interface ComputeResult {
 
 const CHECK_INTERVAL_MS = 45_000;
 
+const AUTH_ERROR_CODES = new Set(["auth_expired", "auth_required"]);
+
 function deriveKind(count: TokenCountEntry): ErrorKind | null {
-  // Prefer structured codes when available
-  if (count.runtimeErrorCode) {
-    return "call";
-  }
-  if (count.errorCode === "auth_expired" || count.errorCode === "auth_required") {
+  // Structured codes are checked first, and only the code (never the raw
+  // message string) decides "reauth" at runtime -- a stdio server can fail a
+  // tool call for its own internal auth reasons (e.g. "Run `railway login`
+  // first") without that being an mcpx-managed OAuth/token problem, and
+  // sending the user to mcpx to "re-authenticate" would be a dead end. Only a
+  // runtimeErrorCode/errorCode that mcpx itself classified as auth_expired or
+  // auth_required means mcpx's own credential is the problem.
+  if (count.runtimeErrorCode && AUTH_ERROR_CODES.has(count.runtimeErrorCode)) {
     return "reauth";
   }
-  if (count.runtimeError) {
+  if (count.errorCode && AUTH_ERROR_CODES.has(count.errorCode)) {
+    return "reauth";
+  }
+  if (count.runtimeErrorCode || count.runtimeError) {
     return "call";
   }
-  if (count.error && describeTokenError(count.error).authLike) {
+  if (count.error && describeTokenError(count.error, count.errorCode).authLike) {
     return "reauth";
   }
   return null;

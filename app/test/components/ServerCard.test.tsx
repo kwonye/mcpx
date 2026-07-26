@@ -153,9 +153,8 @@ describe("ServerCard", () => {
     expect(screen.getByText(/sign-in expired.*re-authenticate/i)).toBeDefined();
   });
 
-  it("clicking the re-auth button on an OAuth server calls startOauth then onRefresh", async () => {
+  it("clicking the re-auth button on an OAuth server opens a confirm dialog, then calls startOauth on confirm", async () => {
     const onRefresh = vi.fn();
-    vi.spyOn(window, "confirm").mockReturnValue(true);
     render(
       <ServerCard
         name="stripe"
@@ -174,11 +173,68 @@ describe("ServerCard", () => {
 
     fireEvent.click(screen.getByText(/re-authenticate/i));
 
+    // In-app confirm dialog, not the native window.confirm.
+    expect(screen.getByText("Re-authenticate?")).toBeDefined();
+    expect(mockMcpx.startOauth).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByText("Sign in"));
+
     await waitFor(() => {
       expect(mockMcpx.startOauth).toHaveBeenCalledWith("stripe");
       expect(onRefresh).toHaveBeenCalled();
     });
-    (window.confirm as any).mockRestore();
+  });
+
+  it("does not call startOauth when the re-auth confirm dialog is cancelled", () => {
+    render(
+      <ServerCard
+        name="stripe"
+        enabled={true}
+        transport="http"
+        target="https://mcp.stripe.com/"
+        authConfigured={true}
+        isOAuth={true}
+        syncedCount={3}
+        errorCount={0}
+        tokenCount={{ tools: 0, resources: 0, prompts: 0, total: 0, error: "Invalid refresh token" }}
+        onRefresh={() => {}}
+        onClick={() => {}}
+      />
+    );
+
+    fireEvent.click(screen.getByText(/re-authenticate/i));
+    fireEvent.click(screen.getByText("Cancel"));
+
+    expect(mockMcpx.startOauth).not.toHaveBeenCalled();
+  });
+
+  it("shows an inline error, without throwing, when re-authentication fails", async () => {
+    // Regression test: handleReauth used to have no catch block, so a
+    // rejected startOauth() became an unhandled promise rejection with
+    // nothing shown to the user.
+    mockMcpx.startOauth.mockRejectedValueOnce(new Error("Discovery failed: ECONNREFUSED"));
+    render(
+      <ServerCard
+        name="stripe"
+        enabled={true}
+        transport="http"
+        target="https://mcp.stripe.com/"
+        authConfigured={true}
+        isOAuth={true}
+        syncedCount={3}
+        errorCount={0}
+        tokenCount={{ tools: 0, resources: 0, prompts: 0, total: 0, error: "Invalid refresh token" }}
+        onRefresh={() => {}}
+        onClick={() => {}}
+      />
+    );
+
+    fireEvent.click(screen.getByText(/re-authenticate/i));
+    fireEvent.click(screen.getByText("Sign in"));
+
+    await waitFor(() => {
+      expect(screen.getByText("Discovery failed: ECONNREFUSED")).toBeDefined();
+    });
   });
 
   it("clicking the re-auth button on a non-OAuth server calls onAuthClick, not startOauth", () => {
@@ -225,7 +281,10 @@ describe("ServerCard", () => {
     expect(screen.queryByText(/re-authenticate/i)).toBeNull();
   });
 
-  it("shows an informational runtimeError badge for a stdio call-time failure", () => {
+  it("makes an auth-like runtimeError badge clickable, not an inert span", () => {
+    // Regression test: a call-time auth failure (only tokenCount.runtimeError
+    // set, no tokenCount.error) used to render as a non-clickable <span> with
+    // no way to act on it -- a literally dead button.
     const runtimeError = "MCP error -32603: Not authenticated. Run 'railway login' first. Unauthorized";
     render(
       <ServerCard
@@ -243,13 +302,38 @@ describe("ServerCard", () => {
       />
     );
 
-    const badge = screen.getByText("Sign-in expired");
-    expect(badge.tagName.toLowerCase()).toBe("span");
+    const badge = screen.getByText(/re-authenticate/i);
+    expect(badge.tagName.toLowerCase()).toBe("button");
+    expect((badge as HTMLButtonElement).disabled).toBe(false);
     expect(badge.getAttribute("title")).toBe(runtimeError);
-    expect(screen.queryByText(/re-authenticate/i)).toBeNull();
   });
 
-  it("labels a non-auth runtimeError as 'call error'", () => {
+  it("clicking a runtimeError badge on a non-OAuth server calls onAuthClick", () => {
+    const onAuthClick = vi.fn();
+    render(
+      <ServerCard
+        name="Railway"
+        enabled={true}
+        transport="stdio"
+        target="npx -y @railway/mcp-server"
+        authConfigured={false}
+        isOAuth={false}
+        syncedCount={3}
+        errorCount={0}
+        tokenCount={{ tools: 120, resources: 0, prompts: 0, total: 120, runtimeError: "Not authenticated. Unauthorized." }}
+        onRefresh={() => {}}
+        onClick={() => {}}
+        onAuthClick={onAuthClick}
+      />
+    );
+
+    fireEvent.click(screen.getByText(/re-authenticate/i));
+
+    expect(onAuthClick).toHaveBeenCalled();
+    expect(mockMcpx.startOauth).not.toHaveBeenCalled();
+  });
+
+  it("labels a non-auth runtimeError as 'token error' and still makes it clickable", () => {
     render(
       <ServerCard
         name="db"
@@ -266,8 +350,8 @@ describe("ServerCard", () => {
       />
     );
 
-    const badge = screen.getByText("call error");
-    expect(badge.tagName.toLowerCase()).toBe("span");
+    const badge = screen.getByText("token error");
+    expect(badge.tagName.toLowerCase()).toBe("button");
     expect(badge.getAttribute("title")).toBe("Connection refused");
   });
 

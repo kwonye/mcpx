@@ -198,7 +198,8 @@ describe("ipc-handlers.ts - servers group", () => {
       app: { getAppPath: vi.fn(() => "/fake/app-path") },
       ipcMain: { handle: ipcMainHandleMock },
       dialog: { showOpenDialog: vi.fn(async () => ({ canceled: true, filePaths: [] })) },
-      shell: { openExternal: vi.fn(async () => undefined) }
+      shell: { openExternal: vi.fn(async () => undefined) },
+      BrowserWindow: { getAllWindows: vi.fn(() => []) }
     }));
 
     vi.doMock("../../src/main/dashboard", () => ({
@@ -255,13 +256,15 @@ describe("ipc-handlers.ts - servers group", () => {
       buildStatusReport: vi.fn(async () => ({})),
       loadManagedIndex: vi.fn(() => ({ schemaVersion: 1, managed: {} })),
       probeHttpAuthRequirement: probeHttpAuthRequirementMock,
+      probeOAuthSupport: vi.fn(async () => ({ support: "unknown", resourceMetadata: false, authorizationServerMetadata: false })),
       applyAuthReference: applyAuthReferenceMock,
       resolveAuthTarget: resolveAuthTargetMock,
       toSecretRef: toSecretRefMock,
       maybePrefixBearer: maybePrefixBearerMock,
       parseCliAddCommand: parseCliAddCommandMock,
       tokenizeCommandLine: tokenizeCommandLineMock,
-      runOAuthLogin: vi.fn(async () => ({ success: true })),
+      runOAuthLogin: vi.fn(async () => ({ serverName: "stub", authorized: true })),
+      OAuthCancelledError: class OAuthCancelledError extends Error {},
       // Imported by ipc-handlers.ts but never referenced in its body (dead
       // import) - see report. Stubbed only so the mock object's shape
       // matches the real module's.

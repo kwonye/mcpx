@@ -732,6 +732,12 @@ select {
     line-height: 1.2;
 }
 
+.server-card__reauth-error {
+    margin-top: 6px;
+    font-size: 0.78rem;
+    padding: 4px 8px;
+}
+
 .server-card__auth {
     display: flex;
     align-items: center;
@@ -1349,6 +1355,73 @@ select {
     justify-content: flex-end;
     gap: 8px;
     padding: 12px 20px 16px;
+}
+
+.auth-modal-oauth {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.auth-modal-hint {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    margin: 0;
+}
+
+.auth-modal-disclosure {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    align-self: flex-start;
+    background: none;
+    border: none;
+    padding: 4px 0;
+    font-size: 0.82rem;
+    color: var(--text-muted);
+    cursor: pointer;
+}
+
+.auth-modal-disclosure:hover {
+    color: var(--text-main);
+}
+
+.auth-modal-disclosure .material-symbols-outlined {
+    font-size: 18px;
+}
+
+.auth-modal-waiting {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: 8px;
+    padding: 12px 0 4px;
+}
+
+.auth-modal-spinner {
+    font-size: 28px;
+    color: var(--primary);
+    animation: spin 1.1s linear infinite;
+}
+
+.auth-modal-waiting__title {
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--text-main);
+    margin: 0;
+}
+
+.auth-modal-waiting__actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 4px;
+}
+
+.auth-modal-waiting__countdown {
+    font-size: 0.78rem;
+    color: var(--text-subtle);
+    margin: 0;
 }
 
 @keyframes spin {

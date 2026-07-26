@@ -34,18 +34,14 @@ describe("UI-02: Spacing scale consistency", () => {
   });
 });
 
+// UI-03's "requires confirmation before starting OAuth" case used to assert
+// on the literal string "window.confirm" in ServerCard.tsx's source. That
+// confirmation now goes through the app's own ConfirmDialog component
+// instead of the native (event-loop-blocking) window.confirm, so the source
+// string no longer exists to match. Real behavioral coverage -- clicking the
+// re-auth badge opens a confirm dialog, canceling it doesn't start OAuth,
+// confirming it does -- now lives in test/components/ServerCard.test.tsx.
 describe("UI-03: OAuth re-auth confirmation", () => {
-  it("requires confirmation before starting OAuth", () => {
-    const serverCardPath = path.join(process.cwd(), "src/renderer/components/ServerCard.tsx");
-    const source = fs.readFileSync(serverCardPath, "utf8");
-    
-    // Should use window.confirm
-    expect(source).toContain("window.confirm");
-    
-    // Should check confirmation result
-    expect(source).toMatch(/if \(!confirmed\) return/);
-  });
-
   it("visually distinguishes clickable badge", () => {
     const cssPath = path.join(process.cwd(), "src/renderer/index.css");
     const source = fs.readFileSync(cssPath, "utf8");

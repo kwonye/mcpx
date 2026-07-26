@@ -53,7 +53,16 @@ const mockMcpx = {
   openDashboard: vi.fn(),
   quitApp: vi.fn(),
   updateServer: vi.fn(),
-  setServerEnabled: vi.fn().mockResolvedValue({})
+  setServerEnabled: vi.fn().mockResolvedValue({}),
+  getPendingAuth: vi.fn().mockResolvedValue([]),
+  onAuthStateChanged: vi.fn(() => () => {}),
+  dismissAuth: vi.fn().mockResolvedValue({ dismissed: "x" }),
+  startOauth: vi.fn().mockResolvedValue(undefined),
+  cancelOauth: vi.fn().mockResolvedValue(undefined),
+  reopenOauthUrl: vi.fn().mockResolvedValue(undefined),
+  checkOauthSupport: vi.fn().mockResolvedValue({ support: "unknown", resourceMetadata: false, authorizationServerMetadata: false }),
+  onOauthProgress: vi.fn(() => () => {}),
+  requestAuth: vi.fn().mockResolvedValue({ opened: true })
 };
 
 beforeEach(() => {
@@ -152,5 +161,58 @@ describe("Dashboard", () => {
     fireEvent.click(await screen.findByLabelText(/Disable vercel/i));
 
     expect(mockMcpx.setServerEnabled).toHaveBeenCalledWith("vercel", false);
+  });
+
+  describe("pending auth", () => {
+    it("opens the auth modal for the first of several pending servers, not just showing one forever", async () => {
+      // Regression test: pendingAuth used to be a single nullable entry, so a
+      // second server needing auth silently overwrote the first with no way
+      // to ever see it again.
+      mockMcpx.getPendingAuth.mockResolvedValueOnce([
+        { serverName: "vercel" },
+        { serverName: "github" }
+      ]);
+
+      render(<Dashboard />);
+
+      expect(await screen.findByText("Auth Required")).toBeDefined();
+      // The modal shows the *first* pending server ("vercel" appears both as
+      // a server-card title and inside the modal's description).
+      const descriptions = await screen.findAllByText(/requires authentication to function/i);
+      expect(descriptions[0].textContent).toContain("vercel");
+    });
+
+    it("advances to the next pending server once the current one is dismissed", async () => {
+      const entries = [{ serverName: "vercel" }, { serverName: "github" }];
+      mockMcpx.getPendingAuth.mockResolvedValueOnce(entries);
+
+      let broadcast: ((next: Array<{ serverName: string }>) => void) | undefined;
+      mockMcpx.onAuthStateChanged.mockImplementationOnce((cb: (next: Array<{ serverName: string }>) => void) => {
+        broadcast = cb;
+        return () => {};
+      });
+      // dismissAuth's real effect is a main-process broadcast of the updated
+      // list; simulate that here rather than asserting on the call alone.
+      mockMcpx.dismissAuth.mockImplementationOnce(async (serverName: string) => {
+        broadcast?.(entries.filter((e) => e.serverName !== serverName));
+        return { dismissed: serverName };
+      });
+
+      render(<Dashboard />);
+      await screen.findByText("Auth Required");
+
+      fireEvent.click(screen.getByText("Skip"));
+
+      expect(mockMcpx.dismissAuth).toHaveBeenCalledWith("vercel");
+      await screen.findByText("Auth Required"); // modal is still open, now for the next entry
+      const descriptions = await screen.findAllByText(/requires authentication to function/i);
+      expect(descriptions[0].textContent).toContain("github");
+    });
+
+    it("does not render the auth modal when there is nothing pending", async () => {
+      render(<Dashboard />);
+      await screen.findByText("vercel");
+      expect(screen.queryByText("Auth Required")).toBeNull();
+    });
   });
 });

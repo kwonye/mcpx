@@ -15,7 +15,8 @@ import { ProjectsTab } from "./ProjectsTab";
 import { formatTokenApprox } from "../utils/tokenHelper";
 import { ContextBudgetCard } from "./ContextBudgetCard";
 
-type PendingAuthEntry = { serverName: string; oauthLikely?: boolean; status?: number };
+type OAuthSupport = "supported" | "unsupported" | "unknown";
+type PendingAuthEntry = { serverName: string; oauthLikely?: boolean; oauthSupport?: OAuthSupport; status?: number };
 const VALID_TABS: DesktopTab[] = ["servers", "projects", "plugins", "settings"];
 
 export function Dashboard() {
@@ -25,7 +26,7 @@ export function Dashboard() {
   const [selectedProjectPath, setSelectedProjectPath] = useState<string | null>(null);
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(() => new Set());
   const [settingsLoaded, setSettingsLoaded] = useState(false);
-  const [pendingAuth, setPendingAuth] = useState<PendingAuthEntry | null>(null);
+  const [pendingAuth, setPendingAuth] = useState<PendingAuthEntry[]>([]);
 
   useEffect(() => {
     const pendingAuthPromise = window.mcpx.getPendingAuth?.();
@@ -34,16 +35,14 @@ export function Dashboard() {
     }
 
     pendingAuthPromise.then((result: PendingAuthEntry | PendingAuthEntry[] | null) => {
-      const entry = Array.isArray(result) ? result[0] : result;
-      if (entry) {
-        setPendingAuth(entry);
-      }
+      if (!result) return;
+      setPendingAuth(Array.isArray(result) ? result : [result]);
     }).catch(() => {
       // Handler may not be registered yet — ignore
     });
 
-    return window.mcpx.onAuthRequired?.((entry: PendingAuthEntry) => {
-      setPendingAuth(entry);
+    return window.mcpx.onAuthStateChanged?.((entries: PendingAuthEntry[]) => {
+      setPendingAuth(entries);
     });
   }, []);
 
@@ -85,6 +84,9 @@ export function Dashboard() {
 
   const activeServer = selectedServer ? report.servers.find((s) => s.name === selectedServer) : null;
   const projects = Object.values(report.projects ?? {}).sort((left, right) => left.name.localeCompare(right.name));
+
+  const activeAuthEntry = pendingAuth[0];
+  const activeAuthServer = activeAuthEntry ? report.servers.find((s) => s.name === activeAuthEntry.serverName) : undefined;
 
   function getProjectServers(projectName: string) {
     return report.servers.filter((server) => server.name.startsWith(`${projectName}.`));
@@ -249,10 +251,7 @@ export function Dashboard() {
                         tokenCount={server.tokenCount}
                         onRefresh={refresh}
                         onClick={() => setSelectedServer(server.name)}
-                        onAuthClick={() => setPendingAuth({
-                          serverName: server.name,
-                          oauthLikely: server.authBindings.some((b) => b.value.startsWith("oauth://"))
-                        })}
+                        onAuthClick={() => void window.mcpx.requestAuth?.(server.name)}
                       />
                     ))}
                   </div>
@@ -290,15 +289,19 @@ export function Dashboard() {
         </div>
       </main>
 
-      {pendingAuth && (
+      {activeAuthEntry && (
         <AuthModal
-          serverName={pendingAuth.serverName}
-          oauthLikely={pendingAuth.oauthLikely}
+          key={activeAuthEntry.serverName}
+          serverName={activeAuthEntry.serverName}
+          transport={activeAuthServer?.transport === "stdio" ? "stdio" : "http"}
+          oauthSupport={activeAuthEntry.oauthSupport}
           onClose={() => {
-            void window.mcpx.dismissAuth?.(pendingAuth.serverName);
-            setPendingAuth(null);
+            void window.mcpx.dismissAuth?.(activeAuthEntry.serverName);
           }}
-          onConfigured={() => { setPendingAuth(null); refresh(); }}
+          onConfigured={() => {
+            void window.mcpx.dismissAuth?.(activeAuthEntry.serverName);
+            refresh();
+          }}
         />
       )}
     </div>

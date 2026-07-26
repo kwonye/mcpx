@@ -1,4 +1,4 @@
-import { app, ipcMain, dialog, shell } from "electron";
+import { app, ipcMain, dialog, shell, BrowserWindow } from "electron";
 import {
   loadConfig,
   mutateConfig,
@@ -24,6 +24,7 @@ import {
   buildStatusReport,
   loadManagedIndex,
   probeHttpAuthRequirement,
+  probeOAuthSupport,
   applyAuthReference,
   resolveAuthTarget,
   toSecretRef,
@@ -31,9 +32,10 @@ import {
   parseCliAddCommand,
   tokenizeCommandLine,
   runOAuthLogin,
+  OAuthCancelledError,
   ensureGatewayToken
 } from "@mcpx/core";
-import type { HttpServerSpec, StdioServerSpec, UpstreamServerSpec } from "@mcpx/core";
+import type { HttpServerSpec, StdioServerSpec, UpstreamServerSpec, OAuthProgressEvent } from "@mcpx/core";
 import { IPC } from "../shared/ipc-channels";
 import type { DesktopSettingsPatch } from "../shared/desktop-settings";
 import { GATEWAY_FETCH_TIMEOUT_MS } from "../shared/timeouts";
@@ -109,6 +111,28 @@ function normalizeUpdatedSpec(spec: UpstreamServerSpec): UpstreamServerSpec {
   };
 }
 
+// In-flight OAuth logins, keyed by server name. Shared across every window in
+// this process: if the dashboard and the popover both trigger sign-in for the
+// same server, the second call joins the first instead of racing it (the
+// cross-process file lock in runOAuthLogin is the last-resort net for two
+// separate mcpx processes; within one process this dedup is what actually
+// gives a good user experience -- an error rather than a shared flow).
+interface InFlightOAuth {
+  controller: AbortController;
+  promise: Promise<{ serverName: string; authorized: true }>;
+}
+const inFlightOAuth = new Map<string, InFlightOAuth>();
+const oauthAuthorizationUrls = new Map<string, string>();
+
+function broadcastOAuthProgress(serverName: string, event: OAuthProgressEvent | { phase: "done" | "cancelled" | "error"; message?: string }): void {
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (window.isDestroyed()) {
+      continue;
+    }
+    window.webContents.send(IPC.OAUTH_PROGRESS, { serverName, ...event });
+  }
+}
+
 export function registerIpcHandlers(): void {
   ipcMain.handle(IPC.OPEN_DASHBOARD, () => {
     openDashboard();
@@ -156,7 +180,7 @@ export function registerIpcHandlers(): void {
     });
     queueTokenCountRefresh();
 
-    const result: { added: string; sync: typeof summary; authRequired?: boolean; authStatus?: number; oauthLikely?: boolean } = { added: name, sync: summary };
+    const result: { added: string; sync: typeof summary; authRequired?: boolean; authStatus?: number; oauthLikely?: boolean; oauthSupport?: string } = { added: name, sync: summary };
 
     if (spec.transport === "http") {
       const probe = await probeHttpAuthRequirement(spec, secrets);
@@ -164,7 +188,8 @@ export function registerIpcHandlers(): void {
         result.authRequired = true;
         result.authStatus = probe.status;
         result.oauthLikely = probe.oauthLikely;
-        queuePendingAuth({ serverName: name, oauthLikely: probe.oauthLikely, status: probe.status });
+        result.oauthSupport = probe.oauthSupport;
+        queuePendingAuth({ serverName: name, oauthLikely: probe.oauthLikely, oauthSupport: probe.oauthSupport, status: probe.status });
       }
     }
 
@@ -208,7 +233,36 @@ export function registerIpcHandlers(): void {
     return { dismissed: serverName };
   });
 
+  ipcMain.handle(IPC.REQUEST_AUTH, (_event, serverName: string) => {
+    const config = loadConfig();
+    if (!config.servers[serverName]) {
+      throw new Error(`Server "${serverName}" not found.`);
+    }
+    if (!getPendingAuth().some((entry) => entry.serverName === serverName)) {
+      queuePendingAuth({ serverName });
+    }
+    openDashboard();
+    return { opened: true };
+  });
+
+  ipcMain.handle(IPC.CHECK_OAUTH_SUPPORT, async (_event, serverName: string) => {
+    const config = loadConfig();
+    const spec = config.servers[serverName];
+    if (!spec) {
+      throw new Error(`Server "${serverName}" not found.`);
+    }
+    if (spec.transport !== "http") {
+      return { support: "unsupported" as const, resourceMetadata: false, authorizationServerMetadata: false };
+    }
+    return probeOAuthSupport(spec.url);
+  });
+
   ipcMain.handle(IPC.START_OAUTH, async (_event, serverName: string) => {
+    const existing = inFlightOAuth.get(serverName);
+    if (existing) {
+      return existing.promise;
+    }
+
     const config = loadConfig();
     const spec = config.servers[serverName];
     if (!spec) {
@@ -219,15 +273,59 @@ export function registerIpcHandlers(): void {
     }
 
     const secrets = new SecretsManager();
-    const result = await runOAuthLogin(
-      serverName,
-      spec as HttpServerSpec,
-      secrets,
-      (url) => { void shell.openExternal(url); },
-    );
-    dismissPendingAuth(serverName);
-    await refreshTokenCountsSoon();
-    return result;
+    const controller = new AbortController();
+
+    const promise = (async () => {
+      try {
+        const result = await runOAuthLogin(
+          serverName,
+          spec as HttpServerSpec,
+          secrets,
+          (url) => { void shell.openExternal(url); },
+          undefined,
+          undefined,
+          {
+            signal: controller.signal,
+            onProgress: (event) => {
+              if (event.phase === "awaiting-browser") {
+                oauthAuthorizationUrls.set(serverName, event.authorizationUrl);
+              }
+              broadcastOAuthProgress(serverName, event);
+            }
+          }
+        );
+        dismissPendingAuth(serverName);
+        await refreshTokenCountsSoon();
+        broadcastOAuthProgress(serverName, { phase: "done" });
+        return result;
+      } catch (error) {
+        broadcastOAuthProgress(serverName, {
+          phase: error instanceof OAuthCancelledError ? "cancelled" : "error",
+          message: error instanceof Error ? error.message : String(error)
+        });
+        throw error;
+      } finally {
+        inFlightOAuth.delete(serverName);
+        oauthAuthorizationUrls.delete(serverName);
+      }
+    })();
+
+    inFlightOAuth.set(serverName, { controller, promise });
+    return promise;
+  });
+
+  ipcMain.handle(IPC.CANCEL_OAUTH, (_event, serverName: string) => {
+    const entry = inFlightOAuth.get(serverName);
+    entry?.controller.abort();
+    return { cancelled: Boolean(entry) };
+  });
+
+  ipcMain.handle(IPC.OAUTH_REOPEN, (_event, serverName: string) => {
+    const url = oauthAuthorizationUrls.get(serverName);
+    if (url) {
+      void shell.openExternal(url);
+    }
+    return { reopened: Boolean(url) };
   });
 
   ipcMain.handle(IPC.REMOVE_SERVER, async (_event, name: string) => {
@@ -426,7 +524,7 @@ export function registerIpcHandlers(): void {
     });
     queueTokenCountRefresh();
 
-    const result: { added: string; sync: typeof summary; authRequired?: boolean; authStatus?: number; oauthLikely?: boolean } = { added: name, sync: summary };
+    const result: { added: string; sync: typeof summary; authRequired?: boolean; authStatus?: number; oauthLikely?: boolean; oauthSupport?: string } = { added: name, sync: summary };
 
     if (spec.transport === "http") {
       const probe = await probeHttpAuthRequirement(spec, secrets);
@@ -434,7 +532,8 @@ export function registerIpcHandlers(): void {
         result.authRequired = true;
         result.authStatus = probe.status;
         result.oauthLikely = probe.oauthLikely;
-        queuePendingAuth({ serverName: name, oauthLikely: probe.oauthLikely, status: probe.status });
+        result.oauthSupport = probe.oauthSupport;
+        queuePendingAuth({ serverName: name, oauthLikely: probe.oauthLikely, oauthSupport: probe.oauthSupport, status: probe.status });
       }
     }
 

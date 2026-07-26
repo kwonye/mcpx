@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type { IpcRendererEvent } from "electron";
+import type { OAuthSupport } from "@mcpx/core";
 import { IPC } from "../shared/ipc-channels";
 import type { DesktopSettingsPatch } from "../shared/desktop-settings";
 
@@ -32,14 +33,25 @@ const api = {
   openDashboard: () => invokeIpc(IPC.OPEN_DASHBOARD),
   quitApp: () => invokeIpc(IPC.QUIT_APP),
   getPendingAuth: () => invokeIpc(IPC.GET_PENDING_AUTH),
-  onAuthRequired: (callback: (entry: { serverName: string; oauthLikely?: boolean; status?: number }) => void) => {
-    const listener = (_event: IpcRendererEvent, entry: { serverName: string; oauthLikely?: boolean; status?: number }) => callback(entry);
-    ipcRenderer.on(IPC.AUTH_REQUIRED, listener);
+  onAuthStateChanged: (callback: (entries: Array<{ serverName: string; oauthLikely?: boolean; oauthSupport?: OAuthSupport; status?: number }>) => void) => {
+    const listener = (_event: IpcRendererEvent, entries: Array<{ serverName: string; oauthLikely?: boolean; oauthSupport?: OAuthSupport; status?: number }>) => callback(entries);
+    ipcRenderer.on(IPC.AUTH_STATE_CHANGED, listener);
     return () => {
-      ipcRenderer.removeListener(IPC.AUTH_REQUIRED, listener);
+      ipcRenderer.removeListener(IPC.AUTH_STATE_CHANGED, listener);
     };
   },
+  onOauthProgress: (callback: (event: { serverName: string; phase: string; authorizationUrl?: string; expiresAt?: number; message?: string }) => void) => {
+    const listener = (_event: IpcRendererEvent, payload: { serverName: string; phase: string; authorizationUrl?: string; expiresAt?: number; message?: string }) => callback(payload);
+    ipcRenderer.on(IPC.OAUTH_PROGRESS, listener);
+    return () => {
+      ipcRenderer.removeListener(IPC.OAUTH_PROGRESS, listener);
+    };
+  },
+  requestAuth: (serverName: string) => invokeIpc(IPC.REQUEST_AUTH, serverName),
+  checkOauthSupport: (serverName: string) => invokeIpc(IPC.CHECK_OAUTH_SUPPORT, serverName),
   startOauth: (serverName: string) => invokeIpc(IPC.START_OAUTH, serverName),
+  cancelOauth: (serverName: string) => invokeIpc(IPC.CANCEL_OAUTH, serverName),
+  reopenOauthUrl: (serverName: string) => invokeIpc(IPC.OAUTH_REOPEN, serverName),
   dismissAuth: (serverName: string) => invokeIpc(IPC.DISMISS_AUTH, serverName),
   skills: {
     list: () => invokeIpc(IPC.LIST_SKILLS),
