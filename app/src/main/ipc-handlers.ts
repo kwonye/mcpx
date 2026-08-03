@@ -160,8 +160,8 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC.UPDATE_DESKTOP_SETTINGS, (_event, patch: DesktopSettingsPatch) => {
     const next = updateDesktopSettings(patch);
-    applyStartOnLoginSetting(next.startOnLoginEnabled);
-    setAutoUpdateEnabled(next.autoUpdateEnabled);
+    if (patch.startOnLoginEnabled !== undefined) applyStartOnLoginSetting(next.startOnLoginEnabled);
+    if (patch.autoUpdateEnabled !== undefined) setAutoUpdateEnabled(next.autoUpdateEnabled);
     return next;
   });
 
@@ -505,7 +505,8 @@ export function registerIpcHandlers(): void {
     const config = loadConfig();
     const secrets = new SecretsManager();
     const result = await restartDaemon(config, getCliDaemonPath(), secrets);
-    updateTrayForDaemonStatus(true);
+    updateTrayForDaemonStatus(result.started);
+    if (!result.started) throw new Error(result.message);
     return result;
   });
 
@@ -553,13 +554,19 @@ export function registerIpcHandlers(): void {
     return getSkill(id);
   });
 
-  ipcMain.handle(IPC.SAVE_SKILL, (_event, id: string, content: string) => {
+  ipcMain.handle(IPC.SAVE_SKILL, async (_event, id: string, content: string) => {
     saveSkill(id, content);
+    const config = loadConfig();
+    const summary = syncAllClients(config, new SecretsManager());
+    await mutateConfig((freshConfig) => persistSyncState(summary, freshConfig));
     return { id, success: true };
   });
 
-  ipcMain.handle(IPC.DELETE_SKILL, (_event, id: string) => {
+  ipcMain.handle(IPC.DELETE_SKILL, async (_event, id: string) => {
     deleteSkill(id);
+    const config = loadConfig();
+    const summary = syncAllClients(config, new SecretsManager());
+    await mutateConfig((freshConfig) => persistSyncState(summary, freshConfig));
     return { id, success: true };
   });
 

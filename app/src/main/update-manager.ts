@@ -7,6 +7,15 @@ const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 let checkInterval: ReturnType<typeof setInterval> | null = null;
 let initialized = false;
 let pendingResolve: ((result: { status: string; message: string }) => void) | null = null;
+let pendingTimeout: ReturnType<typeof setTimeout> | null = null;
+
+function settlePending(result: { status: string; message: string }): void {
+  if (pendingTimeout) clearTimeout(pendingTimeout);
+  pendingTimeout = null;
+  const resolve = pendingResolve;
+  pendingResolve = null;
+  resolve?.(result);
+}
 
 function ensureInitialized(): void {
   if (initialized) {
@@ -19,18 +28,16 @@ function ensureInitialized(): void {
 
   autoUpdater.on("update-available", (info) => {
     const message = `Update ${info.version} found. Downloading now and it will install on the next restart.`;
-    if (pendingResolve) {
-      pendingResolve({ status: "checking", message });
-      pendingResolve = null;
-    }
+    settlePending({ status: "checking", message });
   });
 
   autoUpdater.on("update-not-available", () => {
     const message = "You're already on the latest version.";
-    if (pendingResolve) {
-      pendingResolve({ status: "downloaded", message });
-      pendingResolve = null;
-    }
+    settlePending({ status: "downloaded", message });
+  });
+
+  autoUpdater.on("error", (error) => {
+    settlePending({ status: "error", message: `Update check failed: ${error.message}` });
   });
 
   autoUpdater.on("update-downloaded", () => {
@@ -101,7 +108,14 @@ export function checkForUpdatesNow(): Promise<{ status: string; message: string 
   ensureInitialized();
 
   return new Promise((resolve) => {
+    if (pendingResolve) {
+      pendingResolve({ status: "error", message: "An update check is already in progress." });
+    }
     pendingResolve = resolve;
+    pendingTimeout = setTimeout(() => {
+      settlePending({ status: "error", message: "Update check timed out." });
+    }, 30_000);
+    pendingTimeout.unref?.();
     autoUpdater.checkForUpdates();
   });
 }
@@ -109,5 +123,7 @@ export function checkForUpdatesNow(): Promise<{ status: string; message: string 
 export function disposeUpdateManager(): void {
   clearCheckInterval();
   pendingResolve = null;
+  if (pendingTimeout) clearTimeout(pendingTimeout);
+  pendingTimeout = null;
   initialized = false;
 }

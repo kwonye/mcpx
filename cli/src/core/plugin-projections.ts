@@ -37,6 +37,18 @@ function saveOwnership(targetDir: string, manifest: OwnershipManifest): void {
 
 function recordOwned(targetDir: string, pluginId: string, paths: string[]): void {
   const manifest = loadOwnership(targetDir);
+  const previous = manifest.plugins[pluginId]?.paths ?? [];
+  const next = new Set(paths);
+  for (const stale of previous) {
+    if (next.has(stale)) continue;
+    const stalePath = path.join(targetDir, stale);
+    try {
+      assertWithinBase(targetDir, stalePath);
+      fs.rmSync(stalePath, { recursive: true, force: true });
+    } catch {
+      // Never remove a path outside the projection base.
+    }
+  }
   manifest.plugins[pluginId] = {
     pluginId,
     paths,
@@ -61,6 +73,7 @@ export function prunePluginProjections(targetDir: string, pluginId: string): voi
   for (const p of paths) {
     const fullPath = path.join(targetDir, p);
     try {
+      assertWithinBase(targetDir, fullPath);
       if (fs.existsSync(fullPath)) {
         fs.rmSync(fullPath, { recursive: true, force: true });
       }
@@ -127,6 +140,7 @@ function syncClaude(plugins: PluginSyncInput[]): PluginSyncResult {
     }
 
     const targetDir = path.join(targetBase, plugin.pluginName);
+    assertWithinBase(targetBase, targetDir);
     ensureDir(targetDir);
 
     const mcpJsonSrc = path.join(plugin.pluginRoot, ".mcp.json");
@@ -162,6 +176,66 @@ function syncClaudeDesktop(plugins: PluginSyncInput[]): PluginSyncResult {
 }
 
 // --- Codex: skills only (commands deprecated) ---
+interface NamespacedProjectionConfig {
+  clientId: ClientId;
+  skillsBase: string;
+  commandsBase?: string;
+  unsupported: PluginComponent[];
+}
+
+function syncNamespacedComponents(config: NamespacedProjectionConfig, plugins: PluginSyncInput[]): PluginSyncResult {
+  const projectedDirs: string[] = [];
+  const errors: string[] = [];
+  const syncSkills = (plugin: PluginSyncInput) => {
+    if (!config.skillsBase || !plugin.components.skills || !isComponentApproved(plugin, "skills")) return;
+    ensureDir(config.skillsBase);
+    const owned: string[] = [];
+    for (const skill of plugin.skills) {
+      try {
+        const name = nsName(plugin.pluginName, skill.id);
+        const targetDir = path.join(config.skillsBase, name);
+        assertWithinBase(config.skillsBase, targetDir);
+        ensureDir(targetDir);
+        copyFileOrDir(skill.path, path.join(targetDir, "SKILL.md"));
+        owned.push(name);
+        projectedDirs.push(targetDir);
+      } catch (error) {
+        errors.push(`${plugin.pluginName}/${skill.id}: ${(error as Error).message}`);
+      }
+    }
+    recordOwned(config.skillsBase, plugin.pluginId, owned);
+  };
+  const syncCommands = (plugin: PluginSyncInput) => {
+    if (!config.commandsBase || !plugin.components.commands || !isComponentApproved(plugin, "commands")) return;
+    ensureDir(config.commandsBase);
+    const owned: string[] = [];
+    for (const command of plugin.commands) {
+      try {
+        const targetPath = path.join(config.commandsBase, `${nsName(plugin.pluginName, command.id)}.md`);
+        assertWithinBase(config.commandsBase, targetPath);
+        copyFileOrDir(command.path, targetPath);
+        owned.push(path.basename(targetPath));
+        projectedDirs.push(targetPath);
+      } catch (error) {
+        errors.push(`${plugin.pluginName}/${command.id}: ${(error as Error).message}`);
+      }
+    }
+    recordOwned(config.commandsBase, plugin.pluginId, owned);
+  };
+  for (const plugin of plugins) {
+    if (!plugin.enabled) continue;
+    syncSkills(plugin);
+    syncCommands(plugin);
+  }
+  return {
+    clientId: config.clientId,
+    status: "SYNCED",
+    projectedDirs,
+    unsupported: config.unsupported,
+    ...(errors.length > 0 ? { error: errors.join("; ") } : {}),
+  };
+}
+
 function syncCodex(plugins: PluginSyncInput[]): PluginSyncResult {
   const targetBase = path.join(homeDir(), ".codex", "skills");
   const projectedDirs: string[] = [];
@@ -426,12 +500,12 @@ export function syncPluginsToClient(clientId: string, plugins: PluginSyncInput[]
   const syncMap: Record<string, (plugins: PluginSyncInput[]) => PluginSyncResult> = {
     claude: syncClaude,
     "claude-desktop": syncClaudeDesktop,
-    codex: syncCodex,
-    cursor: syncCursor,
-    vscode: syncVsCode,
-    qwen: syncQwen,
-    cline: syncCline,
-    kiro: syncKiro,
+    codex: (plugins) => syncNamespacedComponents({ clientId: "codex", skillsBase: path.join(homeDir(), ".codex", "skills"), unsupported: ["hooks", "agents"] }, plugins),
+    cursor: (plugins) => syncNamespacedComponents({ clientId: "cursor", skillsBase: path.join(homeDir(), ".cursor", "skills"), commandsBase: path.join(homeDir(), ".cursor", "commands"), unsupported: ["hooks", "agents"] }, plugins),
+    vscode: (plugins) => syncNamespacedComponents({ clientId: "vscode", skillsBase: path.join(homeDir(), ".copilot", "skills"), unsupported: ["hooks", "agents"] }, plugins),
+    qwen: (plugins) => syncNamespacedComponents({ clientId: "qwen", skillsBase: path.join(homeDir(), ".qwen", "skills"), unsupported: ["hooks", "agents", "commands"] }, plugins),
+    cline: (plugins) => syncNamespacedComponents({ clientId: "cline", skillsBase: path.join(homeDir(), ".config", "cline", "skills"), unsupported: ["hooks", "agents", "commands"] }, plugins),
+    kiro: (plugins) => syncNamespacedComponents({ clientId: "kiro", skillsBase: path.join(homeDir(), ".kiro", "skills"), unsupported: ["hooks", "agents", "commands"] }, plugins),
     opencode: syncOpenCode,
   };
 
@@ -445,7 +519,7 @@ export function syncPluginsToClient(clientId: string, plugins: PluginSyncInput[]
     claude: path.join(homeDir(), ".claude", "skills"),
     "claude-desktop": "",
     codex: path.join(homeDir(), ".codex", "skills"),
-    cursor: path.join(homeDir(), ".cursor"),
+    cursor: path.join(homeDir(), ".cursor", "skills"),
     vscode: path.join(homeDir(), ".copilot", "skills"),
     qwen: path.join(homeDir(), ".qwen", "skills"),
     cline: path.join(homeDir(), ".config", "cline", "skills"),
@@ -454,9 +528,12 @@ export function syncPluginsToClient(clientId: string, plugins: PluginSyncInput[]
   };
 
   const target = targetBaseMap[clientId];
-  if (target) {
+    if (target) {
     const enabledIds = plugins.filter((p) => p.enabled).map((p) => p.pluginId);
-    pruneUnlistedPlugins(target, enabledIds);
+      pruneUnlistedPlugins(target, enabledIds);
+      if (clientId === "cursor") {
+        pruneUnlistedPlugins(path.join(homeDir(), ".cursor", "commands"), enabledIds);
+      }
   }
 
   return syncFn(plugins);

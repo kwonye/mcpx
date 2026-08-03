@@ -1,8 +1,11 @@
 import fs from "node:fs";
 import path from "node:path";
-import { execSync, spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
+import { promisify } from "node:util";
 import { getUpdatesDir, getUpdateLockPath, ensureDir } from "./paths.js";
 import { checkForUpdates, stageUpdate, clearStagedUpdate, getStagedUpdate, removeOldVersions, compareVersions } from "./update.js";
+
+const execFileAsync = promisify(execFile);
 
 function acquireLock(): boolean {
   const lockPath = getUpdateLockPath();
@@ -54,6 +57,9 @@ async function downloadAndStageUpdate(): Promise<{ success: boolean; version?: s
   }
 
   const targetVersion = updateStatus.latestVersion;
+  if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(targetVersion)) {
+    return { success: false, error: "Update returned an invalid version" };
+  }
   const updatesDir = getUpdatesDir();
   const versionDir = path.join(updatesDir, `v${targetVersion}`);
 
@@ -67,25 +73,16 @@ async function downloadAndStageUpdate(): Promise<{ success: boolean; version?: s
   try {
     ensureDir(versionDir);
 
-    execSync(`npm pack @kwonye/mcpx@${targetVersion} --json`, {
-      cwd: versionDir,
-      stdio: ["pipe", "pipe", "pipe"]
-    });
+    await execFileAsync("npm", ["pack", `@kwonye/mcpx@${targetVersion}`, "--json"], { cwd: versionDir });
 
     const tarballPath = path.join(versionDir, `kwonye-mcpx-${targetVersion}.tgz`);
     if (!fs.existsSync(tarballPath)) {
       throw new Error("Downloaded tarball not found");
     }
 
-    execSync(`tar -xzf ${tarballPath} --strip-components=1`, {
-      cwd: versionDir,
-      stdio: ["pipe", "pipe", "pipe"]
-    });
+    await execFileAsync("tar", ["-xzf", tarballPath, "--strip-components=1"], { cwd: versionDir });
 
-    execSync("npm install --production --ignore-scripts", {
-      cwd: versionDir,
-      stdio: ["pipe", "pipe", "pipe"]
-    });
+    await execFileAsync("npm", ["install", "--production", "--ignore-scripts"], { cwd: versionDir });
 
     const cliPath = path.join(versionDir, "dist", "cli.js");
     if (!fs.existsSync(cliPath)) {
@@ -93,10 +90,7 @@ async function downloadAndStageUpdate(): Promise<{ success: boolean; version?: s
     }
 
     try {
-      execSync(`${process.execPath} ${JSON.stringify(cliPath)} --version`, {
-        stdio: ["ignore", "pipe", "pipe"],
-        timeout: 10_000
-      });
+      await execFileAsync(process.execPath, [cliPath, "--version"], { timeout: 10_000 });
     } catch (smokeTestError) {
       throw new Error(`Downloaded CLI failed smoke test (--version): ${smokeTestError instanceof Error ? smokeTestError.message : String(smokeTestError)}`);
     }
@@ -146,9 +140,10 @@ export function startBackgroundUpdateCheck(): void {
 
   child.unref();
 
-  setTimeout(() => {
+  const releaseTimer = setTimeout(() => {
     releaseLock();
   }, 60000);
+  releaseTimer.unref?.();
 }
 
 export async function runBackgroundUpdate(): Promise<void> {

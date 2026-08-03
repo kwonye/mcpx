@@ -1,15 +1,16 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useSkills } from "../hooks/useSkills";
 import { ConfirmDialog } from "./ConfirmDialog";
 
 export function SkillsTab() {
-  const { skills, loading, saveSkill, deleteSkill } = useSkills();
+  const { skills, loading, error, saveSkill, deleteSkill } = useSkills();
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [selectedSkillId, setSelectedSkillId] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
   const [newSkillName, setNewSkillName] = useState("");
   const [content, setContent] = useState("");
   const [saving, setSaving] = useState(false);
+  const lastSelectedId = useRef<string | null>(null);
 
   const selectedSkill = skills.find(s => s.id === selectedSkillId);
 
@@ -18,8 +19,9 @@ export function SkillsTab() {
       setSelectedSkillId(skills[0].id);
       return;
     }
-    if (selectedSkill) {
+    if (selectedSkill && lastSelectedId.current !== selectedSkill.id) {
       setContent(selectedSkill.content);
+      lastSelectedId.current = selectedSkill.id;
     }
   }, [selectedSkill, skills]);
 
@@ -28,6 +30,10 @@ export function SkillsTab() {
     if (!newSkillName.trim()) return;
     
     const id = newSkillName.trim().toLowerCase().replace(/\s+/g, "-");
+    if (!/^[a-z0-9][a-z0-9._-]*$/.test(id)) return;
+    if (skills.some((skill) => skill.id === id)) {
+      return;
+    }
     const success = await saveSkill(id, `# ${newSkillName}\n\nAdd your instructions here.`);
     if (success) {
       setNewSkillName("");
@@ -88,6 +94,8 @@ export function SkillsTab() {
           <button type="submit" className="btn btn-primary btn-sm">Create</button>
         </form>
       )}
+
+      {error && <div className="error-panel">{error}</div>}
 
       <div className="skills-layout">
         <div className="skills-list">

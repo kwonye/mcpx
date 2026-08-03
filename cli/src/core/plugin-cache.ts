@@ -1,10 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
-import { execFileSync } from "node:child_process";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { getPluginCacheRoot, ensureDir } from "./paths.js";
 import type { PluginSource } from "../types.js";
 
 const TMP_PREFIX = "mcpx-acquire-";
+const execFileAsync = promisify(execFile);
 
 export interface CachedPlugin {
   source: string;
@@ -47,24 +49,18 @@ export class PluginCache {
     const srcDir = this.sourceDir(source);
 
     if (source.type === "github") {
-      const repo = source.original.split("@")[0];
+      const repo = source.original.replace(/^github\.com\//, "").split("@")[0];
       const ref = source.ref || "HEAD";
-      const output = execFileSync("git", ["ls-remote", `https://github.com/${repo}.git`, ref], {
-        encoding: "utf8",
-        timeout: 30000,
-      });
-      const sha = output.split("\t")[0]?.trim();
+      const { stdout } = await execFileAsync("git", ["ls-remote", `https://github.com/${repo}.git`, ref], { timeout: 30000 });
+      const sha = stdout.split("\t")[0]?.trim();
       if (!sha) throw new Error(`Could not resolve ref ${ref} for ${repo}`);
       return sha;
     }
 
     if (source.type === "git" || source.type === "git-subdir") {
       const ref = source.ref || "HEAD";
-      const output = execFileSync("git", ["ls-remote", source.original, ref], {
-        encoding: "utf8",
-        timeout: 30000,
-      });
-      const sha = output.split("\t")[0]?.trim();
+      const { stdout } = await execFileAsync("git", ["ls-remote", source.original, ref], { timeout: 30000 });
+      const sha = stdout.split("\t")[0]?.trim();
       if (!sha) throw new Error(`Could not resolve ref ${ref} for ${source.original}`);
       return sha;
     }
@@ -100,24 +96,23 @@ export class PluginCache {
 
     if (source.type === "github" || source.type === "git" || source.type === "git-subdir") {
       const remote = source.type === "github"
-        ? `https://github.com/${source.original.split("@")[0]}.git`
+        ? `https://github.com/${source.original.replace(/^github\.com\//, "").split("@")[0]}.git`
         : source.original;
       const target = source.resolvedSha || source.ref || "HEAD";
       const tmpDir = fs.mkdtempSync(path.join(this.cacheRoot, TMP_PREFIX));
       try {
-        execFileSync("git", ["init"], { cwd: tmpDir, stdio: "pipe", timeout: 10000 });
-        execFileSync("git", ["remote", "add", "origin", remote], { cwd: tmpDir, stdio: "pipe", timeout: 10000 });
-        execFileSync("git", ["fetch", "--depth", "1", "origin", target], {
+        await execFileAsync("git", ["init"], { cwd: tmpDir, timeout: 10000 });
+        await execFileAsync("git", ["remote", "add", "origin", remote], { cwd: tmpDir, timeout: 10000 });
+        await execFileAsync("git", ["fetch", "--depth", "1", "origin", target], {
           cwd: tmpDir,
-          stdio: "pipe",
           timeout: 60000,
         });
-        execFileSync("git", ["checkout", "--detach", "FETCH_HEAD"], { cwd: tmpDir, stdio: "pipe", timeout: 10000 });
-        const actualSha = execFileSync("git", ["rev-parse", "HEAD"], {
+        await execFileAsync("git", ["checkout", "--detach", "FETCH_HEAD"], { cwd: tmpDir, timeout: 10000 });
+        const { stdout } = await execFileAsync("git", ["rev-parse", "HEAD"], {
           cwd: tmpDir,
-          encoding: "utf8",
           timeout: 10000,
-        }).trim();
+        });
+        const actualSha = stdout.trim();
         fs.rmSync(path.join(tmpDir, ".git"), { recursive: true, force: true });
 
         const finalDest = this.shaDir(srcDir, actualSha);
@@ -133,10 +128,19 @@ export class PluginCache {
           if (!subdir.startsWith(path.resolve(tmpDir) + path.sep) || !fs.existsSync(subdir)) {
             throw new Error(`Plugin subdirectory not found: ${source.path}`);
           }
-          fs.renameSync(subdir, finalDest);
+          try {
+            fs.renameSync(subdir, finalDest);
+          } catch (error) {
+            if (!fs.existsSync(finalDest)) throw error;
+          }
           fs.rmSync(tmpDir, { recursive: true, force: true });
         } else {
-          fs.renameSync(tmpDir, finalDest);
+          try {
+            fs.renameSync(tmpDir, finalDest);
+          } catch (error) {
+            if (!fs.existsSync(finalDest)) throw error;
+            return { source: source.original, name: pluginName, sha: actualSha, root: finalDest };
+          }
         }
         this.updateRef(srcDir, actualSha);
         return { source: source.original, name: pluginName, sha: actualSha, root: finalDest };

@@ -287,6 +287,9 @@ export function hasManifest(pluginRoot: string): boolean {
 export function resolvePluginVars(value: string, pluginRoot: string, dataDir: string): string {
   return value
     .replace(/\$\{CLAUDE_PLUGIN_ROOT\}/g, pluginRoot)
+    .replace(/\$\{CLAUDE_PLUGIN_DATA\}/g, dataDir)
+    .replace(/\$\{MCPX_PLUGIN_ROOT\}/g, pluginRoot)
+    .replace(/\$\{MCPX_PLUGIN_DATA\}/g, dataDir)
     .replace(/\$\{DATA\}/g, dataDir)
     .replace(/\$\{CLAUDE_PROJECT_DIR\}/g, pluginRoot);
 }

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { SkillsTab } from "./SkillsTab";
 import { Toggle } from "./ui/Toggle";
+import { ConfirmDialog } from "./ConfirmDialog";
 import type {
   ManagedMarketplace,
   ManagedPlugin,
@@ -29,6 +30,13 @@ export function PluginsTab() {
   const [marketplaceInput, setMarketplaceInput] = useState("");
   const [addingMarketplace, setAddingMarketplace] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
+  const [confirmation, setConfirmation] = useState<{
+    title: string;
+    message: string;
+    confirmLabel: string;
+    destructive?: boolean;
+    action: () => Promise<void>;
+  } | null>(null);
 
   async function loadPlugins() {
     try {
@@ -88,6 +96,7 @@ export function PluginsTab() {
     try {
       setDetail(await window.mcpx.plugins.marketplaces.inspectPlugin(listing.id) as MarketplacePluginDetail);
     } catch (caught) {
+      setDetail(null);
       setError(caught instanceof Error ? caught.message : String(caught));
     } finally {
       setInspecting(false);
@@ -95,18 +104,25 @@ export function PluginsTab() {
   }
 
   async function installListing(selected: MarketplacePluginDetail) {
-    if (!selected.compatible || !confirm(`Install "${selected.displayName}" with ${selected.supportedCapabilities.join(", ")}?`)) return;
-    setInstallingId(selected.id);
-    setError(null);
-    try {
-      await window.mcpx.plugins.marketplaces.installPlugin(selected.id);
-      setDetail(null);
-      await loadCatalog();
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught));
-    } finally {
-      setInstallingId(null);
-    }
+    if (!selected.compatible) return;
+    setConfirmation({
+      title: "Install plugin?",
+      message: `Install "${selected.displayName}" with ${selected.supportedCapabilities.join(", ")}?`,
+      confirmLabel: "Install",
+      action: async () => {
+        setInstallingId(selected.id);
+        try {
+          await window.mcpx.plugins.marketplaces.installPlugin(selected.id);
+          setDetail(null);
+          await loadCatalog();
+        } catch (caught) {
+          setError(caught instanceof Error ? caught.message : String(caught));
+        } finally {
+          setInstallingId(null);
+        }
+      },
+    });
+    return;
   }
 
   async function installSource(event: React.FormEvent) {
@@ -145,13 +161,20 @@ export function PluginsTab() {
   }
 
   async function uninstall(plugin: ManagedPlugin) {
-    if (!confirm(`Uninstall plugin "${plugin.name}"? Plugin data will be kept.`)) return;
-    try {
-      await window.mcpx.plugins.uninstall(plugin.id, true);
-      await loadCatalog();
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught));
-    }
+    setConfirmation({
+      title: "Uninstall plugin?",
+      message: `Uninstall plugin "${plugin.name}"? Plugin data will be kept.`,
+      confirmLabel: "Uninstall",
+      destructive: true,
+      action: async () => {
+        try {
+          await window.mcpx.plugins.uninstall(plugin.id, true);
+          await loadCatalog();
+        } catch (caught) {
+          setError(caught instanceof Error ? caught.message : String(caught));
+        }
+      },
+    });
   }
 
   async function update(plugin: ManagedPlugin) {
@@ -189,13 +212,20 @@ export function PluginsTab() {
   }
 
   async function removeMarketplace(marketplace: ManagedMarketplace) {
-    if (!confirm(`Remove "${marketplace.displayName}" and uninstall plugins installed from it?`)) return;
-    try {
-      await window.mcpx.plugins.marketplaces.remove(marketplace.name);
-      await loadCatalog();
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught));
-    }
+    setConfirmation({
+      title: "Remove marketplace?",
+      message: `Remove "${marketplace.displayName}" and uninstall plugins installed from it?`,
+      confirmLabel: "Remove",
+      destructive: true,
+      action: async () => {
+        try {
+          await window.mcpx.plugins.marketplaces.remove(marketplace.name);
+          await loadCatalog();
+        } catch (caught) {
+          setError(caught instanceof Error ? caught.message : String(caught));
+        }
+      },
+    });
   }
 
   async function toggleMarketplaceUpdates(marketplace: ManagedMarketplace) {
@@ -222,6 +252,19 @@ export function PluginsTab() {
       <div className="page-header page-header--split">
         <h1 className="page-title">Plugins</h1>
       </div>
+      <ConfirmDialog
+        open={confirmation !== null}
+        title={confirmation?.title ?? "Confirm"}
+        message={confirmation?.message ?? ""}
+        confirmLabel={confirmation?.confirmLabel}
+        destructive={confirmation?.destructive}
+        onCancel={() => setConfirmation(null)}
+        onConfirm={() => {
+          const action = confirmation?.action;
+          setConfirmation(null);
+          if (action) void action();
+        }}
+      />
 
       <div className="plugin-view-tabs" role="tablist" aria-label="Plugin views">
         {(["discover", "installed", "marketplaces", "skills"] as View[]).map((item) => (
@@ -305,7 +348,7 @@ export function PluginsTab() {
                 <div className="plugin-card__header"><div className="plugin-card__title-row"><span className="plugin-card__name">{plugin.name}</span><span className="plugin-card__version">v{plugin.version}</span><span className={`plugin-card__status ${plugin.status === "error" ? "plugin-card__status--error" : ""}`}>{plugin.status}</span></div><div className="plugin-card__source">{plugin.marketplace ? `${plugin.marketplace.pluginName}@${plugin.marketplace.name}` : plugin.source}</div></div>
                 <div className="plugin-card__controls"><Toggle id={`plugin-enabled-${plugin.id}`} checked={plugin.enabled} onChange={() => void togglePlugin(plugin)} label={`${plugin.enabled ? "Disable" : "Enable"} ${plugin.name}`} /><button type="button" className="btn btn-sm btn-secondary" onClick={() => toggleExpanded(plugin.id)}>{expanded.has(plugin.id) ? "Less" : "More"}</button></div>
                 {expanded.has(plugin.id) && <div className="plugin-card__detail">
-                  <div className="plugin-card__components">{Object.entries(plugin.components).filter(([, enabled]) => enabled).map(([key]) => { const needsApproval = gatedComponents.includes(key as typeof gatedComponents[number]) && plugin.approvals?.[key as PluginComponent] !== true; return <span key={key} className="plugin-component-chip">{key}{needsApproval && <button type="button" className="plugin-approve-btn" onClick={() => void approve(plugin.id, key)}>Approve</button>}</span>; })}</div>
+                   <div className="plugin-card__components">{Object.entries(plugin.components).filter(([, enabled]) => enabled).map(([key]) => { const needsApproval = gatedComponents.includes(key as typeof gatedComponents[number]) && (plugin.approvals?.[key as PluginComponent] === false || (key === "hooks" && plugin.approvals?.[key as PluginComponent] !== true)); return <span key={key} className="plugin-component-chip">{key}{needsApproval && <button type="button" className="plugin-approve-btn" onClick={() => void approve(plugin.id, key)}>Approve</button>}</span>; })}</div>
                   {plugin.updateError && <div className="feedback-message error">Update failed: {plugin.updateError}</div>}
                   <div className="plugin-card__footer"><button type="button" className="btn btn-sm btn-secondary" onClick={() => void update(plugin)}>Update</button><button type="button" className="btn btn-sm btn-danger" onClick={() => void uninstall(plugin)}>Uninstall</button></div>
                 </div>}

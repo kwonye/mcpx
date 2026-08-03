@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { getSkillsDir, ensureDir } from "./paths.js";
 import type { Skill } from "../types.js";
+import { validateSkillId } from "./identifiers.js";
 
 export function listSkills(): Skill[] {
   const skillsDir = getSkillsDir();
@@ -15,8 +16,12 @@ export function listSkills(): Skill[] {
   for (const file of files) {
     if (file.endsWith(".md")) {
       const id = path.basename(file, ".md");
-      const content = fs.readFileSync(path.join(skillsDir, file), "utf-8");
-      skills.push({ id, content });
+      try {
+        const content = fs.readFileSync(path.join(skillsDir, file), "utf-8");
+        skills.push({ id, content });
+      } catch {
+        console.error(`[mcpx] Warning: could not read skill ${file}`);
+      }
     }
   }
 
@@ -24,6 +29,7 @@ export function listSkills(): Skill[] {
 }
 
 export function getSkill(id: string): Skill | null {
+  validateSkillId(id);
   const skillsDir = getSkillsDir();
   const filePath = path.join(skillsDir, `${id}.md`);
 
@@ -36,6 +42,7 @@ export function getSkill(id: string): Skill | null {
 }
 
 export function saveSkill(id: string, content: string): void {
+  validateSkillId(id);
   const skillsDir = getSkillsDir();
   ensureDir(skillsDir);
 
@@ -44,6 +51,7 @@ export function saveSkill(id: string, content: string): void {
 }
 
 export function deleteSkill(id: string): void {
+  validateSkillId(id);
   const skillsDir = getSkillsDir();
   const filePath = path.join(skillsDir, `${id}.md`);
 

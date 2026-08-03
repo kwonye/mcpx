@@ -2,7 +2,8 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { execFileSync } from "node:child_process";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { z } from "zod";
 import type {
   ManagedMarketplace,
@@ -18,6 +19,8 @@ import { loadConfig } from "./config.js";
 import { mutateConfig } from "./config-store.js";
 import { PluginCache } from "./plugin-cache.js";
 import { discoverComponents, hasManifest, readManifest } from "./plugin-parse.js";
+
+const execFileAsync = promisify(execFile);
 import { PluginManager, uninstallPlugin } from "./plugin-manager.js";
 
 const CLAUDE_MANIFEST = ".claude-plugin/marketplace.json";
@@ -144,18 +147,18 @@ async function acquireSource(source: string): Promise<{ root: string; revision: 
   ensureDir(getMarketplaceCacheRoot());
   const git = parseGitSource(source);
   if (git) {
-    const revision = execFileSync("git", ["ls-remote", git.remote, git.ref], { encoding: "utf8", timeout: 30000 })
-      .split("\t")[0]?.trim();
+    const { stdout } = await execFileAsync("git", ["ls-remote", git.remote, git.ref], { timeout: 30000 });
+    const revision = stdout.split("\t")[0]?.trim();
     if (!revision) throw new Error(`Could not resolve ${git.ref} for ${source}`);
     const destination = snapshotRoot(source, revision);
     if (fs.existsSync(destination)) return { root: destination, revision };
     ensureDir(path.dirname(destination));
     const temp = fs.mkdtempSync(path.join(os.tmpdir(), "mcpx-marketplace-"));
     try {
-      execFileSync("git", ["init"], { cwd: temp, stdio: "pipe", timeout: 10000 });
-      execFileSync("git", ["remote", "add", "origin", git.remote], { cwd: temp, stdio: "pipe", timeout: 10000 });
-      execFileSync("git", ["fetch", "--depth", "1", "origin", revision], { cwd: temp, stdio: "pipe", timeout: 60000 });
-      execFileSync("git", ["checkout", "--detach", "FETCH_HEAD"], { cwd: temp, stdio: "pipe", timeout: 10000 });
+      await execFileAsync("git", ["init"], { cwd: temp, timeout: 10000 });
+      await execFileAsync("git", ["remote", "add", "origin", git.remote], { cwd: temp, timeout: 10000 });
+      await execFileAsync("git", ["fetch", "--depth", "1", "origin", revision], { cwd: temp, timeout: 60000 });
+      await execFileAsync("git", ["checkout", "--detach", "FETCH_HEAD"], { cwd: temp, timeout: 10000 });
       fs.rmSync(path.join(temp, ".git"), { recursive: true, force: true });
       fs.renameSync(temp, destination);
     } catch (error) {

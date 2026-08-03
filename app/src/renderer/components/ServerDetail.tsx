@@ -3,6 +3,7 @@ import { EditServerForm } from "./EditServerForm";
 import { Toggle } from "./ui";
 import { useServerEnabled } from "../hooks/useServerEnabled";
 import type { StatusAuthBinding, UpstreamServerSpec } from "@mcpx/core";
+import { ConfirmDialog } from "./ConfirmDialog";
 
 interface ServerDetailProps {
   server: {
@@ -20,6 +21,7 @@ interface ServerDetailProps {
 export function ServerDetail({ server, onBack, onRefresh }: ServerDetailProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [confirmRemove, setConfirmRemove] = useState(false);
   const { isToggling, handleEnabledChange } = useServerEnabled(server.name, onRefresh);
 
   const handleEdit = () => {
@@ -40,6 +42,18 @@ export function ServerDetail({ server, onBack, onRefresh }: ServerDetailProps) {
 
   const handleEditCancel = () => {
     setIsEditing(false);
+  };
+
+  const handleRemove = async () => {
+    try {
+      await window.mcpx.removeServer(server.name);
+      setConfirmRemove(false);
+      onRefresh();
+      onBack();
+    } catch (caught) {
+      setConfirmRemove(false);
+      setError(caught instanceof Error ? caught.message : String(caught));
+    }
   };
 
   if (isEditing) {
@@ -159,11 +173,20 @@ export function ServerDetail({ server, onBack, onRefresh }: ServerDetailProps) {
           <h3>Danger Zone</h3>
           <p className="detail-section__description">Removing this server will disconnect it from all synced clients.</p>
         </div>
-        <button className="btn btn-danger" onClick={() => window.mcpx.removeServer(server.name).then(onRefresh)}>
+        <button className="btn btn-danger" onClick={() => setConfirmRemove(true)}>
           <span className="material-symbols-outlined font-icon-sm">delete</span>
           Remove Server
         </button>
       </div>
+      <ConfirmDialog
+        open={confirmRemove}
+        title="Remove server?"
+        message={`Remove ${server.name} from mcpx and all synced clients?`}
+        confirmLabel="Remove"
+        destructive
+        onConfirm={() => void handleRemove()}
+        onCancel={() => setConfirmRemove(false)}
+      />
     </div>
   );
 }

@@ -36,7 +36,7 @@ export function applyStartOnLoginSetting(enabled: boolean): void {
 Type=Application
 Name=mcpx
 Comment=Local MCP gateway
-Exec=${execPath}
+Exec=${execPath} --hidden
 Icon=${iconPath}
 Terminal=false
 X-GNOME-Autostart-enabled=true

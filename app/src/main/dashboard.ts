@@ -45,7 +45,11 @@ export function openDashboard(): BrowserWindow {
     });
   });
 
-  dashboard.loadFile(rendererEntryPath(), { hash: "dashboard" });
+  if (process.env.ELECTRON_RENDERER_URL) {
+    void dashboard.loadURL(`${process.env.ELECTRON_RENDERER_URL}#/dashboard`);
+  } else {
+    void dashboard.loadFile(rendererEntryPath(), { hash: "dashboard" });
+  }
 
   dashboard.once("ready-to-show", () => {
     if (!dashboard.isDestroyed()) {

@@ -2034,14 +2034,22 @@ function registerSkillsCommands(program: Command): void {
         process.exit(1);
       }
       saveSkill(id, `# ${id}\n\nAdd your instructions here.`);
+      const summary = syncAllClients(loadConfig(), new SecretsManager());
+      await mutateConfig((config) => persistSyncState(summary, config));
       process.stdout.write(`Skill "${id}" created.\n`);
     });
 
   skill
     .command("rm <id>")
     .description("Remove a skill")
-    .action((id: string) => {
+    .action(async (id: string) => {
+      if (!getSkill(id)) {
+        process.stderr.write(`Skill "${id}" not found.\n`);
+        process.exit(1);
+      }
       deleteSkill(id);
+      const summary = syncAllClients(loadConfig(), new SecretsManager());
+      await mutateConfig((config) => persistSyncState(summary, config));
       process.stdout.write(`Skill "${id}" removed.\n`);
     });
 }

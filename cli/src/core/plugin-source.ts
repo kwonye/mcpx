@@ -46,10 +46,7 @@ export function parseSource(source: string): PluginSource {
     };
   }
 
-  return {
-    type: "git",
-    original: source,
-  };
+  throw new Error(`Unrecognized plugin source: ${source}`);
 }
 
 export function sourceCacheKey(source: PluginSource): string {

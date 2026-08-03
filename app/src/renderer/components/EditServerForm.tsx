@@ -1,6 +1,26 @@
 import { useState } from "react";
 import type { UpstreamServerSpec } from "@mcpx/core";
 
+function tokenizeArguments(value: string): string[] {
+  const tokens: string[] = [];
+  let token = "";
+  let quote: string | null = null;
+  for (const char of value.trim()) {
+    if ((char === '"' || char === "'") && (!quote || quote === char)) {
+      quote = quote ? null : char;
+    } else if (/\s/.test(char) && !quote) {
+      if (token) {
+        tokens.push(token);
+        token = "";
+      }
+    } else {
+      token += char;
+    }
+  }
+  if (token) tokens.push(token);
+  return tokens;
+}
+
 interface AuthBinding {
   kind: "env" | "header";
   key: string;
@@ -123,7 +143,7 @@ export function EditServerForm({
         }
       });
 
-      const argsList = args.trim() ? args.trim().split(/\s+/) : undefined;
+      const argsList = args.trim() ? tokenizeArguments(args) : undefined;
 
       spec = {
         transport: "stdio",

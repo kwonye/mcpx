@@ -1,13 +1,23 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type { IpcRendererEvent } from "electron";
-import type { OAuthSupport } from "@mcpx/core";
+import type {
+  OAuthSupport,
+  StatusReport,
+  Skill,
+  ManagedPlugin,
+  ManagedMarketplace,
+  MarketplaceListing,
+  MarketplacePluginDetail,
+  DaemonStartResult,
+  SyncSummary,
+} from "@mcpx/core";
 import { IPC } from "../shared/ipc-channels";
 import type { DesktopSettingsPatch } from "../shared/desktop-settings";
 
 const ALLOWED_CHANNELS = new Set<string>(Object.values(IPC));
 const REMOTE_ERROR_PREFIX = /^Error invoking remote method '[^']+':\s*(?:Error:\s*)?/;
 
-function invokeIpc(channel: string, ...args: unknown[]) {
+function invokeIpc<T>(channel: string, ...args: unknown[]): Promise<T> {
   return ipcRenderer.invoke(channel, ...args).catch((error: unknown) => {
     if (error instanceof Error) {
       error.message = error.message.replace(REMOTE_ERROR_PREFIX, "");
@@ -17,19 +27,19 @@ function invokeIpc(channel: string, ...args: unknown[]) {
 }
 
 const api = {
-  getStatus: () => invokeIpc(IPC.GET_STATUS),
-  getServers: () => invokeIpc(IPC.GET_SERVERS),
+  getStatus: () => invokeIpc<StatusReport>(IPC.GET_STATUS),
+  getServers: () => invokeIpc<Array<Record<string, unknown>>>(IPC.GET_SERVERS),
   getDesktopSettings: () => invokeIpc(IPC.GET_DESKTOP_SETTINGS),
   addServer: (name: string, spec: unknown) => invokeIpc(IPC.ADD_SERVER, name, spec),
   updateServer: (name: string, spec: unknown, resolvedSecrets?: Record<string, string>) => invokeIpc(IPC.UPDATE_SERVER, name, spec, resolvedSecrets),
   removeServer: (name: string) => invokeIpc(IPC.REMOVE_SERVER, name),
   setServerEnabled: (name: string, enabled: boolean) => invokeIpc(IPC.SET_SERVER_ENABLED, name, enabled),
   updateDesktopSettings: (patch: DesktopSettingsPatch) => invokeIpc(IPC.UPDATE_DESKTOP_SETTINGS, patch),
-  checkForUpdates: () => invokeIpc(IPC.CHECK_FOR_UPDATES),
-  syncAll: () => invokeIpc(IPC.SYNC_ALL),
-  daemonStart: () => invokeIpc(IPC.DAEMON_START),
-  daemonStop: () => invokeIpc(IPC.DAEMON_STOP),
-  daemonRestart: () => invokeIpc(IPC.DAEMON_RESTART),
+  checkForUpdates: () => invokeIpc<unknown>(IPC.CHECK_FOR_UPDATES),
+  syncAll: () => invokeIpc<SyncSummary>(IPC.SYNC_ALL),
+  daemonStart: () => invokeIpc<DaemonStartResult>(IPC.DAEMON_START),
+  daemonStop: () => invokeIpc<unknown>(IPC.DAEMON_STOP),
+  daemonRestart: () => invokeIpc<DaemonStartResult>(IPC.DAEMON_RESTART),
   openDashboard: () => invokeIpc(IPC.OPEN_DASHBOARD),
   quitApp: () => invokeIpc(IPC.QUIT_APP),
   getPendingAuth: () => invokeIpc(IPC.GET_PENDING_AUTH),
@@ -54,10 +64,10 @@ const api = {
   reopenOauthUrl: (serverName: string) => invokeIpc(IPC.OAUTH_REOPEN, serverName),
   dismissAuth: (serverName: string) => invokeIpc(IPC.DISMISS_AUTH, serverName),
   skills: {
-    list: () => invokeIpc(IPC.LIST_SKILLS),
-    get: (id: string) => invokeIpc(IPC.GET_SKILL, id),
-    save: (id: string, content: string) => invokeIpc(IPC.SAVE_SKILL, id, content),
-    delete: (id: string) => invokeIpc(IPC.DELETE_SKILL, id)
+    list: () => invokeIpc<Skill[]>(IPC.LIST_SKILLS),
+    get: (id: string) => invokeIpc<Skill | null>(IPC.GET_SKILL, id),
+    save: (id: string, content: string) => invokeIpc<{ id: string; success: true }>(IPC.SAVE_SKILL, id, content),
+    delete: (id: string) => invokeIpc<{ id: string; success: true }>(IPC.DELETE_SKILL, id)
   },
   plugins: {
     inspect: (source: string) => invokeIpc(IPC.PLUGIN_INSPECT, source),
@@ -76,15 +86,15 @@ const api = {
       invokeIpc(IPC.PLUGIN_CONFIG_SET, name, key, value, options),
     sync: (name?: string, options?: unknown) => invokeIpc(IPC.PLUGIN_SYNC, name, options),
     status: (name?: string) => invokeIpc(IPC.PLUGIN_STATUS, name),
-    list: () => invokeIpc(IPC.PLUGIN_LIST),
+    list: () => invokeIpc<ManagedPlugin[]>(IPC.PLUGIN_LIST),
     marketplaces: {
-      list: () => invokeIpc(IPC.MARKETPLACE_LIST),
+      list: () => invokeIpc<ManagedMarketplace[]>(IPC.MARKETPLACE_LIST),
       add: (source: string, manifestPath?: string) => invokeIpc(IPC.MARKETPLACE_ADD, source, manifestPath),
       refresh: (name: string) => invokeIpc(IPC.MARKETPLACE_REFRESH, name),
       remove: (name: string) => invokeIpc(IPC.MARKETPLACE_REMOVE, name),
       setAutoUpdate: (name: string, enabled: boolean) => invokeIpc(IPC.MARKETPLACE_SET_AUTO_UPDATE, name, enabled),
-      browse: (query?: string) => invokeIpc(IPC.MARKETPLACE_BROWSE, query),
-      inspectPlugin: (id: string) => invokeIpc(IPC.MARKETPLACE_INSPECT_PLUGIN, id),
+       browse: (query?: string) => invokeIpc<MarketplaceListing[]>(IPC.MARKETPLACE_BROWSE, query),
+       inspectPlugin: (id: string) => invokeIpc<MarketplacePluginDetail>(IPC.MARKETPLACE_INSPECT_PLUGIN, id),
       installPlugin: (id: string) => invokeIpc(IPC.MARKETPLACE_INSTALL_PLUGIN, id)
     }
   },

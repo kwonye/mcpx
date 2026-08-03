@@ -1,9 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
-import { execFileSync } from "node:child_process";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { PluginDataManager } from "./plugin-data.js";
 import { getPluginDataRoot, ensureDir } from "./paths.js";
 import type { DiscoveredComponents, ManagedPlugin } from "../types.js";
+
+const execFileAsync = promisify(execFile);
 
 export class PluginLifecycle {
   private dataManager: PluginDataManager;
@@ -24,9 +27,8 @@ export class PluginLifecycle {
         const pkg = JSON.parse(fs.readFileSync(pkgJsonPath, "utf8"));
         const deps = { ...pkg.dependencies, ...pkg.devDependencies };
         if (Object.keys(deps).length > 0) {
-          execFileSync("npm", ["install", "--production"], {
+          await execFileAsync("npm", ["install", "--production", "--ignore-scripts"], {
             cwd: pluginRoot,
-            stdio: "pipe",
             timeout: 120000,
           });
         }
@@ -39,8 +41,7 @@ export class PluginLifecycle {
     const reqPath = path.join(pluginRoot, "requirements.txt");
     if (fs.existsSync(reqPath)) {
       try {
-        execFileSync("pip", ["install", "-r", reqPath], {
-          stdio: "pipe",
+        await execFileAsync("pip", ["install", "-r", reqPath], {
           timeout: 120000,
         });
       } catch {

@@ -3,29 +3,8 @@ import { spawn } from "node:child_process";
 import { loadConfig } from "./config.js";
 import { resolvePluginVars } from "./plugin-parse.js";
 import { resolvePluginId } from "./plugin-manager.js";
-import type { ManagedPlugin } from "../types.js";
 
 const ALLOWLISTED_ENV = new Set(["PATH", "HOME", "TMPDIR", "LANG", "SHELL"]);
-
-function isAncestorOrSelf(ancestor: string, child: string): boolean {
-  const rel = child.startsWith(ancestor) ? child.slice(ancestor.length) : null;
-  return rel !== null && (rel === "" || rel.startsWith("/"));
-}
-
-function getProjectOverride(plugin: ManagedPlugin): { enabled?: boolean; components?: Record<string, boolean> } | null {
-  const cwd = process.cwd();
-  const overrides = plugin.projectOverrides;
-  if (!overrides) return null;
-  let best: string | null = null;
-  for (const overridePath of Object.keys(overrides)) {
-    if (isAncestorOrSelf(overridePath, cwd)) {
-      if (!best || overridePath.length > best.length) {
-        best = overridePath;
-      }
-    }
-  }
-  return best ? overrides[best] : null;
-}
 
 export function runPluginHost(pluginNameOrId: string, serverId: string): void {
   const config = loadConfig();
@@ -46,18 +25,6 @@ export function runPluginHost(pluginNameOrId: string, serverId: string): void {
     process.exit(1);
   }
 
-  const projectOverride = getProjectOverride(plugin);
-  if (projectOverride) {
-    if (projectOverride.enabled === false) {
-      process.stderr.write(`[mcpx] Plugin "${plugin.name}" is disabled for this project\n`);
-      process.exit(1);
-    }
-    if (projectOverride.components?.mcpServers === false) {
-      process.stderr.write(`[mcpx] MCP servers for plugin "${plugin.name}" are disabled for this project\n`);
-      process.exit(1);
-    }
-  }
-
   const serverDef = plugin.discovered.mcpServers.find((s) => s.id === serverId);
   if (!serverDef) {
     process.stderr.write(`[mcpx] Server "${serverId}" not found in plugin "${plugin.name}"\n`);
@@ -76,12 +43,15 @@ export function runPluginHost(pluginNameOrId: string, serverId: string): void {
   }
 
   // Path traversal guard
-  const allPaths = [command, ...args, ...Object.values(resolvedEnv)];
+  const cwd = serverDef.cwd ? resolvePluginVars(serverDef.cwd, pluginRoot, dataDir) : pluginRoot;
+  const allPaths = [command, cwd, ...args, ...Object.values(resolvedEnv)];
   const resolvedPluginRoot = path.resolve(pluginRoot);
   const resolvedDataDir = path.resolve(dataDir);
   for (const p of allPaths) {
     if (p.includes("..") || p.startsWith("/")) {
-      const resolved = path.resolve(resolvePluginVars(p, pluginRoot, dataDir));
+      const resolved = path.isAbsolute(p)
+        ? path.resolve(p)
+        : path.resolve(pluginRoot, p);
       const withinRoot = resolved === resolvedPluginRoot || resolved.startsWith(resolvedPluginRoot + path.sep);
       const withinData = resolved === resolvedDataDir || resolved.startsWith(resolvedDataDir + path.sep);
       if (!withinRoot && !withinData) {
@@ -113,7 +83,7 @@ export function runPluginHost(pluginNameOrId: string, serverId: string): void {
 
   const child = spawn(command, args, {
     stdio: "inherit",
-    cwd: pluginRoot,
+    cwd,
     env: env as Record<string, string>,
   });
 
@@ -122,5 +92,9 @@ export function runPluginHost(pluginNameOrId: string, serverId: string): void {
 
   child.on("exit", (code) => {
     process.exit(code ?? 1);
+  });
+  child.on("error", (error) => {
+    process.stderr.write(`[mcpx] Failed to start plugin server: ${error.message}\n`);
+    process.exit(1);
   });
 }

@@ -142,7 +142,7 @@ export function Dashboard() {
           {projects.length > 0 && (
             <div className="project-nav-tree">
               {projects.map((project) => {
-                const isExpanded = expandedProjects.has(project.path) || selectedProjectPath === project.path;
+                const isExpanded = expandedProjects.has(project.path);
                 const projectServers = getProjectServers(project.name);
                 return (
                   <div className="project-nav-group" key={project.path}>

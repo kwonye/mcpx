@@ -14,6 +14,7 @@ import type {
   ManagedPlugin, PluginComponent, PluginManifest, PluginSource,
   DiscoveredComponents
 } from "../types.js";
+import { normalizePluginName } from "./identifiers.js";
 
 interface InstallPluginOptions {
   name?: string;
@@ -90,7 +91,7 @@ export class PluginManager {
 
   async installResolvedPlugin(source: PluginSource, options?: InstallPluginOptions, sourceLabel = source.original): Promise<ManagedPlugin> {
     const info = await this.inspectResolvedSource(source, sourceLabel);
-    const pluginName = options?.name || info.manifest?.name || path.basename(info.root);
+    const pluginName = normalizePluginName(options?.name || info.manifest?.name || path.basename(info.root));
     const pluginId = `${pluginName}@${info.sha.slice(0, 8)}`;
 
     const dataDir = path.join(getPluginDataRoot(), pluginId);
@@ -158,7 +159,7 @@ export class PluginManager {
         const nsName = `${pluginName}__${mcp.id}`;
         const approved = plugin.approvals?.mcpServers !== false;
         config.servers[nsName] = mcp.transport === "http" && mcp.url
-          ? { transport: "http", url: mcp.url, enabled: enabled && approved }
+          ? { transport: "http", url: new URL(mcp.url).toString(), enabled: enabled && approved }
           : {
               transport: "stdio",
               command: "npx",
@@ -203,7 +204,7 @@ export class PluginManager {
   ): Promise<ManagedPlugin> {
     const currentSnapshot = loadConfig(this.configPath).plugins?.[pluginId];
     if (!currentSnapshot) throw new Error(`Plugin ${pluginId} not found`);
-    const pluginName = info.manifest?.name || currentSnapshot.name;
+    const pluginName = normalizePluginName(info.manifest?.name || currentSnapshot.name);
 
     // Now update with freshly-read config inside the lock
     let updatedPlugin: ManagedPlugin | undefined;
@@ -225,11 +226,12 @@ export class PluginManager {
       current.serverNames = info.components.mcpServers.map(s => `${pluginName}__${s.id}`);
 
       // Re-register MCP servers
-      const approved = current.approvals?.mcpServers !== false;
+      const requiresApproval = !current.marketplace && info.components.mcpServers.length > 0;
+      const approved = !requiresApproval && current.approvals?.mcpServers !== false;
       for (const mcp of info.components.mcpServers) {
         const nsName = `${pluginName}__${mcp.id}`;
         config.servers[nsName] = mcp.transport === "http" && mcp.url
-          ? { transport: "http", url: mcp.url, enabled: current.enabled && approved }
+          ? { transport: "http", url: new URL(mcp.url).toString(), enabled: current.enabled && approved }
           : {
               transport: "stdio",
               command: "npx",
@@ -239,7 +241,7 @@ export class PluginManager {
       }
 
       // Reset SHA-bound approvals
-      current.approvals = {};
+      current.approvals = requiresApproval ? { mcpServers: false } : {};
       if (sourceFingerprint && current.marketplace) current.marketplace.sourceFingerprint = sourceFingerprint;
       delete current.updateError;
 
@@ -291,6 +293,10 @@ export class PluginManager {
       const plugin = config.plugins[pluginId];
       if (!plugin) throw new Error(`Plugin ${pluginId} not found`);
       plugin.enabled = true;
+      for (const name of plugin.serverNames) {
+        const server = config.servers[name];
+        if (server) server.enabled = plugin.approvals?.mcpServers !== false;
+      }
     }, this.configPath);
 
     // Sync outside the lock (slow I/O)
@@ -308,6 +314,10 @@ export class PluginManager {
       const plugin = config.plugins[pluginId];
       if (!plugin) throw new Error(`Plugin ${pluginId} not found`);
       plugin.enabled = false;
+      for (const name of plugin.serverNames) {
+        const server = config.servers[name];
+        if (server) server.enabled = false;
+      }
     }, this.configPath);
 
     // Sync outside the lock (slow I/O)
@@ -359,9 +369,10 @@ export class PluginManager {
   async preparePlugin(pluginId: string): Promise<void> {
     const config = loadConfig(this.configPath);
     if (!config.plugins) throw new Error(`Plugin ${pluginId} not found`);
-    const plugin = config.plugins[pluginId];
+    const resolvedId = resolvePluginId(config, pluginId);
+    const plugin = config.plugins[resolvedId];
     if (!plugin) throw new Error(`Plugin ${pluginId} not found`);
-    await this.lifecycle.prepareDependencies(pluginId, plugin.root);
+    await this.lifecycle.prepareDependencies(resolvedId, plugin.root);
   }
 }
 
