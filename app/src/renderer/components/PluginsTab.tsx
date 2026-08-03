@@ -105,24 +105,17 @@ export function PluginsTab() {
 
   async function installListing(selected: MarketplacePluginDetail) {
     if (!selected.compatible) return;
-    setConfirmation({
-      title: "Install plugin?",
-      message: `Install "${selected.displayName}" with ${selected.supportedCapabilities.join(", ")}?`,
-      confirmLabel: "Install",
-      action: async () => {
-        setInstallingId(selected.id);
-        try {
-          await window.mcpx.plugins.marketplaces.installPlugin(selected.id);
-          setDetail(null);
-          await loadCatalog();
-        } catch (caught) {
-          setError(caught instanceof Error ? caught.message : String(caught));
-        } finally {
-          setInstallingId(null);
-        }
-      },
-    });
-    return;
+    setInstallingId(selected.id);
+    setError(null);
+    try {
+      await window.mcpx.plugins.marketplaces.installPlugin(selected.id);
+      setDetail(null);
+      await loadCatalog();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setInstallingId(null);
+    }
   }
 
   async function installSource(event: React.FormEvent) {
