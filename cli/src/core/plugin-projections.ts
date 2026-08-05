@@ -187,7 +187,14 @@ function syncNamespacedComponents(config: NamespacedProjectionConfig, plugins: P
   const projectedDirs: string[] = [];
   const errors: string[] = [];
   const syncSkills = (plugin: PluginSyncInput) => {
-    if (!config.skillsBase || !plugin.components.skills || !isComponentApproved(plugin, "skills")) return;
+    if (!config.skillsBase) return;
+    if (!plugin.components.skills || !isComponentApproved(plugin, "skills")) {
+      // Component disabled or not approved — clear any stale projections.
+      if (fs.existsSync(config.skillsBase)) {
+        recordOwned(config.skillsBase, plugin.pluginId, []);
+      }
+      return;
+    }
     ensureDir(config.skillsBase);
     const owned: string[] = [];
     for (const skill of plugin.skills) {
@@ -206,7 +213,13 @@ function syncNamespacedComponents(config: NamespacedProjectionConfig, plugins: P
     recordOwned(config.skillsBase, plugin.pluginId, owned);
   };
   const syncCommands = (plugin: PluginSyncInput) => {
-    if (!config.commandsBase || !plugin.components.commands || !isComponentApproved(plugin, "commands")) return;
+    if (!config.commandsBase) return;
+    if (!plugin.components.commands || !isComponentApproved(plugin, "commands")) {
+      if (fs.existsSync(config.commandsBase)) {
+        recordOwned(config.commandsBase, plugin.pluginId, []);
+      }
+      return;
+    }
     ensureDir(config.commandsBase);
     const owned: string[] = [];
     for (const command of plugin.commands) {

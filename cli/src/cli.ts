@@ -122,7 +122,13 @@ function parseAddServerSpec(values: string[], options: AddCommandOptions): { nam
   }
 
   const name = values[0] ?? "";
+  if (!name.trim()) {
+    throw new Error("Server name must be non-empty.");
+  }
   const target = values[1] ?? "";
+  if (!target.trim()) {
+    throw new Error("Server target (URL or command) must be non-empty.");
+  }
   const trailing = values.slice(2);
   const requestedTransport = normalizeTransport(options.transport);
   const transport = requestedTransport === "auto"
@@ -165,6 +171,9 @@ function parseAddServerSpec(values: string[], options: AddCommandOptions): { nam
     env[key] = value;
   }
 
+  if (options.cwd !== undefined && options.cwd !== null && !options.cwd.trim()) {
+    throw new Error("--cwd must be non-empty when provided.");
+  }
   const spec: StdioServerSpec = {
     transport: "stdio",
     command: target,

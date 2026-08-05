@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import fs from "node:fs";
@@ -80,8 +81,9 @@ export function getUpdateLockPath(): string {
 }
 
 export function getOAuthLockPath(serverName: string): string {
-  const safeName = serverName.toLowerCase().replace(/[^a-z0-9._-]/g, "_");
-  return path.join(getRuntimeDir(), `oauth-${safeName}.lock`);
+  const safeName = serverName.toLowerCase().replace(/[^a-z0-9._-]/g, "_").slice(0, 32);
+  const hash = crypto.createHash("sha256").update(serverName).digest("hex").slice(0, 12);
+  return path.join(getRuntimeDir(), `oauth-${safeName}-${hash}.lock`);
 }
 
 export function getPluginCacheRoot(): string {

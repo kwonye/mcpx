@@ -413,7 +413,12 @@ function specFingerprint(spec: UpstreamServerSpec, secrets?: SecretsManager): st
         // obtainedAt instead, which changes on every login and refresh.
         try {
           const serverName = oauthReferenceServerName(value);
-          const storedTokens = secrets.getSecret(oauthSecretNames(serverName).tokens);
+          let storedTokens = secrets.getSecret(oauthSecretNames(serverName).tokens);
+          if (!storedTokens) {
+            // Legacy fallback for old non-hashed secret names
+            const legacy = `oauth_${serverName.toLowerCase().replace(/[^a-z0-9._-]/g, "_")}_tokens`;
+            storedTokens = secrets.getSecret(legacy);
+          }
           const obtainedAt = storedTokens ? (JSON.parse(storedTokens) as { obtainedAt?: number }).obtainedAt : undefined;
           resolvedMarkers[key] = obtainedAt != null ? `oauth:${serverName}:${obtainedAt}` : value;
         } catch {

@@ -37,9 +37,14 @@ import {
   ensureGatewayToken
 } from "@mcpx/core";
 import type { HttpServerSpec, StdioServerSpec, UpstreamServerSpec, OAuthProgressEvent } from "@mcpx/core";
+import { z } from "zod";
 import { IPC } from "../shared/ipc-channels";
 import type { DesktopSettingsPatch } from "../shared/desktop-settings";
 import { GATEWAY_FETCH_TIMEOUT_MS } from "../shared/timeouts";
+
+const serverNameSchema = z.string().trim().min(1, "Server name must be non-empty");
+const headerNameSchema = z.string().trim().min(1);
+const authValueSchema = z.string().min(1);
 import { openDashboard } from "./dashboard";
 import { loadDesktopSettings, updateDesktopSettings } from "./settings-store";
 import { applyStartOnLoginSetting } from "./login-item";
@@ -170,6 +175,8 @@ export function registerIpcHandlers(): void {
   });
 
   ipcMain.handle(IPC.ADD_SERVER, async (_event, name: string, spec: UpstreamServerSpec) => {
+    serverNameSchema.parse(name);
+    if (!spec || typeof spec !== "object" || !("transport" in spec)) throw new Error("Invalid server spec");
     await mutateConfig((config) => {
       addServer(config, name, spec, true);
     });
@@ -198,6 +205,10 @@ export function registerIpcHandlers(): void {
   });
 
   ipcMain.handle(IPC.CONFIGURE_AUTH, async (_event, { serverName, headerName, authValue, secretName, raw }: { serverName: string; headerName: string; authValue: string; secretName?: string; raw?: boolean }) => {
+    serverNameSchema.parse(serverName);
+    headerNameSchema.parse(headerName);
+    authValueSchema.parse(authValue);
+    if (secretName !== undefined) z.string().min(1).parse(secretName);
     const config = loadConfig();
     const spec = config.servers[serverName];
     if (!spec) throw new Error(`Server "${serverName}" not found`);
@@ -230,11 +241,13 @@ export function registerIpcHandlers(): void {
   });
 
   ipcMain.handle(IPC.DISMISS_AUTH, (_event, serverName: string) => {
+    serverNameSchema.parse(serverName);
     dismissPendingAuth(serverName);
     return { dismissed: serverName };
   });
 
   ipcMain.handle(IPC.REQUEST_AUTH, (_event, serverName: string) => {
+    serverNameSchema.parse(serverName);
     const config = loadConfig();
     if (!config.servers[serverName]) {
       throw new Error(`Server "${serverName}" not found.`);
@@ -247,6 +260,7 @@ export function registerIpcHandlers(): void {
   });
 
   ipcMain.handle(IPC.CHECK_OAUTH_SUPPORT, async (_event, serverName: string) => {
+    serverNameSchema.parse(serverName);
     const config = loadConfig();
     const spec = config.servers[serverName];
     if (!spec) {
@@ -259,6 +273,7 @@ export function registerIpcHandlers(): void {
   });
 
   ipcMain.handle(IPC.START_OAUTH, async (_event, serverName: string) => {
+    serverNameSchema.parse(serverName);
     const existing = inFlightOAuth.get(serverName);
     if (existing) {
       return existing.promise;
@@ -316,12 +331,14 @@ export function registerIpcHandlers(): void {
   });
 
   ipcMain.handle(IPC.CANCEL_OAUTH, (_event, serverName: string) => {
+    serverNameSchema.parse(serverName);
     const entry = inFlightOAuth.get(serverName);
     entry?.controller.abort();
     return { cancelled: Boolean(entry) };
   });
 
   ipcMain.handle(IPC.OAUTH_REOPEN, (_event, serverName: string) => {
+    serverNameSchema.parse(serverName);
     const url = oauthAuthorizationUrls.get(serverName);
     if (url) {
       void shell.openExternal(url);
@@ -330,6 +347,7 @@ export function registerIpcHandlers(): void {
   });
 
   ipcMain.handle(IPC.REMOVE_SERVER, async (_event, name: string) => {
+    serverNameSchema.parse(name);
     await mutateConfig((config) => {
       removeServer(config, name, false);
     });
@@ -347,6 +365,8 @@ export function registerIpcHandlers(): void {
   });
 
   ipcMain.handle(IPC.SET_SERVER_ENABLED, async (_event, name: string, enabled: boolean) => {
+    serverNameSchema.parse(name);
+    z.boolean().parse(enabled);
     await mutateConfig((config) => {
       setServerEnabled(config, name, enabled);
     });
@@ -375,6 +395,8 @@ export function registerIpcHandlers(): void {
   });
 
   ipcMain.handle(IPC.UPDATE_SERVER, async (_event, name: string, spec: UpstreamServerSpec, resolvedSecrets?: Record<string, string>) => {
+    serverNameSchema.parse(name);
+    if (!spec || typeof spec !== "object" || !("transport" in spec)) throw new Error("Invalid server spec");
     const secrets = new SecretsManager();
     
     // Store any new secret values before updating the server

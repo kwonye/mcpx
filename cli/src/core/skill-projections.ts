@@ -3,6 +3,7 @@ import path from "node:path";
 import { ensureDir } from "./paths.js";
 import type { Skill } from "../types.js";
 import { z } from "zod";
+import { validateSkillId } from "./identifiers.js";
 
 const OWNERSHIP_MANIFEST = "mcpx-skills.json";
 
@@ -78,9 +79,11 @@ export function projectSkillsToDir(targetDir: string, skills: Skill[], layout: "
   }
 
   for (const skill of skills) {
+    validateSkillId(skill.id);
     const filePath = layout === "dir"
       ? path.join(targetDir, skill.id, "SKILL.md")
       : path.join(targetDir, `${skill.id}.md`);
+    assertWithinBase(targetDir, filePath);
     ensureDir(path.dirname(filePath));
     fs.writeFileSync(filePath, skill.content, "utf-8");
   }
