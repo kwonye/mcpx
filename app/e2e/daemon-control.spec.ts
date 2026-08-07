@@ -1,6 +1,6 @@
 import { test, expect, _electron as electron, type ElectronApplication, type Page } from "@playwright/test";
 import { resolve, join } from "node:path";
-import { mkdtempSync, rmSync, readFileSync, existsSync } from "node:fs";
+import { mkdtempSync, rmSync, readFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 
 const mainPath = resolve(__dirname, "../out/main/index.js");
@@ -21,6 +21,11 @@ function createSandbox(): Sandbox {
   const configHome = mkdtempSync(join(tmpdir(), "mcpx-e2e-config-"));
   const dataHome = mkdtempSync(join(tmpdir(), "mcpx-e2e-data-"));
   const stateHome = mkdtempSync(join(tmpdir(), "mcpx-e2e-state-"));
+  const configDir = join(configHome, "mcpx");
+  mkdirSync(configDir, { recursive: true });
+  // This spec owns the explicit start/stop transition. Disable startup's
+  // background daemon so the first dashboard snapshot cannot race the click.
+  writeFileSync(join(configDir, "config.json"), JSON.stringify({ gateway: { autoStart: false } }));
 
   return {
     env: {
