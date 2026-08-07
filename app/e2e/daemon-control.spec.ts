@@ -25,7 +25,7 @@ function createSandbox(): Sandbox {
   mkdirSync(configDir, { recursive: true });
   // This spec owns the explicit start/stop transition. Disable startup's
   // background daemon so the first dashboard snapshot cannot race the click.
-  writeFileSync(join(configDir, "config.json"), JSON.stringify({ gateway: { autoStart: false } }));
+  writeFileSync(join(configDir, "config.json"), JSON.stringify({ gateway: { port: 38773, autoStart: false } }));
 
   return {
     env: {
