@@ -177,7 +177,12 @@ async function toggleAndAwait(window: Page, targetText: "Gateway Running" | "Gat
   }
 
   await window.evaluate(() => window.dispatchEvent(new Event("focus")));
-  await expect(title).toHaveText(targetText, { timeout: 15000 });
+  try {
+    await expect(title).toHaveText(targetText, { timeout: 15000 });
+  } catch (error) {
+    const feedback = await window.locator(".daemon-panel .feedback-message").textContent();
+    throw new Error(`${error instanceof Error ? error.message : String(error)}${feedback ? `\nDaemon error: ${feedback}` : ""}`);
+  }
 }
 
 test.describe("daemon control", () => {
