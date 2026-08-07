@@ -510,8 +510,9 @@ export function registerIpcHandlers(): void {
     }
     const secrets = new SecretsManager();
     const result = await startDaemon(config, getCliDaemonPath(), secrets);
-    updateTrayForDaemonStatus(result.started);
-    if (!result.started) {
+    const alreadyRunning = result.message === "mcpx daemon already running.";
+    updateTrayForDaemonStatus(result.started || alreadyRunning);
+    if (!result.started && !alreadyRunning) {
       throw new Error(result.message);
     }
     return result;

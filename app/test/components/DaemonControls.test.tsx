@@ -52,7 +52,7 @@ describe("DaemonControls", () => {
     expect(await screen.findByText("EADDRINUSE: port already in use")).toBeDefined();
     const startButton = screen.getByRole("button", { name: /Start/i }) as HTMLButtonElement;
     expect(startButton.disabled).toBe(false);
-    expect(onRefresh).not.toHaveBeenCalled();
+    expect(onRefresh).toHaveBeenCalledTimes(1);
   });
 
   it("shows an error message when stopping the daemon fails", async () => {
@@ -78,6 +78,6 @@ describe("DaemonControls", () => {
     await waitFor(() => {
       expect(screen.queryByText("EADDRINUSE: port already in use")).toBeNull();
     });
-    expect(onRefresh).toHaveBeenCalledTimes(1);
+    expect(onRefresh).toHaveBeenCalledTimes(2);
   });
 });

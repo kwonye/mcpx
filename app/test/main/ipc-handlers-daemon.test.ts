@@ -276,6 +276,16 @@ describe("ipc-handlers.ts - daemon + settings + misc group", () => {
       await expect(invokeHandler(IPC.DAEMON_START)).rejects.toThrow("port 37373 already in use");
       expect(updateTrayForDaemonStatusMock).toHaveBeenCalledWith(false);
     });
+
+    it("treats an already-running daemon as an idempotent start", async () => {
+      startDaemonMock.mockResolvedValue({ started: false, message: "mcpx daemon already running." });
+
+      await expect(invokeHandler(IPC.DAEMON_START)).resolves.toEqual({
+        started: false,
+        message: "mcpx daemon already running."
+      });
+      expect(updateTrayForDaemonStatusMock).toHaveBeenCalledWith(true);
+    });
   });
 
   // ---------------------------------------------------------------------------

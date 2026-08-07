@@ -2,7 +2,7 @@ import { useState } from "react";
 
 interface DaemonControlsProps {
   daemon: { running: boolean; pid?: number; port?: number };
-  onRefresh: () => void;
+  onRefresh: () => void | Promise<void>;
 }
 
 export function DaemonControls({ daemon, onRefresh }: DaemonControlsProps) {
@@ -16,9 +16,17 @@ export function DaemonControls({ daemon, onRefresh }: DaemonControlsProps) {
       } else {
         await window.mcpx.daemonStart();
       }
-      onRefresh();
+      await onRefresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : `Failed to ${daemon.running ? "stop" : "start"} the gateway`);
+      // The daemon operation may have completed despite an IPC error (for
+      // example, when auto-start wins the same start race). Always reconcile
+      // the rendered status with the daemon's actual state.
+      try {
+        await onRefresh();
+      } catch {
+        // Preserve the original operation error for the user.
+      }
     }
   }
 

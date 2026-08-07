@@ -176,17 +176,15 @@ export function getDaemonStatus(config: McpxConfig): DaemonStatus {
 export async function startDaemon(config: McpxConfig, cliPath: string, secrets: SecretsManager): Promise<DaemonStartResult> {
   const existingStatus = getDaemonStatus(config);
   if (existingStatus.running && existingStatus.pid) {
-    const portAvailable = await isPortAvailable(config.gateway.port);
-    if (!portAvailable) {
-      return {
-        started: false,
-        pid: existingStatus.pid,
-        port: config.gateway.port,
-        message: "mcpx daemon already running."
-      };
-    }
-
-    try { fs.unlinkSync(getPidPath()); } catch {}
+    // Treat a live pid record as authoritative while the daemon is starting.
+    // Removing it when the port has not bound yet can launch a second daemon
+    // during the desktop auto-start/toggle race.
+    return {
+      started: false,
+      pid: existingStatus.pid,
+      port: existingStatus.port ?? config.gateway.port,
+      message: "mcpx daemon already running."
+    };
   }
 
   const { port, fellBackFrom } = await resolveGatewayPort(config, secrets);
