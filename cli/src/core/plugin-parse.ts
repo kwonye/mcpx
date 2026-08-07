@@ -5,7 +5,8 @@ import type { PluginManifest, DiscoveredComponents, DiscoveredComponent, Discove
 
 const CLAUDE_PLUGIN_JSON_REL = path.join(".claude-plugin", "plugin.json");
 const CODEX_PLUGIN_JSON_REL = path.join(".codex-plugin", "plugin.json");
-const MCP_JSON_REL = ".mcp.json";
+const AGENT_PLUGIN_JSON_REL = "plugin.json";
+const MCP_JSON_RELS = ["mcp.json", ".mcp.json"];
 const HOOKS_JSON_REL = path.join("hooks", "hooks.json");
 const SKILLS_DIR = "skills";
 const COMMANDS_DIR = "commands";
@@ -45,7 +46,7 @@ const manifestSchema = z.object({
 type RawManifest = z.infer<typeof manifestSchema>;
 
 function manifestPath(pluginRoot: string): string | null {
-  for (const rel of [CLAUDE_PLUGIN_JSON_REL, CODEX_PLUGIN_JSON_REL]) {
+  for (const rel of [AGENT_PLUGIN_JSON_REL, CLAUDE_PLUGIN_JSON_REL, CODEX_PLUGIN_JSON_REL]) {
     const candidate = path.join(pluginRoot, rel);
     if (fs.existsSync(candidate)) return candidate;
   }
@@ -246,7 +247,9 @@ function discoverHooks(pluginRoot: string, raw: RawManifest | null): DiscoveredC
 
 function discoverMcpServers(pluginRoot: string, raw: RawManifest | null): DiscoveredMcpServer[] {
   const declared = typeof raw?.mcpServers === "string" ? raw.mcpServers : undefined;
-  const mcpPath = declared ? resolveWithinRoot(pluginRoot, declared) : path.join(pluginRoot, MCP_JSON_REL);
+  const mcpPath = declared
+    ? resolveWithinRoot(pluginRoot, declared)
+    : MCP_JSON_RELS.map((rel) => path.join(pluginRoot, rel)).find(fs.existsSync) ?? null;
   if (!mcpPath || !fs.existsSync(mcpPath)) return [];
   try {
     const raw = JSON.parse(fs.readFileSync(mcpPath, "utf8"));

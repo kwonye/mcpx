@@ -1,6 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+
+vi.mock("electron", () => ({
+  app: {},
+  crashReporter: { start: vi.fn() },
+  dialog: { showErrorBox: vi.fn() },
+  Menu: { setApplicationMenu: vi.fn() },
+}));
+
 import { registerLifecycleHandlers } from "../../src/main/index";
 
 vi.mock("@mcpx/core", () => ({

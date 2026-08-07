@@ -97,6 +97,35 @@ describe("plugin manifest parsing", () => {
     expect(manifest?.description).toBe("A test");
   });
 
+  it("reads the Agent Plugins v1 root manifest and mcp.json", () => {
+    const pluginRoot = path.join(env.root, "agent-plugin");
+    fs.mkdirSync(pluginRoot, { recursive: true });
+    fs.writeFileSync(
+      path.join(pluginRoot, "plugin.json"),
+      JSON.stringify({
+        $schema: "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+        name: "agent-plugin",
+        version: "1.0.0",
+        description: "An Agent Plugins v1 package"
+      })
+    );
+    fs.writeFileSync(
+      path.join(pluginRoot, "mcp.json"),
+      JSON.stringify({
+        $schema: "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+        mcpServers: {
+          remote: { type: "streamable-http", url: "https://example.com/mcp" }
+        }
+      })
+    );
+
+    expect(hasManifest(pluginRoot)).toBe(true);
+    expect(readManifest(pluginRoot)?.name).toBe("agent-plugin");
+    expect(discoverComponents(pluginRoot).mcpServers).toMatchObject([
+      { id: "remote", transport: "http", url: "https://example.com/mcp" }
+    ]);
+  });
+
   it("returns null for missing manifest", () => {
     expect(readManifest(env.root)).toBeNull();
   });

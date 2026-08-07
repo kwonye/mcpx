@@ -240,6 +240,16 @@ mcpx sync claude
 mcpx sync --client claude --client codex
 ```
 
+### Agent Plugins
+
+`mcpx plugin` installs Claude, Codex, and [Agent Plugins v1](https://agent-plugins.org/) packages from a local directory, Git URL, or GitHub shorthand. Agent Plugins v1 packages use a root `plugin.json`, optional `skills/`, and optional `mcp.json`; `stdio` and streamable HTTP MCP entries are managed through the normal gateway and client projection flow.
+
+```bash
+mcpx plugin inspect ./my-plugin
+mcpx plugin install owner/my-plugin
+mcpx plugin marketplace list
+```
+
 ### Config/data/state path overrides
 
 - `MCPX_CONFIG_HOME`
