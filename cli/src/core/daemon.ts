@@ -122,7 +122,7 @@ export async function resolveGatewayPort(config: McpxConfig, secrets?: SecretsMa
   throw new Error(`No available local port found near ${config.gateway.port}.`);
 }
 
-async function waitForGatewayReady(port: number, token: string, timeoutMs = 5000): Promise<void> {
+async function waitForGatewayReady(port: number, token: string, timeoutMs = 15000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   let lastError: unknown;
 
