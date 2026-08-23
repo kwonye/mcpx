@@ -40,6 +40,21 @@ async function startServer(handler: http.RequestListener): Promise<StartedServer
         res.end();
         return;
       }
+      const end = res.end.bind(res);
+      res.end = ((chunk?: unknown, ...args: unknown[]) => {
+        if (typeof chunk === "string") {
+          try {
+            const payload = JSON.parse(chunk) as { result?: Record<string, unknown> };
+            if (payload.result && typeof payload.result === "object" && !payload.result.resultType) {
+              payload.result = { resultType: "complete", ttlMs: 0, cacheScope: "private", ...payload.result };
+              chunk = JSON.stringify(payload);
+            }
+          } catch {
+            // Non-JSON fixture responses should pass through unchanged.
+          }
+        }
+        return end(chunk as never, ...args as never[]);
+      }) as typeof res.end;
       handler(req, res);
     });
     server.once("error", reject);
@@ -72,20 +87,57 @@ async function waitForListening(server: http.Server): Promise<void> {
   });
 }
 
-function respondWithInit(res: http.ServerResponse, id: string | number | null): void {
+function respondWithDiscover(res: http.ServerResponse, id: string | number | null): void {
   res.setHeader("content-type", "application/json");
   res.end(
     JSON.stringify({
       jsonrpc: "2.0",
       id,
       result: {
-        protocolVersion: "2024-11-05",
-        capabilities: {},
-        serverInfo: { name: "test-upstream", version: "1.0.0" }
+        supportedVersions: ["2026-07-28"],
+        capabilities: { tools: {}, resources: {}, prompts: {} },
+        resultType: "complete"
       }
     })
   );
 }
+
+function modernRpcBody(method: string, id: string | number, params: Record<string, unknown> = {}): string {
+  return JSON.stringify({
+    jsonrpc: "2.0",
+    id,
+    method,
+    params: {
+      ...params,
+      _meta: {
+        "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+        "io.modelcontextprotocol/clientInfo": { name: "mcpx-test", version: "2.0.0" },
+        "io.modelcontextprotocol/clientCapabilities": {}
+      }
+    }
+  });
+}
+
+const nativeFetch = globalThis.fetch;
+globalThis.fetch = async (input, init = {}) => {
+  const body = typeof init.body === "string" ? init.body : undefined;
+  const url = new URL(typeof input === "string" ? input : input instanceof URL ? input : input.url);
+  if (body && url.pathname === "/mcp") {
+    try {
+      const parsed = JSON.parse(body) as { method?: string; params?: { name?: string; uri?: string; _meta?: Record<string, unknown> } };
+      if (parsed.params?._meta?.["io.modelcontextprotocol/protocolVersion"]) {
+        const headers = new Headers(init.headers);
+        headers.set("mcp-method", parsed.method ?? "");
+        const name = parsed.params.name ?? parsed.params.uri;
+        if (typeof name === "string") headers.set("mcp-name", name);
+        return nativeFetch(input, { ...init, headers });
+      }
+    } catch {
+      // Let fetch and the server report malformed test requests normally.
+    }
+  }
+  return nativeFetch(input, init);
+};
 
 describe("gateway passthrough", () => {
   const cleanups: Array<() => Promise<void> | void> = [];
@@ -110,8 +162,8 @@ describe("gateway passthrough", () => {
       }
 
       const payload = JSON.parse(Buffer.concat(chunks).toString("utf8")) as { method: string; id: string | number | null };
-      if (payload.method === "initialize") {
-        respondWithInit(res, payload.id);
+      if (payload.method === "server/discover") {
+        respondWithDiscover(res, payload.id);
         return;
       }
 
@@ -160,7 +212,7 @@ describe("gateway passthrough", () => {
         "content-type": "application/json",
         Authorization: "Bearer test-local-token"
       },
-      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} })
+      body: modernRpcBody("tools/list", 1)
     });
     const firstPayload = (await firstList.json()) as { result: { tools: Array<{ name: string }> } };
     expect(firstPayload.result.tools.map((tool) => tool.name)).toContain("echo");
@@ -174,7 +226,7 @@ describe("gateway passthrough", () => {
         "content-type": "application/json",
         Authorization: "Bearer test-local-token"
       },
-      body: JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} })
+      body: modernRpcBody("tools/list", 2)
     });
     const secondPayload = (await secondList.json()) as { result: { tools: Array<{ name: string }> } };
     expect(secondPayload.result.tools).toHaveLength(0);
@@ -191,8 +243,8 @@ describe("gateway passthrough", () => {
       }
 
       const payload = JSON.parse(Buffer.concat(chunks).toString("utf8")) as { method: string; id: string | number | null };
-      if (payload.method === "initialize") {
-        respondWithInit(res, payload.id);
+      if (payload.method === "server/discover") {
+        respondWithDiscover(res, payload.id);
         return;
       }
 
@@ -237,7 +289,7 @@ describe("gateway passthrough", () => {
         "content-type": "application/json",
         Authorization: "Bearer test-local-token"
       },
-      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} })
+      body: modernRpcBody("tools/list", 1)
     });
 
     const payload = (await response.json()) as { result: { tools: Array<{ name: string }> } };
@@ -301,7 +353,7 @@ describe("gateway passthrough", () => {
         "content-type": "application/json",
         Authorization: "Bearer test-local-token"
       },
-      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} })
+      body: modernRpcBody("tools/list", 1)
     });
     const listPayload = (await listResponse.json()) as { result: { tools: Array<{ name: string }> } };
     expect(listPayload.result.tools).toEqual([]);
@@ -312,12 +364,7 @@ describe("gateway passthrough", () => {
         "content-type": "application/json",
         Authorization: "Bearer test-local-token"
       },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: 2,
-        method: "tools/call",
-        params: { name: "echo", arguments: { text: "hello" } }
-      })
+      body: modernRpcBody("tools/call", 2, { name: "echo", arguments: { text: "hello" } })
     });
     const scopedPayload = (await scopedResponse.json()) as { error?: { message?: string } };
     expect(scopedPayload.error?.message).toContain("Unknown upstream");
@@ -358,7 +405,7 @@ describe("gateway passthrough", () => {
         "content-type": "application/json",
         Authorization: "Bearer test-local-token"
       },
-      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} })
+      body: modernRpcBody("tools/list", 1)
     });
     expect(listResponse.status).toBe(200);
     const listPayload = (await listResponse.json()) as { result: { tools: Array<{ name: string }> } };
@@ -370,12 +417,7 @@ describe("gateway passthrough", () => {
         "content-type": "application/json",
         Authorization: "Bearer test-local-token"
       },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: 2,
-        method: "tools/call",
-        params: { name: "echo", arguments: { text: "hello-stdio" } }
-      })
+      body: modernRpcBody("tools/call", 2, { name: "echo", arguments: { text: "hello-stdio" } })
     });
     expect(callResponse.status).toBe(200);
     const callPayload = (await callResponse.json()) as {
@@ -424,7 +466,7 @@ describe("gateway passthrough", () => {
         "content-type": "application/json",
         Authorization: "Bearer test-local-token"
       },
-      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} })
+      body: modernRpcBody("tools/list", 1)
     });
     const firstPayload = (await firstList.json()) as { result: { tools: Array<{ name: string }> } };
     expect(firstPayload.result.tools.map((tool) => tool.name)).toContain("echo");
@@ -438,7 +480,7 @@ describe("gateway passthrough", () => {
         "content-type": "application/json",
         Authorization: "Bearer test-local-token"
       },
-      body: JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} })
+      body: modernRpcBody("tools/list", 2)
     });
     const secondPayload = (await secondList.json()) as { result: { tools: Array<{ name: string }> } };
     expect(secondPayload.result.tools).toEqual([]);
@@ -467,12 +509,12 @@ describe("gateway passthrough", () => {
         "content-type": "application/json",
         Authorization: "Bearer wrong-token"
       },
-      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} })
+      body: modernRpcBody("tools/list", 1)
     });
 
     expect(response.status).toBe(401);
-    const payload = (await response.json()) as { error: { code: number } };
-    expect(payload.error.code).toBe(-32001);
+    const payload = (await response.json()) as { error?: string };
+    expect(payload.error).toBe("unauthorized");
   });
 
   it("rejects a same-length wrong bearer token (exercises the timing-safe comparison path, not just a length mismatch)", async () => {
@@ -500,7 +542,7 @@ describe("gateway passthrough", () => {
         // runs a byte comparison instead of short-circuiting on length.
         Authorization: "Bearer wrong-token-x"
       },
-      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} })
+      body: modernRpcBody("tools/list", 1)
     });
 
     expect(response.status).toBe(401);
@@ -517,8 +559,8 @@ describe("gateway passthrough", () => {
       }
 
       const payload = JSON.parse(Buffer.concat(chunks).toString("utf8")) as { method: string; id: string | number | null };
-      if (payload.method === "initialize") {
-        respondWithInit(res, payload.id);
+      if (payload.method === "server/discover") {
+        respondWithDiscover(res, payload.id);
         return;
       }
 
@@ -553,7 +595,7 @@ describe("gateway passthrough", () => {
         "content-type": "application/json",
         "x-mcpx-local-token": "correct-token"
       },
-      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} })
+      body: modernRpcBody("tools/list", 1)
     });
 
     expect(response.status).toBe(200);
@@ -584,8 +626,8 @@ describe("gateway passthrough", () => {
       }
       const payload = JSON.parse(Buffer.concat(chunks).toString("utf8")) as { method: string; id: string | number | null };
 
-      if (payload.method === "initialize") {
-        respondWithInit(res, payload.id);
+      if (payload.method === "server/discover") {
+        respondWithDiscover(res, payload.id);
         return;
       }
 
@@ -626,7 +668,7 @@ describe("gateway passthrough", () => {
         "content-type": "application/json",
         "x-mcpx-local-token": "local-token"
       },
-      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} })
+      body: modernRpcBody("tools/list", 1)
     });
     expect(authChallengeResponse.status).toBe(401);
     expect(authChallengeResponse.headers.get("www-authenticate")).toContain("resource_metadata");
@@ -638,7 +680,7 @@ describe("gateway passthrough", () => {
         "x-mcpx-local-token": "local-token",
         Authorization: "Bearer upstream-token"
       },
-      body: JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} })
+      body: modernRpcBody("tools/list", 2)
     });
 
     expect(authorizedResponse.status).toBe(200);
@@ -691,15 +733,7 @@ describe("gateway passthrough", () => {
         "content-type": "application/json",
         Authorization: "Bearer test-local-token"
       },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: 1,
-        method: "tools/call",
-        params: {
-          name: "circleback.echo",
-          arguments: { value: "hi" }
-        }
-      })
+      body: modernRpcBody("tools/call", 1, { name: "circleback.echo", arguments: { value: "hi" } })
     });
 
     const payload = (await response.json()) as { error: { code: number; message: string } };
@@ -723,8 +757,8 @@ describe("gateway passthrough", () => {
         method: string;
         params?: { name?: string };
       };
-      if (payload.method === "initialize") {
-        respondWithInit(res, payload.id);
+      if (payload.method === "server/discover") {
+        respondWithDiscover(res, payload.id);
         return;
       }
 
@@ -766,14 +800,7 @@ describe("gateway passthrough", () => {
         "content-type": "application/json",
         Authorization: "Bearer test-local-token"
       },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: 1,
-        method: "tools/call",
-        params: {
-          name: "explain_vercel_concept"
-        }
-      })
+      body: modernRpcBody("tools/call", 1, { name: "explain_vercel_concept" })
     });
 
     expect(response.status).toBe(200);
@@ -937,7 +964,7 @@ describe("gateway passthrough", () => {
         "content-type": "application/json",
         "x-mcpx-local-token": "test-local-token"
       },
-      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} })
+      body: modernRpcBody("tools/list", 1)
     });
 
     expect(response.status).toBe(401);
@@ -946,7 +973,7 @@ describe("gateway passthrough", () => {
     );
   });
 
-  it("calculates, caches, and returns custom/tokenCounts correctly", async () => {
+  it("calculates, caches, and returns /internal/token-counts correctly", async () => {
     const env = setupTempEnv("mcpx-gateway-tokens-");
     cleanups.push(env.restore);
 
@@ -957,8 +984,8 @@ describe("gateway passthrough", () => {
       }
 
       const payload = JSON.parse(Buffer.concat(chunks).toString("utf8")) as { method: string; id: string | number | null };
-      if (payload.method === "initialize") {
-        respondWithInit(res, payload.id);
+      if (payload.method === "server/discover") {
+        respondWithDiscover(res, payload.id);
         return;
       }
 
@@ -993,23 +1020,22 @@ describe("gateway passthrough", () => {
       throw new Error("Failed to resolve gateway address.");
     }
 
-    const response = await fetch(`http://127.0.0.1:${address.port}/mcp`, {
+    const response = await fetch(`http://127.0.0.1:${address.port}/internal/token-counts`, {
       method: "POST",
       headers: {
         "content-type": "application/json",
         Authorization: "Bearer test-local-token"
-      },
-      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "custom/tokenCounts", params: {} })
+      }
     });
 
     expect(response.status).toBe(200);
-    const payload = (await response.json()) as { result: Record<string, { tools: number; resources: number; prompts: number; total: number }> };
-    expect(payload.result.vercel).toBeDefined();
-    expect(payload.result.vercel.tools).toBeGreaterThan(0);
-    expect(payload.result.vercel.total).toBe(payload.result.vercel.tools);
+    const payload = (await response.json()) as { counts: Record<string, { tools: number; resources: number; prompts: number; total: number }> };
+    expect(payload.counts.vercel).toBeDefined();
+    expect(payload.counts.vercel.tools).toBeGreaterThan(0);
+    expect(payload.counts.vercel.total).toBe(payload.counts.vercel.tools);
   });
 
-  it("populates errorCode on custom/tokenCounts with the classified error, not just the message", async () => {
+  it("populates errorCode on /internal/token-counts with the classified error, not just the message", async () => {
     const env = setupTempEnv("mcpx-gateway-tokencounts-errorcode-");
     cleanups.push(env.restore);
 
@@ -1043,19 +1069,18 @@ describe("gateway passthrough", () => {
       throw new Error("Failed to resolve gateway address.");
     }
 
-    const response = await fetch(`http://127.0.0.1:${address.port}/mcp`, {
+    const response = await fetch(`http://127.0.0.1:${address.port}/internal/token-counts`, {
       method: "POST",
       headers: {
         "content-type": "application/json",
         Authorization: "Bearer test-local-token"
       },
-      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "custom/tokenCounts", params: {} })
     });
 
     expect(response.status).toBe(200);
-    const payload = (await response.json()) as { result: Record<string, { error?: string; errorCode?: string }> };
-    expect(payload.result.vercel.error).toBeTruthy();
-    expect(payload.result.vercel.errorCode).toBe("auth_required");
+    const payload = (await response.json()) as { counts: Record<string, { error?: string; errorCode?: string }> };
+    expect(payload.counts.vercel.error).toBeTruthy();
+    expect(payload.counts.vercel.errorCode).toBe("auth_required");
   });
 
   it("resolves oauth references and refreshes once after an upstream 401", async () => {
@@ -1095,12 +1120,12 @@ describe("gateway passthrough", () => {
         return;
       }
 
-      if (payload.method === "initialize") {
-        respondWithInit(res, payload.id);
+      if (payload.method === "server/discover") {
+        respondWithDiscover(res, payload.id);
         return;
       }
 
-      if (!payload.id) {
+      if (payload.id === undefined || payload.id === null) {
         // notification (e.g. notifications/initialized) — no response needed
         res.statusCode = 202;
         res.end();
@@ -1164,7 +1189,7 @@ describe("gateway passthrough", () => {
         "content-type": "application/json",
         Authorization: "Bearer test-local-token"
       },
-      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} })
+      body: modernRpcBody("tools/list", 1)
     });
 
     expect(response.status).toBe(200);
@@ -1174,7 +1199,7 @@ describe("gateway passthrough", () => {
     expect(JSON.parse(secrets.getSecret("oauth_vercel_tokens") ?? "{}").tokens.access_token).toBe("new-token");
   });
 
-  it("surfaces stdio call-time upstream errors as runtimeError in custom/tokenCounts", async () => {
+  it("surfaces stdio call-time upstream errors as runtimeError in /internal/token-counts", async () => {
     const env = setupTempEnv("mcpx-gateway-runtime-error-");
     cleanups.push(env.restore);
 
@@ -1212,7 +1237,7 @@ describe("gateway passthrough", () => {
     const listResponse = await fetch(baseUrl, {
       method: "POST",
       headers: authHeader,
-      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} })
+      body: modernRpcBody("tools/list", 1)
     });
     expect(listResponse.status).toBe(200);
     const listPayload = (await listResponse.json()) as { result: { tools: Array<{ name: string }> } };
@@ -1222,34 +1247,28 @@ describe("gateway passthrough", () => {
     const failCallResponse = await fetch(baseUrl, {
       method: "POST",
       headers: authHeader,
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: 2,
-        method: "tools/call",
-        params: { name: "whoami", arguments: {} }
-      })
+      body: modernRpcBody("tools/call", 2, { name: "whoami", arguments: {} })
     });
     expect(failCallResponse.status).toBe(200);
     const failCallPayload = (await failCallResponse.json()) as { error: { code: number; message: string } };
     expect(failCallPayload.error.code).toBe(-32000);
     expect(failCallPayload.error.message).toContain("Not authenticated");
 
-    // custom/tokenCounts reflects the call-time error as runtimeError while the
+    // The private token-count endpoint reflects the call-time error as runtimeError while the
     // list still succeeds (total > 0, no method-level error).
-    const failTokensResponse = await fetch(baseUrl, {
+    const failTokensResponse = await fetch(baseUrl.replace("/mcp", "/internal/token-counts"), {
       method: "POST",
       headers: authHeader,
-      body: JSON.stringify({ jsonrpc: "2.0", id: 3, method: "custom/tokenCounts", params: {} })
     });
     expect(failTokensResponse.status).toBe(200);
     const failTokensPayload = (await failTokensResponse.json()) as {
-      result: Record<string, { total: number; error?: string; runtimeError?: string }>;
+      counts: Record<string, { total: number; error?: string; runtimeError?: string }>;
     };
-    expect(failTokensPayload.result.Railway).toBeDefined();
-    expect(failTokensPayload.result.Railway.total).toBeGreaterThan(0);
-    expect(failTokensPayload.result.Railway.error).toBeUndefined();
-    expect(failTokensPayload.result.Railway.runtimeError).toBeDefined();
-    expect(failTokensPayload.result.Railway.runtimeError).toContain("Not authenticated");
+    expect(failTokensPayload.counts.Railway).toBeDefined();
+    expect(failTokensPayload.counts.Railway.total).toBeGreaterThan(0);
+    expect(failTokensPayload.counts.Railway.error).toBeUndefined();
+    expect(failTokensPayload.counts.Railway.runtimeError).toBeDefined();
+    expect(failTokensPayload.counts.Railway.runtimeError).toContain("Not authenticated");
 
     // Clear the flag so the next call succeeds, clearing the recorded runtime error.
     fs.writeFileSync(flagPath, "0", "utf8");
@@ -1257,27 +1276,21 @@ describe("gateway passthrough", () => {
     const okCallResponse = await fetch(baseUrl, {
       method: "POST",
       headers: authHeader,
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: 4,
-        method: "tools/call",
-        params: { name: "whoami", arguments: {} }
-      })
+      body: modernRpcBody("tools/call", 4, { name: "whoami", arguments: {} })
     });
     expect(okCallResponse.status).toBe(200);
     const okCallPayload = (await okCallResponse.json()) as { result?: unknown; error?: { code: number } };
     expect(okCallPayload.error).toBeUndefined();
 
-    const okTokensResponse = await fetch(baseUrl, {
+    const okTokensResponse = await fetch(baseUrl.replace("/mcp", "/internal/token-counts"), {
       method: "POST",
       headers: authHeader,
-      body: JSON.stringify({ jsonrpc: "2.0", id: 5, method: "custom/tokenCounts", params: {} })
     });
     expect(okTokensResponse.status).toBe(200);
     const okTokensPayload = (await okTokensResponse.json()) as {
-      result: Record<string, { total: number; error?: string; runtimeError?: string }>;
+      counts: Record<string, { total: number; error?: string; runtimeError?: string }>;
     };
-    expect(okTokensPayload.result.Railway.runtimeError).toBeUndefined();
+    expect(okTokensPayload.counts.Railway.runtimeError).toBeUndefined();
   });
 
   it("builds a well-known upstream URL without a double slash when the upstream URL has a trailing slash", async () => {
@@ -1347,8 +1360,8 @@ describe("gateway passthrough", () => {
       }
 
       const payload = JSON.parse(Buffer.concat(chunks).toString("utf8")) as { method: string; id: string | number | null };
-      if (payload.method === "initialize") {
-        respondWithInit(res, payload.id);
+      if (payload.method === "server/discover") {
+        respondWithDiscover(res, payload.id);
         return;
       }
 
@@ -1400,7 +1413,7 @@ describe("gateway passthrough", () => {
         "content-type": "application/json",
         Authorization: "Bearer test-local-token"
       },
-      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} })
+      body: modernRpcBody("tools/list", 1)
     });
 
     expect(response.status).toBe(200);
@@ -1423,7 +1436,7 @@ describe("gateway passthrough", () => {
     expect(failedUpstreams[0]?.message.length).toBeGreaterThan(0);
   });
 
-  it("returns well-formed SSE frames with one complete JSON-RPC payload per event for batched requests", async () => {
+  it("rejects legacy and batched MCP HTTP traffic", async () => {
     const env = setupTempEnv("mcpx-gateway-sse-");
     cleanups.push(env.restore);
 
@@ -1434,8 +1447,8 @@ describe("gateway passthrough", () => {
       }
 
       const payload = JSON.parse(Buffer.concat(chunks).toString("utf8")) as { method: string; id: string | number | null };
-      if (payload.method === "initialize") {
-        respondWithInit(res, payload.id);
+      if (payload.method === "server/discover") {
+        respondWithDiscover(res, payload.id);
         return;
       }
 
@@ -1470,44 +1483,18 @@ describe("gateway passthrough", () => {
       throw new Error("Failed to resolve gateway address.");
     }
 
-    // Batch of two requests forces the multi-response SSE path (one "event:
-    // message" / "data:" frame per JSON-RPC response, in request order).
     const response = await fetch(`http://127.0.0.1:${gatewayAddress.port}/mcp`, {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        Accept: "text/event-stream",
         Authorization: "Bearer test-local-token"
       },
-      body: JSON.stringify([
-        { jsonrpc: "2.0", id: 1, method: "tools/list", params: {} },
-        { jsonrpc: "2.0", id: 2, method: "ping" }
-      ])
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} })
     });
 
-    expect(response.status).toBe(200);
-    expect(response.headers.get("content-type")).toBe("text/event-stream");
-
-    const rawBody = await response.text();
-    const frames = rawBody.split("\n\n").filter((frame) => frame.length > 0);
-    expect(frames.length).toBe(2);
-
-    const events = frames.map((frame) => {
-      const lines = frame.split("\n");
-      expect(lines[0]).toBe("event: message");
-      expect(lines[1]?.startsWith("data: ")).toBe(true);
-      // Parsing each data payload independently proves it round-trips as a
-      // single, complete JSON document that wasn't truncated or merged with
-      // a neighboring event.
-      return JSON.parse(lines[1]!.slice("data: ".length)) as { id: number; result?: unknown };
-    });
-
-    expect(events[0]?.id).toBe(1);
-    const firstResult = events[0]?.result as { tools: Array<{ name: string }> };
-    expect(firstResult.tools.map((tool) => tool.name)).toContain("echo");
-
-    expect(events[1]?.id).toBe(2);
-    expect(events[1]?.result).toEqual({ ok: true });
+    expect(response.status).toBe(400);
+    const payload = (await response.json()) as { error?: { code?: number } };
+    expect(payload.error?.code).toBe(-32022);
   });
 
   it("picks up a re-authenticated OAuth token on the very next call, without needing an intervening 401", async () => {
@@ -1530,11 +1517,11 @@ describe("gateway passthrough", () => {
         chunks.push(Buffer.from(chunk));
       }
       const payload = JSON.parse(Buffer.concat(chunks).toString("utf8")) as { method: string; id: string | number | null };
-      if (payload.method === "initialize") {
-        respondWithInit(res, payload.id);
+      if (payload.method === "server/discover") {
+        respondWithDiscover(res, payload.id);
         return;
       }
-      if (!payload.id) {
+      if (payload.id === undefined || payload.id === null) {
         res.statusCode = 202;
         res.end();
         return;
@@ -1572,7 +1559,7 @@ describe("gateway passthrough", () => {
       fetch(`http://127.0.0.1:${address.port}/mcp`, {
         method: "POST",
         headers: { "content-type": "application/json", Authorization: "Bearer test-local-token" },
-        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} })
+      body: modernRpcBody("tools/list", 1)
       });
 
     const first = await call();
@@ -1607,11 +1594,11 @@ describe("gateway passthrough", () => {
         chunks.push(Buffer.from(chunk));
       }
       const payload = JSON.parse(Buffer.concat(chunks).toString("utf8")) as { method: string; id: string | number | null };
-      if (payload.method === "initialize") {
-        respondWithInit(res, payload.id);
+      if (payload.method === "server/discover") {
+        respondWithDiscover(res, payload.id);
         return;
       }
-      if (!payload.id) {
+      if (payload.id === undefined || payload.id === null) {
         res.statusCode = 202;
         res.end();
         return;
@@ -1655,7 +1642,7 @@ describe("gateway passthrough", () => {
           "x-mcpx-local-token": "test-local-token",
           Authorization: `Bearer ${clientToken}`
         },
-        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} })
+      body: modernRpcBody("tools/list", 1)
       });
 
     await callAs("client-a-token");

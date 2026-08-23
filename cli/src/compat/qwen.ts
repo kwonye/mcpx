@@ -3,13 +3,13 @@
  *
  * Supports:
  * - stdio add: qwen mcp add <name> <command> [args...] [--env KEY=VALUE]...
- * - HTTP add: qwen mcp add --transport http <name> <url> [--header "Name: Value"]...
- * - SSE add: qwen mcp add --transport sse <name> <url>
+ * - MCP v2 streamable HTTP add: qwen mcp add --transport http <name> <url> [--header "Name: Value"]...
  *
  * Rejects:
  * - --scope (user/project scope not supported in mcpx)
  * - --trust (trust bypass not supported)
  * - --include-tools / --exclude-tools (tool filtering not supported)
+ * - --transport sse (legacy SSE is not supported)
  * - --timeout (timeout config not supported in mcpx add)
  */
 
@@ -240,7 +240,7 @@ function validateQwenArgs(flags: ParsedQwenFlags): string | null {
   }
 
   if (flags.transport === "sse") {
-    return "Qwen --transport sse is not supported. Use `mcpx add <name> <url>` for HTTP/SSE servers.";
+    return "Qwen --transport sse is not supported. Use `mcpx add <name> <url>` for MCP v2 streamable HTTP servers.";
   }
 
   return null;

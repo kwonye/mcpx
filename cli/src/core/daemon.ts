@@ -12,6 +12,7 @@ import { startBackgroundUpdateCheck } from "./update-manager.js";
 import { withManagedIndexLock } from "./managed-index-lock.js";
 import { getManagedIndexPath } from "./paths.js";
 import { startMarketplaceAutoUpdater } from "./marketplace-updater.js";
+import { captureTelemetryEvent, durationBucket } from "./telemetry.js";
 
 export interface DaemonStatus {
   running: boolean;
@@ -128,7 +129,7 @@ async function waitForGatewayReady(port: number, token: string, timeoutMs = 1500
 
   while (Date.now() < deadline) {
     try {
-      const response = await fetch(`http://127.0.0.1:${port}/mcp`, {
+      const response = await fetch(`http://127.0.0.1:${port}/health`, {
         method: "GET",
         headers: {
           Authorization: `Bearer ${token}`
@@ -174,17 +175,23 @@ export function getDaemonStatus(config: McpxConfig): DaemonStatus {
 }
 
 export async function startDaemon(config: McpxConfig, cliPath: string, secrets: SecretsManager): Promise<DaemonStartResult> {
+  const startedAt = Date.now();
   const existingStatus = getDaemonStatus(config);
   if (existingStatus.running && existingStatus.pid) {
     // Treat a live pid record as authoritative while the daemon is starting.
     // Removing it when the port has not bound yet can launch a second daemon
     // during the desktop auto-start/toggle race.
-    return {
+    const result = {
       started: false,
       pid: existingStatus.pid,
       port: existingStatus.port ?? config.gateway.port,
       message: "mcpx daemon already running."
     };
+    captureTelemetryEvent({
+      name: "operation_completed",
+      properties: { operation: "daemon_start", outcome: "success", durationBucket: durationBucket(Date.now() - startedAt) }
+    });
+    return result;
   }
 
   const { port, fellBackFrom } = await resolveGatewayPort(config, secrets);
@@ -223,23 +230,34 @@ export async function startDaemon(config: McpxConfig, cliPath: string, secrets: 
   startBackgroundUpdateCheck();
   await waitForGatewayReady(port, token);
 
-  return {
+  const result = {
     started: true,
     pid: child.pid ?? -1,
     port,
     message: "mcpx daemon started."
   };
+  captureTelemetryEvent({
+    name: "operation_completed",
+    properties: { operation: "daemon_start", outcome: "success", durationBucket: durationBucket(Date.now() - startedAt) }
+  });
+  return result;
 }
 
 export function stopDaemon(): { stopped: boolean; message: string } {
+  const startedAt = Date.now();
   const pidPath = getPidPath();
   const pid = readPidFromFile(pidPath);
 
   if (!pid) {
-    return {
+    const result = {
       stopped: false,
       message: "mcpx daemon is not running."
     };
+    captureTelemetryEvent({
+      name: "operation_completed",
+      properties: { operation: "daemon_stop", outcome: "success", durationBucket: durationBucket(Date.now() - startedAt) }
+    });
+    return result;
   }
 
   // PID safety: verify the process is actually a mcpx daemon before killing
@@ -248,18 +266,28 @@ export function stopDaemon(): { stopped: boolean; message: string } {
     const looksLikeMcpxDaemon = cmd.includes("daemon run") && (cmd.includes("mcpx") || cmd.includes("cli.js"));
     if (!looksLikeMcpxDaemon) {
       fs.unlinkSync(pidPath);
-      return {
+      const result = {
         stopped: false,
         message: `PID ${pid} is not a mcpx daemon (command: ${cmd.slice(0, 80)}). Pidfile cleaned up.`
       };
+      captureTelemetryEvent({
+        name: "operation_completed",
+        properties: { operation: "daemon_stop", outcome: "failure", errorCode: "invalid_pid", durationBucket: durationBucket(Date.now() - startedAt) }
+      });
+      return result;
     }
   } catch {
     // Process doesn't exist or ps failed; clean up pidfile
     try { fs.unlinkSync(pidPath); } catch {}
-    return {
+    const result = {
       stopped: false,
       message: `PID ${pid} not found. Pidfile cleaned up.`
     };
+    captureTelemetryEvent({
+      name: "operation_completed",
+      properties: { operation: "daemon_stop", outcome: "failure", errorCode: "pid_not_found", durationBucket: durationBucket(Date.now() - startedAt) }
+    });
+    return result;
   }
 
   try {
@@ -274,15 +302,34 @@ export function stopDaemon(): { stopped: boolean; message: string } {
     // Ignore cleanup failure.
   }
 
-  return {
+  const result = {
     stopped: true,
     message: `Stopped mcpx daemon (pid ${pid}).`
   };
+  captureTelemetryEvent({
+    name: "operation_completed",
+    properties: { operation: "daemon_stop", outcome: "success", durationBucket: durationBucket(Date.now() - startedAt) }
+  });
+  return result;
 }
 
 export async function restartDaemon(config: McpxConfig, cliPath: string, secrets: SecretsManager): Promise<DaemonStartResult> {
+  const startedAt = Date.now();
   stopDaemon();
-  return startDaemon(config, cliPath, secrets);
+  try {
+    const result = await startDaemon(config, cliPath, secrets);
+    captureTelemetryEvent({
+      name: "operation_completed",
+      properties: { operation: "daemon_restart", outcome: "success", durationBucket: durationBucket(Date.now() - startedAt) }
+    });
+    return result;
+  } catch (error) {
+    captureTelemetryEvent({
+      name: "operation_completed",
+      properties: { operation: "daemon_restart", outcome: "failure", errorCode: "daemon_restart_failed", durationBucket: durationBucket(Date.now() - startedAt) }
+    });
+    throw error;
+  }
 }
 
 export function readDaemonLogs(maxLines = 200): string {

@@ -100,6 +100,13 @@ jobs:
     needs: orchestrate
     if: needs.orchestrate.outputs.include_cli == 'true'
     runs-on: ubuntu-latest
+    env:
+      MCPX_POSTHOG_PROJECT_TOKEN: ${{ vars.MCPX_POSTHOG_PROJECT_TOKEN }}
+      MCPX_POSTHOG_HOST: ${{ vars.MCPX_POSTHOG_HOST }}
+      MCPX_SENTRY_DSN: ${{ vars.SENTRY_DSN }}
+      MCPX_SENTRY_RELEASE: mcpx@${{ needs.orchestrate.outputs.version }}
+      SENTRY_ORG: ${{ vars.SENTRY_ORG }}
+      SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
@@ -122,6 +129,16 @@ jobs:
       - name: Test
         run: bun run test
         working-directory: cli
+
+      - name: Upload private CLI source maps
+        uses: actions/upload-artifact@v6
+        with:
+          name: cli-sourcemaps
+          path: cli/dist/**/*.js.map
+          if-no-files-found: ignore
+
+      - name: Remove source maps before packaging
+        run: bun .github/scripts/remove-sourcemaps.mjs cli/dist
 
       - name: Configure git
         run: |
@@ -154,6 +171,13 @@ jobs:
     needs: orchestrate
     if: needs.orchestrate.outputs.include_desktop == 'true'
     runs-on: macos-15
+    env:
+      MCPX_POSTHOG_PROJECT_TOKEN: ${{ vars.MCPX_POSTHOG_PROJECT_TOKEN }}
+      MCPX_POSTHOG_HOST: ${{ vars.MCPX_POSTHOG_HOST }}
+      MCPX_SENTRY_DSN: ${{ vars.SENTRY_DSN }}
+      MCPX_SENTRY_RELEASE: mcpx@${{ needs.orchestrate.outputs.version }}
+      SENTRY_ORG: ${{ vars.SENTRY_ORG }}
+      SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
@@ -173,6 +197,16 @@ jobs:
         run: bun run build
         working-directory: cli
 
+      - name: Upload private bundled CLI source maps (macOS)
+        uses: actions/upload-artifact@v6
+        with:
+          name: desktop-cli-sourcemaps-macos
+          path: cli/dist/**/*.js.map
+          if-no-files-found: ignore
+
+      - name: Remove bundled CLI source maps before packaging (macOS)
+        run: bun .github/scripts/remove-sourcemaps.mjs cli/dist
+
       - name: Install desktop dependencies
         run: bun install --frozen-lockfile
         working-directory: app
@@ -184,6 +218,16 @@ jobs:
       - name: Build desktop bundle
         run: bun run build
         working-directory: app
+
+      - name: Upload private macOS source maps
+        uses: actions/upload-artifact@v6
+        with:
+          name: desktop-sourcemaps-macos
+          path: app/out/**/*.map
+          if-no-files-found: ignore
+
+      - name: Remove source maps before packaging
+        run: bun .github/scripts/remove-sourcemaps.mjs app/out
 
       - name: Test desktop end-to-end
         run: bun run e2e
@@ -244,6 +288,13 @@ jobs:
     needs: orchestrate
     if: needs.orchestrate.outputs.include_desktop == 'true'
     runs-on: ubuntu-latest
+    env:
+      MCPX_POSTHOG_PROJECT_TOKEN: ${{ vars.MCPX_POSTHOG_PROJECT_TOKEN }}
+      MCPX_POSTHOG_HOST: ${{ vars.MCPX_POSTHOG_HOST }}
+      MCPX_SENTRY_DSN: ${{ vars.SENTRY_DSN }}
+      MCPX_SENTRY_RELEASE: mcpx@${{ needs.orchestrate.outputs.version }}
+      SENTRY_ORG: ${{ vars.SENTRY_ORG }}
+      SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
@@ -263,6 +314,16 @@ jobs:
         run: bun run build
         working-directory: cli
 
+      - name: Upload private bundled CLI source maps (Linux)
+        uses: actions/upload-artifact@v6
+        with:
+          name: desktop-cli-sourcemaps-linux
+          path: cli/dist/**/*.js.map
+          if-no-files-found: ignore
+
+      - name: Remove bundled CLI source maps before packaging (Linux)
+        run: bun .github/scripts/remove-sourcemaps.mjs cli/dist
+
       - name: Install desktop dependencies
         run: bun install --frozen-lockfile
         working-directory: app
@@ -274,6 +335,16 @@ jobs:
       - name: Build desktop bundle
         run: bun run build
         working-directory: app
+
+      - name: Upload private Linux source maps
+        uses: actions/upload-artifact@v6
+        with:
+          name: desktop-sourcemaps-linux
+          path: app/out/**/*.map
+          if-no-files-found: ignore
+
+      - name: Remove source maps before packaging
+        run: bun .github/scripts/remove-sourcemaps.mjs app/out
 
       - name: Package Linux app
         run: bunx electron-builder build --linux --publish never
@@ -293,6 +364,13 @@ jobs:
     needs: orchestrate
     if: needs.orchestrate.outputs.include_desktop == 'true'
     runs-on: windows-latest
+    env:
+      MCPX_POSTHOG_PROJECT_TOKEN: ${{ vars.MCPX_POSTHOG_PROJECT_TOKEN }}
+      MCPX_POSTHOG_HOST: ${{ vars.MCPX_POSTHOG_HOST }}
+      MCPX_SENTRY_DSN: ${{ vars.SENTRY_DSN }}
+      MCPX_SENTRY_RELEASE: mcpx@${{ needs.orchestrate.outputs.version }}
+      SENTRY_ORG: ${{ vars.SENTRY_ORG }}
+      SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
@@ -312,6 +390,16 @@ jobs:
         run: bun run build
         working-directory: cli
 
+      - name: Upload private bundled CLI source maps (Windows)
+        uses: actions/upload-artifact@v6
+        with:
+          name: desktop-cli-sourcemaps-windows
+          path: cli/dist/**/*.js.map
+          if-no-files-found: ignore
+
+      - name: Remove bundled CLI source maps before packaging (Windows)
+        run: bun .github/scripts/remove-sourcemaps.mjs cli/dist
+
       - name: Install desktop dependencies
         run: bun install --frozen-lockfile
         working-directory: app
@@ -323,6 +411,16 @@ jobs:
       - name: Build desktop bundle
         run: bun run build
         working-directory: app
+
+      - name: Upload private Windows source maps
+        uses: actions/upload-artifact@v6
+        with:
+          name: desktop-sourcemaps-windows
+          path: app/out/**/*.map
+          if-no-files-found: ignore
+
+      - name: Remove source maps before packaging
+        run: bun .github/scripts/remove-sourcemaps.mjs app/out
 
       - name: Package Windows app
         run: bunx electron-builder build --win --publish never
@@ -343,6 +441,10 @@ jobs:
     needs: [orchestrate, build-cli, build-desktop-macos, build-desktop-linux, build-desktop-windows]
     if: always() && needs.orchestrate.result == 'success' && (needs.build-cli.result == 'success' || needs.build-cli.result == 'skipped') && (needs.build-desktop-macos.result == 'success' || needs.build-desktop-macos.result == 'skipped') && (needs.build-desktop-linux.result == 'success' || needs.build-desktop-linux.result == 'skipped') && (needs.build-desktop-windows.result == 'success' || needs.build-desktop-windows.result == 'skipped')
     runs-on: ubuntu-latest
+    env:
+      SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+      SENTRY_ORG: ${{ vars.SENTRY_ORG }}
+      SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
@@ -405,16 +507,88 @@ jobs:
           name: cli-tarball
           path: cli-tarball/
 
-      - name: Publish to npm
-        if: needs.orchestrate.outputs.include_cli == 'true'
-        run: npm publish ./cli-tarball/*.tgz --provenance --access public
-
       - name: Download CLI artifacts
         if: needs.orchestrate.outputs.include_cli == 'true'
         uses: actions/download-artifact@v6
         with:
           name: cli-dist
           path: cli-dist/
+
+      - name: Download CLI source maps
+        if: needs.orchestrate.outputs.include_cli == 'true'
+        uses: actions/download-artifact@v6
+        with:
+          name: cli-sourcemaps
+          path: sentry-sourcemaps/cli/
+
+      - name: Download bundled CLI source maps from macOS
+        if: needs.orchestrate.outputs.include_desktop == 'true'
+        uses: actions/download-artifact@v6
+        with:
+          name: desktop-cli-sourcemaps-macos
+          path: sentry-sourcemaps/desktop-cli-macos/
+
+      - name: Download bundled CLI source maps from Linux
+        if: needs.orchestrate.outputs.include_desktop == 'true'
+        uses: actions/download-artifact@v6
+        with:
+          name: desktop-cli-sourcemaps-linux
+          path: sentry-sourcemaps/desktop-cli-linux/
+
+      - name: Download bundled CLI source maps from Windows
+        if: needs.orchestrate.outputs.include_desktop == 'true'
+        uses: actions/download-artifact@v6
+        with:
+          name: desktop-cli-sourcemaps-windows
+          path: sentry-sourcemaps/desktop-cli-windows/
+
+      - name: Download macOS source maps
+        if: needs.orchestrate.outputs.include_desktop == 'true'
+        uses: actions/download-artifact@v6
+        with:
+          name: desktop-sourcemaps-macos
+          path: sentry-sourcemaps/desktop-macos/
+
+      - name: Download Linux source maps
+        if: needs.orchestrate.outputs.include_desktop == 'true'
+        uses: actions/download-artifact@v6
+        with:
+          name: desktop-sourcemaps-linux
+          path: sentry-sourcemaps/desktop-linux/
+
+      - name: Download Windows source maps
+        if: needs.orchestrate.outputs.include_desktop == 'true'
+        uses: actions/download-artifact@v6
+        with:
+          name: desktop-sourcemaps-windows
+          path: sentry-sourcemaps/desktop-windows/
+
+      - name: Upload private source maps to Sentry
+        if: env.SENTRY_AUTH_TOKEN != '' && env.SENTRY_ORG != '' && env.SENTRY_PROJECT != ''
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: ${{ vars.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT }}
+          SENTRY_RELEASE: mcpx@${{ needs.orchestrate.outputs.version }}
+        run: |
+          npx --yes @sentry/cli@2.47.0 releases new "$SENTRY_RELEASE"
+          for target in cli desktop-cli-macos desktop-cli-linux desktop-cli-windows desktop-macos desktop-linux desktop-windows; do
+            if [ -d "sentry-sourcemaps/$target" ]; then
+              if [ "$target" = "cli" ]; then
+                PREFIX="app:///cli/"
+              elif [[ "$target" == desktop-cli-* ]]; then
+                PREFIX="app:///$target/"
+              else
+                PREFIX="app:///out/"
+              fi
+              npx --yes @sentry/cli@2.47.0 sourcemaps upload "sentry-sourcemaps/$target" --release "$SENTRY_RELEASE" --rewrite --url-prefix "$PREFIX"
+            fi
+          done
+          npx --yes @sentry/cli@2.47.0 releases finalize "$SENTRY_RELEASE"
+
+      - name: Publish to npm
+        if: needs.orchestrate.outputs.include_cli == 'true'
+        run: npm publish ./cli-tarball/*.tgz --provenance --access public
 
       - name: Download macOS desktop artifacts
         if: needs.orchestrate.outputs.include_desktop == 'true'

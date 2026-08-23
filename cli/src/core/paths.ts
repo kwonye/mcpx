@@ -32,6 +32,10 @@ export function getConfigPath(): string {
   return path.join(getConfigRoot(), "mcpx", "config.json");
 }
 
+export function getTelemetryPath(): string {
+  return path.join(getConfigRoot(), "mcpx", "telemetry.json");
+}
+
 export function getSkillsDir(): string {
   return path.join(getConfigRoot(), "mcpx", "skills");
 }

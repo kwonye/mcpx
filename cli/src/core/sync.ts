@@ -40,6 +40,11 @@ export function getGatewayUrl(config: McpxConfig): string {
   return `http://127.0.0.1:${config.gateway.port}/mcp`;
 }
 
+export function getGatewayInternalUrl(config: McpxConfig, pathname: string): string {
+  const normalizedPath = pathname.startsWith("/") ? pathname : `/${pathname}`;
+  return `http://127.0.0.1:${config.gateway.port}${normalizedPath}`;
+}
+
 function buildProjectScopes(config: McpxConfig): ProjectScope[] {
   const globallyEnabled = new Set(
     Object.entries(config.servers)

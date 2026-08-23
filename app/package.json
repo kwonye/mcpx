@@ -55,6 +55,7 @@
     "asar": true,
     "files": [
       "out/**",
+      "!out/**/*.map",
       "resources/**"
     ],
     "extraResources": [
@@ -91,7 +92,9 @@
   },
   "dependencies": {
     "@iarna/toml": "2.2.5",
+    "@sentry/electron": "^7.16.0",
     "electron-updater": "^6.6.2",
+    "posthog-node": "^5.49.1",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "zod": "^4.4.3"

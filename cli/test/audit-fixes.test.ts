@@ -465,18 +465,13 @@ describe("SYNC-01: Adapter disable/enable fixes", () => {
   });
 });
 
-describe("GW-04: GET SSE 405", () => {
-  it("returns 405 for GET with Accept: text/event-stream and session ID", async () => {
-    // This test verifies the fix is in place by checking the source code
+describe("GW-04: strict MCP v2 transport", () => {
+  it("rejects legacy protocol traffic through the v2 SDK handler", async () => {
     const serverPath = path.join(process.cwd(), "src/gateway/server.ts");
     const source = fs.readFileSync(serverPath, "utf8");
-    
-    // Should check for text/event-stream in Accept header
-    expect(source).toContain("text/event-stream");
-    
-    // Should return 405 with error message
-    expect(source).toContain("get_stream_not_supported");
-    expect(source).toMatch(/statusCode = 405/);
+
+    expect(source).toContain('legacy: "reject"');
+    expect(source).toContain('responseMode: "auto"');
   });
 });
 

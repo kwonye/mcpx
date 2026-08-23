@@ -24,7 +24,7 @@ interface ClineConfig {
   mcpServers?: Record<string, unknown>;
 }
 
-const HTTP_TRANSPORT_TYPES = new Set(["http", "sse", "streamableHttp"]);
+const HTTP_TRANSPORT_TYPES = new Set(["http", "streamableHttp"]);
 
 const stringMapSchema = z.record(z.string(), z.string());
 const clineEntrySchema = z.object({

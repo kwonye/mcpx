@@ -2,6 +2,31 @@
 export { loadConfig, saveConfig, defaultConfig, loadMergedConfig, loadProjectConfig, saveProjectConfig, ConfigLoadError, migrateProjectServers } from "./config.js";
 export { mutateConfig, mutateProjectConfig, mutateActiveConfig } from "./config-store.js";
 
+// Anonymous telemetry
+export {
+  TELEMETRY_NOTICE_VERSION,
+  acknowledgeTelemetryNotice,
+  architecture,
+  captureTelemetryEvent,
+  countBucket,
+  defaultTelemetryPreferences,
+  durationBucket,
+  getTelemetryStatus,
+  initializeTelemetry,
+  isTelemetryEnvironmentDisabled,
+  loadTelemetryPreferences,
+  markTelemetryMilestone,
+  platformFamily,
+  resetTelemetryInstallationId,
+  reportTelemetryError,
+  setTelemetryErrorReporter,
+  shutdownTelemetry,
+  updateTelemetryPreferences,
+  flushTelemetry,
+  uptimeBucket
+} from "./telemetry.js";
+export type { TelemetryErrorContext, TelemetryErrorReporter, TelemetryEvent, TelemetryPreferences, TelemetryRuntime, TelemetryRuntimeMetadata, TelemetryStatus } from "./telemetry.js";
+
 // Errors
 export { UpstreamError, SecretNotFoundError, classifyUpstreamError } from "./errors.js";
 export type { UpstreamErrorCode } from "./errors.js";
@@ -43,7 +68,7 @@ export {
 export type { DaemonStatus, DaemonStartResult } from "./daemon.js";
 
 // Sync
-export { syncAllClients, getGatewayUrl, persistSyncState } from "./sync.js";
+export { syncAllClients, getGatewayUrl, getGatewayInternalUrl, persistSyncState } from "./sync.js";
 export type { SyncSummary } from "./sync.js";
 
 // Registry (server add/remove)
@@ -104,7 +129,7 @@ export { startMarketplaceAutoUpdater, runMarketplaceAutoUpdate } from "./marketp
 export { inspectPlugin, installPlugin, preparePlugin, updatePlugin, uninstallPlugin, enablePlugin, disablePlugin, setPluginProjectOverride, resetPluginProjectOverride, approvePluginComponent, getPluginStatus, listPlugins, pluginConfigSet, pluginSync, resolvePluginId } from "./plugin-manager.js";
 
 // Paths
-export { getConfigPath, getManagedIndexPath } from "./paths.js";
+export { getConfigPath, getManagedIndexPath, getTelemetryPath } from "./paths.js";
 
 // Update
 export { checkForUpdates, getStagedUpdate, getStagedCliPath, clearStagedUpdate, compareVersions, shouldUseStagedCli } from "./update.js";

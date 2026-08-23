@@ -1594,7 +1594,7 @@ describe("sync engine", () => {
     });
   });
 
-  it("imports Qwen SSE (url) entries into mcpx", () => {
+  it("skips Qwen SSE (url) entries for strict MCP v2", () => {
     const env = setupTempEnv("mcpx-sync-qwen-import-");
     cleanups.push(env.restore);
 
@@ -1618,20 +1618,14 @@ describe("sync engine", () => {
     const summary = syncAllClients(config, new SecretsManager(), { importScan: true });
 
     expect(summary.hasErrors).toBe(false);
-    expect(summary.imports.imported).toEqual([
+    expect(summary.imports.imported).toEqual([]);
+    expect(summary.imports.skipped).toEqual([
       expect.objectContaining({
         clientId: "qwen",
         sourceEntryName: "qwen_sse",
-        serverName: "qwen_sse"
+        reason: expect.stringContaining("Legacy SSE transport")
       })
     ]);
-    expect(config.servers.qwen_sse).toEqual({
-      transport: "http",
-      url: "https://events.example.com/mcp",
-      headers: {
-        Authorization: "Bearer secret"
-      },
-      enabled: true
-    });
+    expect(config.servers.qwen_sse).toBeUndefined();
   });
 });

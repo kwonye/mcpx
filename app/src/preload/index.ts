@@ -13,6 +13,8 @@ import type {
 } from "@mcpx/core";
 import { IPC } from "../shared/ipc-channels";
 import type { DesktopSettingsPatch } from "../shared/desktop-settings";
+import type { DesktopSettings } from "../shared/desktop-settings";
+import type { TelemetryPreferences, TelemetryStatus } from "@mcpx/core";
 
 const ALLOWED_CHANNELS = new Set<string>(Object.values(IPC));
 const REMOTE_ERROR_PREFIX = /^Error invoking remote method '[^']+':\s*(?:Error:\s*)?/;
@@ -29,20 +31,32 @@ function invokeIpc<T>(channel: string, ...args: unknown[]): Promise<T> {
 const api = {
   getStatus: () => invokeIpc<StatusReport>(IPC.GET_STATUS),
   getServers: () => invokeIpc<Array<Record<string, unknown>>>(IPC.GET_SERVERS),
-  getDesktopSettings: () => invokeIpc(IPC.GET_DESKTOP_SETTINGS),
+  getDesktopSettings: () => invokeIpc<DesktopSettings>(IPC.GET_DESKTOP_SETTINGS),
+  getTelemetryStatus: () => invokeIpc<TelemetryStatus>(IPC.GET_TELEMETRY_STATUS),
+  acknowledgeTelemetryNotice: () => invokeIpc<TelemetryPreferences>(IPC.ACKNOWLEDGE_TELEMETRY_NOTICE),
   addServer: (name: string, spec: unknown) => invokeIpc(IPC.ADD_SERVER, name, spec),
   updateServer: (name: string, spec: unknown, resolvedSecrets?: Record<string, string>) => invokeIpc(IPC.UPDATE_SERVER, name, spec, resolvedSecrets),
   removeServer: (name: string) => invokeIpc(IPC.REMOVE_SERVER, name),
   setServerEnabled: (name: string, enabled: boolean) => invokeIpc(IPC.SET_SERVER_ENABLED, name, enabled),
-  updateDesktopSettings: (patch: DesktopSettingsPatch) => invokeIpc(IPC.UPDATE_DESKTOP_SETTINGS, patch),
-  checkForUpdates: () => invokeIpc<unknown>(IPC.CHECK_FOR_UPDATES),
+  updateDesktopSettings: (patch: DesktopSettingsPatch) => invokeIpc<DesktopSettings>(IPC.UPDATE_DESKTOP_SETTINGS, patch),
+  updateTelemetryPreferences: (patch: Partial<Pick<TelemetryPreferences, "usageAnalyticsEnabled" | "errorReportingEnabled">>) =>
+    invokeIpc<TelemetryPreferences>(IPC.UPDATE_TELEMETRY_PREFERENCES, patch),
+  resetTelemetryId: () => invokeIpc<TelemetryPreferences>(IPC.RESET_TELEMETRY_ID),
+  captureDesktopTabViewed: (tab: "servers" | "projects" | "plugins" | "settings") =>
+    invokeIpc<void>(IPC.CAPTURE_DESKTOP_TAB_VIEWED, tab),
+  onTelemetryChanged: (callback: (status: TelemetryStatus) => void) => {
+    const listener = (_event: IpcRendererEvent, status: TelemetryStatus) => callback(status);
+    ipcRenderer.on(IPC.TELEMETRY_CHANGED, listener);
+    return () => ipcRenderer.removeListener(IPC.TELEMETRY_CHANGED, listener);
+  },
+  checkForUpdates: () => invokeIpc<{ status: string; message: string }>(IPC.CHECK_FOR_UPDATES),
   syncAll: () => invokeIpc<SyncSummary>(IPC.SYNC_ALL),
   daemonStart: () => invokeIpc<DaemonStartResult>(IPC.DAEMON_START),
-  daemonStop: () => invokeIpc<unknown>(IPC.DAEMON_STOP),
+  daemonStop: () => invokeIpc<void>(IPC.DAEMON_STOP),
   daemonRestart: () => invokeIpc<DaemonStartResult>(IPC.DAEMON_RESTART),
   openDashboard: () => invokeIpc(IPC.OPEN_DASHBOARD),
   quitApp: () => invokeIpc(IPC.QUIT_APP),
-  getPendingAuth: () => invokeIpc(IPC.GET_PENDING_AUTH),
+  getPendingAuth: () => invokeIpc<Array<{ serverName: string; oauthLikely?: boolean; oauthSupport?: OAuthSupport; status?: number }> | null>(IPC.GET_PENDING_AUTH),
   onAuthStateChanged: (callback: (entries: Array<{ serverName: string; oauthLikely?: boolean; oauthSupport?: OAuthSupport; status?: number }>) => void) => {
     const listener = (_event: IpcRendererEvent, entries: Array<{ serverName: string; oauthLikely?: boolean; oauthSupport?: OAuthSupport; status?: number }>) => callback(entries);
     ipcRenderer.on(IPC.AUTH_STATE_CHANGED, listener);
@@ -58,7 +72,7 @@ const api = {
     };
   },
   requestAuth: (serverName: string) => invokeIpc(IPC.REQUEST_AUTH, serverName),
-  checkOauthSupport: (serverName: string) => invokeIpc(IPC.CHECK_OAUTH_SUPPORT, serverName),
+  checkOauthSupport: (serverName: string) => invokeIpc<{ support: OAuthSupport }>(IPC.CHECK_OAUTH_SUPPORT, serverName),
   startOauth: (serverName: string) => invokeIpc(IPC.START_OAUTH, serverName),
   cancelOauth: (serverName: string) => invokeIpc(IPC.CANCEL_OAUTH, serverName),
   reopenOauthUrl: (serverName: string) => invokeIpc(IPC.OAUTH_REOPEN, serverName),
@@ -103,11 +117,11 @@ const api = {
   setProjectServerEnabled: (projectPath: string, serverName: string, enabled: boolean) =>
     invokeIpc(IPC.PROJECT_SET_SERVER_ENABLED, projectPath, serverName, enabled),
   selectDirectory: () => invokeIpc(IPC.SELECT_DIRECTORY) as Promise<string | null>,
-  invoke: (channel: string, ...args: unknown[]) => {
+  invoke: (channel: string, ...args: unknown[]): Promise<any> => {
     if (!ALLOWED_CHANNELS.has(channel)) {
       throw new Error(`Unknown IPC channel: ${channel}`);
     }
-    return invokeIpc(channel, ...args);
+    return invokeIpc<any>(channel, ...args);
   }
 };
 

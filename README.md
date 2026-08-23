@@ -27,6 +27,9 @@ The mcpx desktop app is the easiest way to manage your MCP servers. It runs in y
 - **Projects** — Organize servers into project-specific groups
 - **Skills** — Create and manage shared MCP skill definitions
 - **Settings** — Configure auto-start, launch-at-login, and auto-updates
+- **Privacy & diagnostics** — Independently control anonymous usage analytics
+  and crash diagnostics, reset the random installation ID, and review the
+  complete [privacy policy](PRIVACY.md)
 
 ### Download
 
@@ -117,6 +120,23 @@ This produces an NSIS installer and portable `.exe` in `app/dist/`.
 
 The `mcpx` CLI is also available as a standalone npm package for terminal workflows and CI.
 
+### Privacy and diagnostics
+
+mcpx keeps analytics dormant until its first-run disclosure is acknowledged.
+Usage analytics and crash diagnostics are independently controllable, and both
+are anonymous by design. Review or change them with:
+
+```bash
+mcpx telemetry status
+mcpx telemetry enable usage|errors|all
+mcpx telemetry disable usage|errors|all
+mcpx telemetry reset-id
+```
+
+See [PRIVACY.md](PRIVACY.md) for the exact event catalog, prohibited data, and
+native minidump warning. Maintainers can follow the [observability runbook](docs/observability.md)
+to configure provider projects, alerts, and release source maps.
+
 ### Install
 
 ```bash
@@ -199,6 +219,14 @@ After manual edits, run `mcpx sync` to propagate changes.
 - Supports encrypted-file backed secret references for upstream headers (AES-256-GCM, no Keychain)
 - Passes upstream OAuth challenges through to compatible clients
 - Proxies OAuth well-known metadata endpoints in single-upstream mode
+
+### MCP protocol support
+
+mcpx supports MCP v2 only, pinned to protocol revision `2026-07-28`. The local
+`/mcp` endpoint accepts modern MCP v2 envelopes and rejects legacy initialize,
+session, batch, and SSE-transport traffic. Client configuration adapters remain available
+for projecting the v2 gateway into supported client config formats; they do not
+add legacy protocol support.
 
 ---
 

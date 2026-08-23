@@ -60,16 +60,18 @@ async function waitForListening(server: http.Server): Promise<void> {
   });
 }
 
-function respondWithInit(res: http.ServerResponse, id: string | number | null): void {
+function respondWithDiscover(res: http.ServerResponse, id: string | number | null): void {
   res.setHeader("content-type", "application/json");
   res.end(
     JSON.stringify({
       jsonrpc: "2.0",
       id,
       result: {
-        protocolVersion: "2024-11-05",
-        capabilities: {},
-        serverInfo: { name: "test-upstream", version: "1.0.0" }
+        supportedVersions: ["2026-07-28"],
+        capabilities: { tools: {}, resources: {}, prompts: {} },
+        resultType: "complete",
+        ttlMs: 0,
+        cacheScope: "private"
       }
     })
   );
@@ -94,8 +96,8 @@ async function setupProxyFixture(
     }
     const payload = JSON.parse(Buffer.concat(chunks).toString("utf8")) as { method: string; id: string | number | null };
 
-    if (payload.method === "initialize") {
-      respondWithInit(res, payload.id);
+    if (payload.method === "server/discover") {
+      respondWithDiscover(res, payload.id);
       return;
     }
     if (payload.method === "tools/list") {
@@ -104,7 +106,7 @@ async function setupProxyFixture(
         JSON.stringify({
           jsonrpc: "2.0",
           id: payload.id,
-          result: { tools: [{ name: "echo", description: "Echo", inputSchema: { type: "object" } }] }
+          result: { resultType: "complete", ttlMs: 0, cacheScope: "private", tools: [{ name: "echo", description: "Echo", inputSchema: { type: "object" } }] }
         })
       );
       return;
@@ -168,7 +170,7 @@ interface ProxyClient {
   readMessage: (timeoutMs?: number) => Promise<any>;
 }
 
-// The stdio transport (see @modelcontextprotocol/sdk shared/stdio.js, used by both
+// The v2 stdio transport (used by both
 // runStdioProxy's StdioServerTransport and this harness) frames messages as one JSON
 // document per newline-terminated line -- no Content-Length headers.
 function spawnProxy(serverName: string, env: NodeJS.ProcessEnv): ProxyClient {
@@ -261,7 +263,7 @@ describe("stdio proxy (mcpx proxy <name>)", () => {
     }
   });
 
-  it("completes an MCP initialize handshake over stdio through the real gateway", async () => {
+  it("completes MCP v2 discovery over stdio through the real gateway", async () => {
     const { env, serverName } = await setupProxyFixture("mcpx-proxy-init-", cleanups);
     const proxy = spawnProxy(serverName, env);
     cleanups.push(() => killProxy(proxy.proc));
@@ -269,19 +271,20 @@ describe("stdio proxy (mcpx proxy <name>)", () => {
     proxy.writeMessage({
       jsonrpc: "2.0",
       id: 1,
-      method: "initialize",
+      method: "server/discover",
       params: {
-        protocolVersion: "2024-11-05",
-        capabilities: {},
-        clientInfo: { name: "proxy-test-client", version: "1.0.0" }
+        _meta: {
+          "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+          "io.modelcontextprotocol/clientInfo": { name: "proxy-test-client", version: "2.0.0" },
+          "io.modelcontextprotocol/clientCapabilities": {}
+        }
       }
     });
 
     const response = await proxy.readMessage();
     expect(response.id).toBe(1);
     expect(response.error).toBeUndefined();
-    expect(response.result.protocolVersion).toBe("2024-11-05");
-    expect(response.result.serverInfo.name).toBe("mcpx");
+    expect(response.result.supportedVersions).toContain("2026-07-28");
   }, 15_000);
 
   it("bridges tools/list over stdio and returns the upstream's tools", async () => {
@@ -292,16 +295,29 @@ describe("stdio proxy (mcpx proxy <name>)", () => {
     proxy.writeMessage({
       jsonrpc: "2.0",
       id: 1,
-      method: "initialize",
+      method: "server/discover",
       params: {
-        protocolVersion: "2024-11-05",
-        capabilities: {},
-        clientInfo: { name: "proxy-test-client", version: "1.0.0" }
+        _meta: {
+          "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+          "io.modelcontextprotocol/clientInfo": { name: "proxy-test-client", version: "2.0.0" },
+          "io.modelcontextprotocol/clientCapabilities": {}
+        }
       }
     });
     await proxy.readMessage();
 
-    proxy.writeMessage({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} });
+    proxy.writeMessage({
+      jsonrpc: "2.0",
+      id: 2,
+      method: "tools/list",
+      params: {
+        _meta: {
+          "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+          "io.modelcontextprotocol/clientInfo": { name: "proxy-test-client", version: "2.0.0" },
+          "io.modelcontextprotocol/clientCapabilities": {}
+        }
+      }
+    });
     const response = await proxy.readMessage();
 
     expect(response.id).toBe(2);

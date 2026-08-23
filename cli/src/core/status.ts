@@ -1,5 +1,5 @@
 import { getDaemonStatus, type DaemonStatus } from "./daemon.js";
-import { getGatewayUrl } from "./sync.js";
+import { getGatewayInternalUrl, getGatewayUrl } from "./sync.js";
 import { listAuthBindings, secretRefName } from "./server-auth.js";
 import { isServerEnabled, type ClientId, type ClientStatus, type ManagedIndex, type McpxConfig, type UpstreamServerSpec, type UpstreamTokenCount } from "../types.js";
 import { SecretsManager } from "./secrets.js";
@@ -95,22 +95,15 @@ async function fetchTokenCounts(gatewayUrl: string, token: string): Promise<{ co
     const res = await fetch(gatewayUrl, {
       method: "POST",
       headers: {
-        "content-type": "application/json",
         "authorization": `Bearer ${token}`
       },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: "status-tokens",
-        method: "custom/tokenCounts",
-        params: {}
-      }),
       signal: AbortSignal.timeout(65_000)
     });
     if (!res.ok) {
       return { counts: {}, fetchError: `HTTP ${res.status}` };
     }
-    const data = await res.json() as any;
-    return { counts: data?.result ?? {} };
+    const data = await res.json() as { counts?: Record<string, UpstreamTokenCount> };
+    return { counts: data?.counts ?? {} };
   } catch (error) {
     return { counts: {}, fetchError: error instanceof Error ? error.message : String(error) };
   }
@@ -128,7 +121,7 @@ export async function buildStatusReport(
   let tokenCounts: Record<string, UpstreamTokenCount> = {};
   let tokenCountFetchError: string | undefined;
   if (daemon.running) {
-    const result = await fetchTokenCounts(gatewayUrl, token);
+    const result = await fetchTokenCounts(getGatewayInternalUrl(config, "/internal/token-counts"), token);
     tokenCounts = result.counts;
     tokenCountFetchError = result.fetchError;
   }

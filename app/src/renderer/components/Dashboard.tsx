@@ -50,9 +50,10 @@ export function Dashboard() {
     async function loadSettings() {
       try {
         const settings = await window.mcpx.getDesktopSettings();
-        const activeTab = settings.activeTab === "skills" ? "plugins" : settings.activeTab;
-        if (activeTab && VALID_TABS.includes(activeTab)) {
-          setTab(activeTab);
+        const rawActiveTab = (settings as { activeTab?: string }).activeTab;
+        const activeTab = rawActiveTab === "skills" ? "plugins" : rawActiveTab;
+        if (activeTab && VALID_TABS.includes(activeTab as DesktopTab)) {
+          setTab(activeTab as DesktopTab);
         }
       } catch {
         // Use defaults if settings fail to load
@@ -65,6 +66,7 @@ export function Dashboard() {
   const handleTabChange = async (newTab: DesktopTab) => {
     setTab(newTab);
     setSelectedServer(null);
+    void window.mcpx.captureDesktopTabViewed?.(newTab);
     try {
       await window.mcpx.updateDesktopSettings({ activeTab: newTab });
     } catch {
@@ -116,7 +118,7 @@ export function Dashboard() {
           <img src={logoSvg} alt="mcpx" className="sidebar-logo-icon" />
           <span className="sidebar-logo-text">{DESKTOP_MANAGER_NAME}</span>
         </div>
-        <DaemonControls daemon={report.daemon} onRefresh={refresh} />
+        <DaemonControls daemon={report.daemon} onRefresh={() => { void refresh(); }} />
         <div className="sidebar-inner glass-panel">
           <button
             className="nav-button"

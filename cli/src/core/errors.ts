@@ -61,11 +61,13 @@ export function classifyUpstreamError(
 
   const message = error instanceof Error ? error.message : String(error);
 
-  // StreamableHTTPError check (duck-typing since SDK may not export it)
-  const maybeHttpError = error as { code?: number | string; message?: string } | undefined;
-  if (maybeHttpError?.code && (maybeHttpError.code === 401 || maybeHttpError.code === 403)) {
+  // The v2 SDK exposes HTTP failures as SdkHttpError with a numeric status;
+  // retain numeric-code support for non-SDK transports.
+  const maybeHttpError = error as { code?: number | string; status?: number; message?: string } | undefined;
+  const httpStatus = maybeHttpError?.status ?? (typeof maybeHttpError?.code === "number" ? maybeHttpError.code : undefined);
+  if (httpStatus === 401 || httpStatus === 403) {
     return new UpstreamError(upstream, "auth_required", message, {
-      status: maybeHttpError.code,
+      status: httpStatus,
       wwwAuthenticate
     });
   }

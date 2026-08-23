@@ -140,25 +140,18 @@ async function pollOnce(): Promise<void> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), GATEWAY_FETCH_TIMEOUT_MS);
   try {
-    const res = await fetch(`http://127.0.0.1:${config.gateway.port}/mcp`, {
+    const res = await fetch(`http://127.0.0.1:${config.gateway.port}/internal/token-counts`, {
       method: "POST",
       headers: {
-        "content-type": "application/json",
         Authorization: `Bearer ${token}`
       },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: "error-notifier",
-        method: "custom/tokenCounts",
-        params: {}
-      }),
       signal: controller.signal
     });
     if (!res.ok) {
       return;
     }
-    const data = (await res.json()) as { result?: Record<string, TokenCountEntry> };
-    const counts = data?.result ?? {};
+    const data = (await res.json()) as { counts?: Record<string, TokenCountEntry> };
+    const counts = data?.counts ?? {};
 
     const { toNotify, nextNotified: updated } = computeErrorNotifications(counts, lastNotified);
     lastNotified = updated;

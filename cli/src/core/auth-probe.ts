@@ -1,6 +1,7 @@
 import type { HttpServerSpec } from "../types.js";
 import { SecretsManager } from "./secrets.js";
 import { probeOAuthSupport, type OAuthSupport } from "./oauth.js";
+import { mcpV2Headers, mcpV2Meta } from "./mcp-v2.js";
 
 const JSON_RPC_VERSION = "2.0";
 const DEFAULT_AUTH_PROBE_TIMEOUT_MS = 8000;
@@ -42,7 +43,7 @@ function isAuthRelatedMessage(message: string): boolean {
 function resolveHeaders(spec: HttpServerSpec, secrets: SecretsManager): Record<string, string> {
   const headers: Record<string, string> = {
     "content-type": "application/json",
-    accept: "application/json, text/event-stream"
+    accept: "application/json"
   };
 
   for (const [key, value] of Object.entries(spec.headers ?? {})) {
@@ -84,7 +85,7 @@ export async function probeHttpAuthRequirement(
   }
 
   try {
-    const headers = resolveHeaders(spec, secrets);
+    const headers = mcpV2Headers("tools/list", resolveHeaders(spec, secrets));
     const response = await fetch(spec.url, {
       method: "POST",
       headers,
@@ -92,7 +93,11 @@ export async function probeHttpAuthRequirement(
         jsonrpc: JSON_RPC_VERSION,
         id: "mcpx-auth-probe",
         method: "tools/list",
-        params: {}
+        params: {
+          _meta: {
+            ...mcpV2Meta({ name: "mcpx-auth-probe", version: "2.0.0" })
+          }
+        }
       }),
       signal: timeoutController.signal
     });

@@ -32,9 +32,22 @@ import {
   parseCliAddCommand,
   tokenizeCommandLine,
   runOAuthLogin,
-  OAuthCancelledError,
   clearOAuthCredentials,
-  ensureGatewayToken
+  ensureGatewayToken,
+  getTelemetryStatus,
+  architecture,
+  acknowledgeTelemetryNotice,
+  updateTelemetryPreferences,
+  resetTelemetryInstallationId,
+  initializeTelemetry,
+  shutdownTelemetry,
+  captureTelemetryEvent,
+  reportTelemetryError,
+  durationBucket,
+  markTelemetryMilestone,
+  platformFamily,
+  type TelemetryEvent,
+  type TelemetryStatus
 } from "@mcpx/core";
 import type { HttpServerSpec, StdioServerSpec, UpstreamServerSpec, OAuthProgressEvent } from "@mcpx/core";
 import { z } from "zod";
@@ -53,6 +66,97 @@ import { updateTrayForDaemonStatus } from "./tray";
 import { dismissPendingAuth, getPendingAuth, queuePendingAuth } from "./auth-events";
 import { quitApp } from "./app-control";
 import { resolveCliDaemonPath } from "./cli-path";
+import { initializeDesktopErrorReporting, refreshDesktopErrorReporting } from "./error-reporting";
+
+function telemetryRelease(): string {
+  return process.env.MCPX_SENTRY_RELEASE || "desktop";
+}
+
+function telemetryVersion(): string {
+  const release = telemetryRelease();
+  return release.startsWith("mcpx@") ? release.slice("mcpx@".length) : release;
+}
+
+type TelemetryOperation = Extract<TelemetryEvent, { name: "operation_completed" }>["properties"]["operation"];
+
+function telemetryErrorCode(error: unknown): string {
+  if (error instanceof Error && error.name === "OAuthCancelledError") return "auth_cancelled";
+  if (error instanceof Error && error.name === "ZodError") return "validation_error";
+  const candidate = error && typeof error === "object" && "code" in error
+    ? (error as { code?: unknown }).code
+    : undefined;
+  if (typeof candidate === "string" && [
+    "auth_required", "auth_expired", "secret_missing", "timeout", "unreachable", "upstream_error",
+    "sync_error", "unexpected_error", "validation_error"
+  ].includes(candidate)) {
+    return candidate;
+  }
+  return "unexpected_error";
+}
+
+function safeDurationBucket(durationMs: number): "lt_100ms" | "lt_1s" | "lt_10s" | "gte_10s" {
+  try {
+    return durationBucket(durationMs);
+  } catch {
+    if (durationMs < 100) return "lt_100ms";
+    if (durationMs < 1_000) return "lt_1s";
+    if (durationMs < 10_000) return "lt_10s";
+    return "gte_10s";
+  }
+}
+
+function safeCaptureTelemetryEvent(event: TelemetryEvent): void {
+  try {
+    captureTelemetryEvent(event);
+  } catch {
+    // Optional diagnostics must never affect an IPC operation or its tests.
+  }
+}
+
+function safeMarkTelemetryMilestone(milestone: "first_server_added" | "first_sync_succeeded" | "first_gateway_request_succeeded"): void {
+  try {
+    markTelemetryMilestone(milestone);
+  } catch {
+    // Optional diagnostics must never affect an IPC operation.
+  }
+}
+
+function safeReportTelemetryError(error: unknown, operation: TelemetryOperation): void {
+  try {
+    reportTelemetryError(error, {
+      runtime: "desktop",
+      operation,
+      code: telemetryErrorCode(error)
+    });
+  } catch {
+    // Optional diagnostics must never affect an IPC operation or its tests.
+  }
+}
+
+function registerTelemetryHandler(
+  channel: string,
+  operation: TelemetryOperation,
+  handler: (event: Electron.IpcMainInvokeEvent, ...args: any[]) => any
+): void {
+  ipcMain.handle(channel, async (event, ...args) => {
+    const startedAt = Date.now();
+    try {
+      const result = await handler(event, ...args);
+      safeCaptureTelemetryEvent({
+        name: "operation_completed",
+        properties: { operation, outcome: "success", durationBucket: safeDurationBucket(Date.now() - startedAt) }
+      });
+      return result;
+    } catch (error) {
+      safeCaptureTelemetryEvent({
+        name: "operation_completed",
+        properties: { operation, outcome: "failure", errorCode: telemetryErrorCode(error), durationBucket: safeDurationBucket(Date.now() - startedAt) }
+      });
+      safeReportTelemetryError(error, operation);
+      throw error;
+    }
+  });
+}
 
 async function refreshTokenCountsSoon(): Promise<void> {
   let config: ReturnType<typeof loadConfig>;
@@ -70,18 +174,11 @@ async function refreshTokenCountsSoon(): Promise<void> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), GATEWAY_FETCH_TIMEOUT_MS);
   try {
-    await fetch(`http://127.0.0.1:${config.gateway.port}/mcp`, {
+    await fetch(`http://127.0.0.1:${config.gateway.port}/internal/token-counts/refresh`, {
       method: "POST",
       headers: {
-        "content-type": "application/json",
         Authorization: `Bearer ${token}`
       },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: "refresh-token-counts",
-        method: "custom/refreshTokenCounts",
-        params: {}
-      }),
       signal: controller.signal
     });
   } catch {
@@ -93,6 +190,14 @@ async function refreshTokenCountsSoon(): Promise<void> {
 
 function queueTokenCountRefresh(): void {
   void refreshTokenCountsSoon();
+}
+
+function broadcastTelemetryStatus(status: TelemetryStatus): void {
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (!window.isDestroyed()) {
+      window.webContents.send(IPC.TELEMETRY_CHANGED, status);
+    }
+  }
 }
 
 function getCliDaemonPath(): string {
@@ -163,6 +268,26 @@ export function registerIpcHandlers(): void {
     return loadDesktopSettings();
   });
 
+  ipcMain.handle(IPC.GET_TELEMETRY_STATUS, () => getTelemetryStatus());
+
+  ipcMain.handle(IPC.ACKNOWLEDGE_TELEMETRY_NOTICE, async () => {
+    const preferences = acknowledgeTelemetryNotice();
+    initializeTelemetry("desktop", { release: telemetryRelease(), platform: process.platform, architecture: process.arch });
+    await initializeDesktopErrorReporting(telemetryRelease());
+    safeCaptureTelemetryEvent({
+      name: "runtime_started",
+      properties: {
+        runtime: "desktop",
+        version: telemetryVersion(),
+        osFamily: platformFamily(),
+        architecture: architecture(),
+        launchMode: "desktop"
+      }
+    });
+    broadcastTelemetryStatus(getTelemetryStatus());
+    return preferences;
+  });
+
   ipcMain.handle(IPC.UPDATE_DESKTOP_SETTINGS, (_event, patch: DesktopSettingsPatch) => {
     const next = updateDesktopSettings(patch);
     if (patch.startOnLoginEnabled !== undefined) applyStartOnLoginSetting(next.startOnLoginEnabled);
@@ -170,11 +295,36 @@ export function registerIpcHandlers(): void {
     return next;
   });
 
+  ipcMain.handle(IPC.UPDATE_TELEMETRY_PREFERENCES, async (_event, patch: { usageAnalyticsEnabled?: boolean; errorReportingEnabled?: boolean }) => {
+    const safePatch = z.object({
+      usageAnalyticsEnabled: z.boolean().optional(),
+      errorReportingEnabled: z.boolean().optional()
+    }).parse(patch);
+    const next = updateTelemetryPreferences(safePatch);
+    initializeTelemetry("desktop", { release: telemetryRelease(), platform: process.platform, architecture: process.arch });
+    await refreshDesktopErrorReporting(telemetryRelease());
+    broadcastTelemetryStatus(getTelemetryStatus());
+    return next;
+  });
+
+  ipcMain.handle(IPC.RESET_TELEMETRY_ID, async () => {
+    const next = resetTelemetryInstallationId();
+    await shutdownTelemetry();
+    initializeTelemetry("desktop", { release: telemetryRelease(), platform: process.platform, architecture: process.arch });
+    broadcastTelemetryStatus(getTelemetryStatus());
+    return next;
+  });
+
+  ipcMain.handle(IPC.CAPTURE_DESKTOP_TAB_VIEWED, (_event, tab: string) => {
+    const safeTab = z.enum(["servers", "projects", "plugins", "settings"]).parse(tab);
+    safeCaptureTelemetryEvent({ name: "desktop_tab_viewed", properties: { tab: safeTab } });
+  });
+
   ipcMain.handle(IPC.CHECK_FOR_UPDATES, async () => {
     return checkForUpdatesNow();
   });
 
-  ipcMain.handle(IPC.ADD_SERVER, async (_event, name: string, spec: UpstreamServerSpec) => {
+  registerTelemetryHandler(IPC.ADD_SERVER, "server_add", async (_event, name: string, spec: UpstreamServerSpec) => {
     serverNameSchema.parse(name);
     if (!spec || typeof spec !== "object" || !("transport" in spec)) throw new Error("Invalid server spec");
     await mutateConfig((config) => {
@@ -201,10 +351,11 @@ export function registerIpcHandlers(): void {
       }
     }
 
+    safeMarkTelemetryMilestone("first_server_added");
     return result;
   });
 
-  ipcMain.handle(IPC.CONFIGURE_AUTH, async (_event, { serverName, headerName, authValue, secretName, raw }: { serverName: string; headerName: string; authValue: string; secretName?: string; raw?: boolean }) => {
+  registerTelemetryHandler(IPC.CONFIGURE_AUTH, "auth_login", async (_event, { serverName, headerName, authValue, secretName, raw }: { serverName: string; headerName: string; authValue: string; secretName?: string; raw?: boolean }) => {
     serverNameSchema.parse(serverName);
     headerNameSchema.parse(headerName);
     authValueSchema.parse(authValue);
@@ -272,7 +423,7 @@ export function registerIpcHandlers(): void {
     return probeOAuthSupport(spec.url);
   });
 
-  ipcMain.handle(IPC.START_OAUTH, async (_event, serverName: string) => {
+  registerTelemetryHandler(IPC.START_OAUTH, "auth_login", async (_event, serverName: string) => {
     serverNameSchema.parse(serverName);
     const existing = inFlightOAuth.get(serverName);
     if (existing) {
@@ -316,7 +467,7 @@ export function registerIpcHandlers(): void {
         return result;
       } catch (error) {
         broadcastOAuthProgress(serverName, {
-          phase: error instanceof OAuthCancelledError ? "cancelled" : "error",
+          phase: error instanceof Error && error.name === "OAuthCancelledError" ? "cancelled" : "error",
           message: error instanceof Error ? error.message : String(error)
         });
         throw error;
@@ -346,7 +497,7 @@ export function registerIpcHandlers(): void {
     return { reopened: Boolean(url) };
   });
 
-  ipcMain.handle(IPC.REMOVE_SERVER, async (_event, name: string) => {
+  registerTelemetryHandler(IPC.REMOVE_SERVER, "server_remove", async (_event, name: string) => {
     serverNameSchema.parse(name);
     await mutateConfig((config) => {
       removeServer(config, name, false);
@@ -364,7 +515,7 @@ export function registerIpcHandlers(): void {
     return { removed: name, sync: summary };
   });
 
-  ipcMain.handle(IPC.SET_SERVER_ENABLED, async (_event, name: string, enabled: boolean) => {
+  registerTelemetryHandler(IPC.SET_SERVER_ENABLED, "server_toggle", async (_event, name: string, enabled: boolean) => {
     serverNameSchema.parse(name);
     z.boolean().parse(enabled);
     await mutateConfig((config) => {
@@ -380,7 +531,7 @@ export function registerIpcHandlers(): void {
     return { updated: name, enabled, sync: summary };
   });
 
-  ipcMain.handle(IPC.PROJECT_SET_SERVER_ENABLED, async (_event, projectPath: string, serverName: string, enabled: boolean) => {
+  registerTelemetryHandler(IPC.PROJECT_SET_SERVER_ENABLED, "server_toggle", async (_event, projectPath: string, serverName: string, enabled: boolean) => {
     const result = await mutateConfig((config) => {
       return setProjectServerEnabled(config, projectPath, serverName, enabled);
     });
@@ -394,7 +545,7 @@ export function registerIpcHandlers(): void {
     return { updated: serverName, projectPath, enabled, sync: summary, effective: result.effective, reason: result.reason };
   });
 
-  ipcMain.handle(IPC.UPDATE_SERVER, async (_event, name: string, spec: UpstreamServerSpec, resolvedSecrets?: Record<string, string>) => {
+  registerTelemetryHandler(IPC.UPDATE_SERVER, "server_update", async (_event, name: string, spec: UpstreamServerSpec, resolvedSecrets?: Record<string, string>) => {
     serverNameSchema.parse(name);
     if (!spec || typeof spec !== "object" || !("transport" in spec)) throw new Error("Invalid server spec");
     const secrets = new SecretsManager();
@@ -448,7 +599,7 @@ export function registerIpcHandlers(): void {
     return { updated: name, sync: summary };
   });
 
-  ipcMain.handle(IPC.SYNC_ALL, async () => {
+  registerTelemetryHandler(IPC.SYNC_ALL, "client_sync", async () => {
     const config = loadConfig();
     const secrets = new SecretsManager();
     const summary = syncAllClients(config, secrets);
@@ -456,10 +607,11 @@ export function registerIpcHandlers(): void {
       persistSyncState(summary, freshConfig);
     });
     queueTokenCountRefresh();
+    if (!summary.hasErrors) safeMarkTelemetryMilestone("first_sync_succeeded");
     return summary;
   });
 
-  ipcMain.handle(IPC.PROJECT_INIT, async (_event, projectPath: string, name: string) => {
+  registerTelemetryHandler(IPC.PROJECT_INIT, "project_init", async (_event, projectPath: string, name: string) => {
     await mutateConfig((config) => {
       registerProject(config, projectPath, name);
     });
@@ -474,7 +626,7 @@ export function registerIpcHandlers(): void {
     return { success: true, sync: summary };
   });
 
-  ipcMain.handle(IPC.PROJECT_REMOVE, async (_event, projectPath: string) => {
+  registerTelemetryHandler(IPC.PROJECT_REMOVE, "project_remove", async (_event, projectPath: string) => {
     await mutateConfig((config) => {
       unregisterProject(config, projectPath);
     });
@@ -533,7 +685,7 @@ export function registerIpcHandlers(): void {
     return result;
   });
 
-  ipcMain.handle(IPC.EXECUTE_CLI_COMMAND, async (_event, command: string) => {
+  registerTelemetryHandler(IPC.EXECUTE_CLI_COMMAND, "server_add", async (_event, command: string) => {
     let parsed: ReturnType<typeof parseCliAddCommand>;
     try {
       parsed = parseCliAddCommand(command);
@@ -565,6 +717,7 @@ export function registerIpcHandlers(): void {
       }
     }
 
+    safeMarkTelemetryMilestone("first_server_added");
     return result;
   });
 
@@ -577,7 +730,7 @@ export function registerIpcHandlers(): void {
     return getSkill(id);
   });
 
-  ipcMain.handle(IPC.SAVE_SKILL, async (_event, id: string, content: string) => {
+  registerTelemetryHandler(IPC.SAVE_SKILL, "skill_add", async (_event, id: string, content: string) => {
     saveSkill(id, content);
     const config = loadConfig();
     const summary = syncAllClients(config, new SecretsManager());
@@ -585,7 +738,7 @@ export function registerIpcHandlers(): void {
     return { id, success: true };
   });
 
-  ipcMain.handle(IPC.DELETE_SKILL, async (_event, id: string) => {
+  registerTelemetryHandler(IPC.DELETE_SKILL, "skill_remove", async (_event, id: string) => {
     deleteSkill(id);
     const config = loadConfig();
     const summary = syncAllClients(config, new SecretsManager());
@@ -599,7 +752,7 @@ export function registerIpcHandlers(): void {
     return inspectPlugin(source);
   });
 
-  ipcMain.handle(IPC.PLUGIN_INSTALL, async (_event, source: string, options?: unknown) => {
+  registerTelemetryHandler(IPC.PLUGIN_INSTALL, "plugin_install", async (_event, source: string, options?: unknown) => {
     const { installPlugin } = await import("@mcpx/core");
     return installPlugin(source, options as any);
   });
@@ -610,24 +763,24 @@ export function registerIpcHandlers(): void {
     return { name, success: true };
   });
 
-  ipcMain.handle(IPC.PLUGIN_UPDATE, async (_event, name: string) => {
+  registerTelemetryHandler(IPC.PLUGIN_UPDATE, "plugin_update", async (_event, name: string) => {
     const { updatePlugin } = await import("@mcpx/core");
     return updatePlugin(name);
   });
 
-  ipcMain.handle(IPC.PLUGIN_UNINSTALL, async (_event, name: string, options?: unknown) => {
+  registerTelemetryHandler(IPC.PLUGIN_UNINSTALL, "plugin_uninstall", async (_event, name: string, options?: unknown) => {
     const { uninstallPlugin } = await import("@mcpx/core");
     await uninstallPlugin(name, options as any);
     return { name, success: true };
   });
 
-  ipcMain.handle(IPC.PLUGIN_ENABLE, async (_event, name: string) => {
+  registerTelemetryHandler(IPC.PLUGIN_ENABLE, "plugin_toggle", async (_event, name: string) => {
     const { enablePlugin } = await import("@mcpx/core");
     await enablePlugin(name);
     return { name, success: true };
   });
 
-  ipcMain.handle(IPC.PLUGIN_DISABLE, async (_event, name: string) => {
+  registerTelemetryHandler(IPC.PLUGIN_DISABLE, "plugin_toggle", async (_event, name: string) => {
     const { disablePlugin } = await import("@mcpx/core");
     await disablePlugin(name);
     return { name, success: true };
@@ -678,17 +831,17 @@ export function registerIpcHandlers(): void {
     return listMarketplaces();
   });
 
-  ipcMain.handle(IPC.MARKETPLACE_ADD, async (_event, source: string, manifestPath?: string) => {
+  registerTelemetryHandler(IPC.MARKETPLACE_ADD, "marketplace_add", async (_event, source: string, manifestPath?: string) => {
     const { addMarketplace } = await import("@mcpx/core");
     return addMarketplace(source, manifestPath);
   });
 
-  ipcMain.handle(IPC.MARKETPLACE_REFRESH, async (_event, name: string) => {
+  registerTelemetryHandler(IPC.MARKETPLACE_REFRESH, "marketplace_refresh", async (_event, name: string) => {
     const { refreshMarketplaceWithPlugins } = await import("@mcpx/core");
     return refreshMarketplaceWithPlugins(name);
   });
 
-  ipcMain.handle(IPC.MARKETPLACE_REMOVE, async (_event, name: string) => {
+  registerTelemetryHandler(IPC.MARKETPLACE_REMOVE, "marketplace_remove", async (_event, name: string) => {
     const { removeMarketplace } = await import("@mcpx/core");
     await removeMarketplace(name);
     return { name, success: true };

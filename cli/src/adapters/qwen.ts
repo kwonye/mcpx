@@ -35,8 +35,8 @@ const qwenEntrySchema = z.object({
 }).passthrough();
 
 // Qwen/Tongyi MCP config at ~/.qwen/settings.json. Qwen does NOT use a `type` field;
-// transport is inferred from field presence: `httpUrl` → HTTP, `url` → SSE,
-// `command` → stdio. If multiple are specified, precedence is httpUrl > url > command.
+// transport is inferred from field presence: `httpUrl` → streamable HTTP,
+// `command` → stdio. Legacy `url` (SSE) entries are skipped for strict MCP v2.
 // Disabled servers are tracked via `mcp.excluded` array, not a per-entry `disabled` property.
 export class QwenAdapter implements ClientAdapter {
   readonly id = "qwen" as const;
@@ -94,18 +94,7 @@ export class QwenAdapter implements ClientAdapter {
       }
 
       if (entry.url && !entry.httpUrl && !entry.command) {
-        result.candidates.push({
-          clientId: this.id,
-          configPath,
-          sourceEntryName: name,
-          serverName: name,
-          spec: {
-            transport: "http",
-            url: entry.url,
-            headers: entry.headers,
-            enabled: !(entry.disabled === true || excludedSet.has(name))
-          }
-        });
+        result.skipped.push(buildImportSkip(this.id, name, "Legacy SSE transport is not supported; use Qwen's httpUrl field for MCP v2 streamable HTTP.", configPath));
         continue;
       }
 

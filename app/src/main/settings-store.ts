@@ -18,7 +18,7 @@ function normalizeSettings(value: unknown): DesktopSettings {
     ? (value as Partial<DesktopSettings>)
     : {};
 
-  const legacyTab = partial.activeTab === "skills" ? "plugins" : partial.activeTab;
+  const legacyTab = (partial as { activeTab?: string }).activeTab === "skills" ? "plugins" : (partial as { activeTab?: string }).activeTab;
   const activeTab = typeof legacyTab === "string" &&
     VALID_TABS.includes(legacyTab as typeof VALID_TABS[number])
     ? legacyTab
@@ -34,7 +34,7 @@ function normalizeSettings(value: unknown): DesktopSettings {
     errorNotificationsEnabled: typeof partial.errorNotificationsEnabled === "boolean"
       ? partial.errorNotificationsEnabled
       : DEFAULT_DESKTOP_SETTINGS.errorNotificationsEnabled,
-    activeTab
+    activeTab: activeTab as DesktopSettings["activeTab"]
   };
 }
 

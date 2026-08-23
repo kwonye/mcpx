@@ -106,7 +106,7 @@ export function selectBestPackage(
     return { kind: "package", package: stdioPkgs[0] };
   }
 
-  const httpRemotes = remotes.filter((r) => r.type === "streamable-http" || r.type === "sse");
+  const httpRemotes = remotes.filter((r) => r.type === "streamable-http");
   if (httpRemotes.length > 0) {
     return { kind: "remote", remote: httpRemotes[0] };
   }
@@ -116,7 +116,7 @@ export function selectBestPackage(
   }
 
   if (remotes.length > 0) {
-    return { kind: "remote", remote: remotes[0] };
+    throw new Error("Server has no MCP v2-compatible streamable HTTP remote");
   }
 
   throw new Error("Server has no packages or remotes");

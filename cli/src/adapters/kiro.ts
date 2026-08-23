@@ -81,7 +81,7 @@ export class KiroAdapter implements ClientAdapter {
       }
 
       const entry = parsed.data;
-      if ((entry.type === undefined || entry.type === "http" || entry.type === "streamable-http" || entry.type === "sse") && entry.url && !entry.command) {
+      if ((entry.type === undefined || entry.type === "http" || entry.type === "streamable-http") && entry.url && !entry.command) {
         result.candidates.push({
           clientId: this.id,
           configPath,

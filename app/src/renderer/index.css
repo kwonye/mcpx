@@ -78,6 +78,53 @@ html, body {
     flex-direction: column;
 }
 
+.telemetry-disclosure {
+    min-height: 100%;
+    display: grid;
+    place-items: center;
+    padding: 32px;
+    background: var(--bg-light);
+}
+
+.telemetry-disclosure__card {
+    width: min(620px, 100%);
+    padding: 34px;
+    display: grid;
+    gap: 16px;
+}
+
+.telemetry-disclosure__icon {
+    width: 48px;
+    height: 48px;
+    display: grid;
+    place-items: center;
+    color: var(--primary);
+    background: var(--primary-soft);
+    border-radius: var(--radius-md);
+}
+
+.telemetry-disclosure__icon .material-symbols-outlined {
+    font-size: 28px;
+}
+
+.telemetry-disclosure__settings {
+    display: grid;
+    gap: 12px;
+    padding: 16px 0 4px;
+    border-top: 1px solid var(--border-soft);
+}
+
+.telemetry-disclosure__actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    padding-top: 8px;
+}
+
+.telemetry-disclosure__footer {
+    font-size: 0.82rem;
+}
+
 .app-shell {
     width: 100%;
     height: 100%;

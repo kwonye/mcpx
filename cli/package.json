@@ -38,6 +38,7 @@
   },
   "files": [
     "dist",
+    "!dist/**/*.map",
     "README.md",
     "LICENSE"
   ],
@@ -45,7 +46,7 @@
     "dev": "bun run src/cli.ts --",
     "sync-version": "bun scripts/sync-version.mjs",
     "prebuild": "bun run sync-version",
-    "build": "bun build src/cli.ts src/core/index.ts src/types.ts --outdir dist --target node --format esm --splitting --external commander --external hono --external zod --external \"@modelcontextprotocol/sdk\" --external \"@iarna/toml\" --external yaml && tsc -p tsconfig.json --emitDeclarationOnly --declaration --declarationMap",
+    "build": "bun scripts/build.mjs",
     "prepublishOnly": "bun run build",
     "test": "bun test",
     "test:watch": "bun test --watch",
@@ -53,9 +54,13 @@
   },
   "dependencies": {
     "@iarna/toml": "^2.2.5",
-    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@modelcontextprotocol/client": "2.0.0",
+    "@modelcontextprotocol/node": "2.0.0",
+    "@modelcontextprotocol/server": "2.0.0",
+    "@sentry/node": "^10.70.0",
     "commander": "^14.0.1",
     "hono": "^4.12.14",
+    "posthog-node": "^5.49.1",
     "yaml": "^2.7.1",
     "zod": "^4.1.12"
   },

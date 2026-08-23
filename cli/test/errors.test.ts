@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { UpstreamError, SecretNotFoundError, classifyUpstreamError } from "../src/core/errors.js";
-import { StreamableHTTPError } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { SdkErrorCode, SdkHttpError } from "@modelcontextprotocol/client";
 
 describe("upstream error taxonomy", () => {
   it("classifies SecretNotFoundError as secret_missing", () => {
@@ -11,14 +11,14 @@ describe("upstream error taxonomy", () => {
   });
 
   it("classifies 401 as auth_required", () => {
-    const err = new StreamableHTTPError(401, "Unauthorized");
+    const err = new SdkHttpError(SdkErrorCode.ClientHttpAuthentication, "Unauthorized", { status: 401 });
     const classified = classifyUpstreamError("test-server", err);
     expect(classified.code).toBe("auth_required");
     expect(classified.status).toBe(401);
   });
 
   it("classifies 403 as auth_required", () => {
-    const err = new StreamableHTTPError(403, "Forbidden");
+    const err = new SdkHttpError(SdkErrorCode.ClientHttpForbidden, "Forbidden", { status: 403 });
     const classified = classifyUpstreamError("test-server", err, 'Bearer realm="test"');
     expect(classified.code).toBe("auth_required");
     expect(classified.wwwAuthenticate).toBe('Bearer realm="test"');

@@ -47,6 +47,25 @@ import { getStagedCliPath, getStagedUpdate, clearStagedUpdate, checkForUpdates, 
 import { performUpdate, performRollback, runBackgroundUpdate } from "./core/update-manager.js";
 import { runStdioProxy } from "./core/proxy.js";
 import {
+  acknowledgeTelemetryNotice,
+  architecture,
+  captureTelemetryEvent,
+  durationBucket,
+  getTelemetryStatus,
+  initializeTelemetry,
+  loadTelemetryPreferences,
+  markTelemetryMilestone,
+  platformFamily,
+  resetTelemetryInstallationId,
+  shutdownTelemetry,
+  updateTelemetryPreferences,
+  flushTelemetry,
+  reportTelemetryError,
+  type TelemetryRuntime,
+  type TelemetryEvent
+} from "./core/telemetry.js";
+import { flushNodeErrorReporting, initializeNodeErrorReporting, shutdownNodeErrorReporting } from "./core/error-reporting.js";
+import {
   runOAuthLogin,
   isOAuthReference,
   oauthReferenceServerName,
@@ -1264,6 +1283,7 @@ function registerEnabledCommand(parent: Command, enabled: boolean, cliPath: stri
     .option("-l, --local", "Force target (or initialize) a local `.mcpx.json` configuration")
     .description(`${enabled ? "Enable" : "Disable"} an upstream MCP server`)
     .action(async (name: string, options: { global?: boolean; local?: boolean }) => {
+      const startedAt = Date.now();
       const { type, projectPath } = await mutateActiveConfig({ global: options.global, local: options.local }, (config) => {
         setServerEnabled(config, name, enabled);
       });
@@ -1277,6 +1297,10 @@ function registerEnabledCommand(parent: Command, enabled: boolean, cliPath: stri
       process.stdout.write(`${enabled ? "Enabled" : "Disabled"} server: ${name} (${type} config)\n`);
       process.stdout.write("Auto-syncing managed gateway entries across all supported clients...\n");
       await autoSyncManagedEntries(cliPath);
+      captureTelemetryEvent({
+        name: "operation_completed",
+        properties: { operation: "server_toggle", outcome: "success", durationBucket: durationBucket(Date.now() - startedAt) }
+      });
     });
 }
 
@@ -1293,6 +1317,7 @@ function registerAddCommand(parent: Command, cliPath: string): void {
     .option("-l, --local", "Force saving to local project configuration")
     .description("Add an upstream MCP server")
     .action(async (values: string[], options: AddCommandOptions) => {
+      const startedAt = Date.now();
       const safeValues = values ?? [];
       const secrets = new SecretsManager();
 
@@ -1392,6 +1417,11 @@ function registerAddCommand(parent: Command, cliPath: string): void {
 
       process.stdout.write("Auto-syncing managed gateway entries across all supported clients...\n");
       await autoSyncManagedEntries(cliPath);
+      markTelemetryMilestone("first_server_added");
+      captureTelemetryEvent({
+        name: "operation_completed",
+        properties: { operation: "server_add", outcome: "success", durationBucket: durationBucket(Date.now() - startedAt) }
+      });
     });
 }
 
@@ -1403,6 +1433,7 @@ function registerRemoveCommand(parent: Command, cliPath: string): void {
     .option("-l, --local", "Force target local project configuration")
     .description("Remove an upstream MCP server")
     .action(async (name: string, options: { force?: boolean; global?: boolean; local?: boolean }) => {
+      const startedAt = Date.now();
       const { type, projectPath } = await mutateActiveConfig({ global: options.global, local: options.local }, (config) => {
         removeServer(config, name, options.force ?? false);
       });
@@ -1418,6 +1449,10 @@ function registerRemoveCommand(parent: Command, cliPath: string): void {
       process.stdout.write(`Removed server: ${name} ${type === "project" ? `from project: ${projectPath}` : "globally"}\n`);
       process.stdout.write("Auto-syncing managed gateway entries across all supported clients...\n");
       await autoSyncManagedEntries(cliPath);
+      captureTelemetryEvent({
+        name: "operation_completed",
+        properties: { operation: "server_remove", outcome: "success", durationBucket: durationBucket(Date.now() - startedAt) }
+      });
     });
 }
 
@@ -1508,6 +1543,7 @@ function registerSyncCommand(program: Command, cliPath: string): void {
     .option("--json", "Output JSON")
     .description("Sync gateway configuration to supported clients (e.g. `mcpx sync claude`)")
     .action(async (clients: string[], options: { client: string[]; json?: boolean; import?: boolean }) => {
+      const startedAt = Date.now();
       const config = loadConfig();
       const targetClients = parseClientList([...(clients ?? []), ...(options.client ?? [])]);
       const secrets = new SecretsManager();
@@ -1518,6 +1554,16 @@ function registerSyncCommand(program: Command, cliPath: string): void {
       });
       printSyncSummary(summary, options.json ?? false);
       ensureExitCodeForSyncFailures(summary.hasErrors);
+      if (!summary.hasErrors) markTelemetryMilestone("first_sync_succeeded");
+      captureTelemetryEvent({
+        name: "operation_completed",
+        properties: {
+          operation: "client_sync",
+          outcome: summary.hasErrors ? "failure" : "success",
+          errorCode: summary.hasErrors ? "sync_error" : undefined,
+          durationBucket: durationBucket(Date.now() - startedAt)
+        }
+      });
     });
 }
 
@@ -1758,6 +1804,7 @@ function registerAuthCommands(program: Command): void {
     .command("login <server>")
     .description("Run browser OAuth login for an HTTP upstream server")
     .action(async (server: string) => {
+      const startedAt = Date.now();
       const config = loadConfig();
       const spec = getServerSpecOrThrow(config, server);
       if (spec.transport !== "http") {
@@ -1770,6 +1817,10 @@ function registerAuthCommands(program: Command): void {
         openInBrowser(url);
       });
       process.stdout.write(`OAuth login complete for "${server}".\n`);
+      captureTelemetryEvent({
+        name: "operation_completed",
+        properties: { operation: "auth_login", outcome: "success", durationBucket: durationBucket(Date.now() - startedAt) }
+      });
     });
 
   auth
@@ -1778,6 +1829,7 @@ function registerAuthCommands(program: Command): void {
     .option("--json", "Output JSON")
     .description("Sign out of OAuth for a server and clear stored credentials")
     .action(async (server: string, options: { yes?: boolean; json?: boolean }) => {
+      const startedAt = Date.now();
       const config = loadConfig();
       const spec = getServerSpecOrThrow(config, server);
 
@@ -1814,6 +1866,10 @@ function registerAuthCommands(program: Command): void {
         `Signed out of "${server}". Removed ${removedSecrets.length} stored credential${removedSecrets.length === 1 ? "" : "s"}${bindingNote}.\n`
       );
       process.stdout.write(`Re-run \`mcpx auth login ${server}\` to sign back in.\n`);
+      captureTelemetryEvent({
+        name: "operation_completed",
+        properties: { operation: "auth_logout", outcome: "success", durationBucket: durationBucket(Date.now() - startedAt) }
+      });
     });
 
   auth
@@ -2037,29 +2093,43 @@ function registerSkillsCommands(program: Command): void {
     .command("add <id>")
     .description("Add a new skill")
     .action(async (id: string) => {
+      const startedAt = Date.now();
       const existing = getSkill(id);
       if (existing) {
         process.stderr.write(`Skill "${id}" already exists.\n`);
-        process.exit(1);
+        recordTelemetryOperationFailure("skill_add", { code: "validation_error" }, startedAt);
+        process.exitCode = 1;
+        return;
       }
       saveSkill(id, `# ${id}\n\nAdd your instructions here.`);
       const summary = syncAllClients(loadConfig(), new SecretsManager());
       await mutateConfig((config) => persistSyncState(summary, config));
       process.stdout.write(`Skill "${id}" created.\n`);
+      captureTelemetryEvent({
+        name: "operation_completed",
+        properties: { operation: "skill_add", outcome: "success", durationBucket: durationBucket(Date.now() - startedAt) }
+      });
     });
 
   skill
     .command("rm <id>")
     .description("Remove a skill")
     .action(async (id: string) => {
+      const startedAt = Date.now();
       if (!getSkill(id)) {
         process.stderr.write(`Skill "${id}" not found.\n`);
-        process.exit(1);
+        recordTelemetryOperationFailure("skill_remove", { code: "validation_error" }, startedAt);
+        process.exitCode = 1;
+        return;
       }
       deleteSkill(id);
       const summary = syncAllClients(loadConfig(), new SecretsManager());
       await mutateConfig((config) => persistSyncState(summary, config));
       process.stdout.write(`Skill "${id}" removed.\n`);
+      captureTelemetryEvent({
+        name: "operation_completed",
+        properties: { operation: "skill_remove", outcome: "success", durationBucket: durationBucket(Date.now() - startedAt) }
+      });
     });
 }
 
@@ -2096,7 +2166,21 @@ function registerUpdateCommand(program: Command): void {
     .option("--json", "Output JSON")
     .description("Check for available updates")
     .action(async (options: { json?: boolean }) => {
+      const startedAt = Date.now();
       const status = await checkForUpdates();
+      captureTelemetryEvent({
+        name: "operation_completed",
+        properties: {
+          operation: "update_check",
+          outcome: status.error ? "failure" : "success",
+          errorCode: status.error ? "update_check_failed" : undefined,
+          durationBucket: durationBucket(Date.now() - startedAt)
+        }
+      });
+      captureTelemetryEvent({
+        name: "update_completed",
+        properties: { action: "check", outcome: status.error ? "failure" : "success", fromVersion: status.currentVersion, toVersion: status.latestVersion ?? undefined }
+      });
 
       if (options.json) {
         process.stdout.write(`${JSON.stringify(status, null, 2)}\n`);
@@ -2120,9 +2204,18 @@ function registerUpdateCommand(program: Command): void {
     .command("install")
     .description("Download and stage the latest update")
     .action(async () => {
+      const startedAt = Date.now();
       process.stdout.write("Checking for updates...\n");
       const result = await performUpdate();
       process.stdout.write(`${result.message}\n`);
+      captureTelemetryEvent({
+        name: "operation_completed",
+        properties: { operation: "update_install", outcome: result.success ? "success" : "failure", errorCode: result.success ? undefined : "update_failed", durationBucket: durationBucket(Date.now() - startedAt) }
+      });
+      captureTelemetryEvent({
+        name: "update_completed",
+        properties: { action: "install", outcome: result.success ? "success" : "failure" }
+      });
       if (!result.success) {
         process.exitCode = 1;
       }
@@ -2132,8 +2225,17 @@ function registerUpdateCommand(program: Command): void {
     .command("rollback")
     .description("Roll back to the previously installed version")
     .action(() => {
+      const startedAt = Date.now();
       const result = performRollback();
       process.stdout.write(`${result.message}\n`);
+      captureTelemetryEvent({
+        name: "operation_completed",
+        properties: { operation: "update_rollback", outcome: result.success ? "success" : "failure", errorCode: result.success ? undefined : "rollback_failed", durationBucket: durationBucket(Date.now() - startedAt) }
+      });
+      captureTelemetryEvent({
+        name: "update_completed",
+        properties: { action: "rollback", outcome: result.success ? "success" : "failure" }
+      });
       if (!result.success) {
         process.exitCode = 1;
       }
@@ -2163,10 +2265,13 @@ function registerProjectCommands(program: Command, cliPath: string): void {
     .command("init [name]")
     .description("Initialize a local .mcpx.json configuration in the current directory")
     .action(async (name?: string) => {
+      const startedAt = Date.now();
       const targetPath = path.join(process.cwd(), ".mcpx.json");
       if (fs.existsSync(targetPath)) {
         process.stderr.write(`Local project configuration already exists at: ${targetPath}\n`);
-        process.exit(1);
+        recordTelemetryOperationFailure("project_init", { code: "validation_error" }, startedAt);
+        process.exitCode = 1;
+        return;
       }
 
       const projectName = name?.trim() || path.basename(process.cwd());
@@ -2184,6 +2289,10 @@ function registerProjectCommands(program: Command, cliPath: string): void {
         registerProject(globalConfig, process.cwd(), projectName);
       });
       process.stdout.write(`Registered project "${projectName}" globally.\n`);
+      captureTelemetryEvent({
+        name: "operation_completed",
+        properties: { operation: "project_init", outcome: "success", durationBucket: durationBucket(Date.now() - startedAt) }
+      });
     });
 
   projectCmd
@@ -2208,11 +2317,14 @@ function registerProjectCommands(program: Command, cliPath: string): void {
     .command("remove <path>")
     .description("Unregister a project path from the global configuration")
     .action(async (projectPath: string) => {
+      const startedAt = Date.now();
       const resolvedPath = path.resolve(projectPath);
       const globalConfig = loadConfig();
       if (!globalConfig.projects || !globalConfig.projects[resolvedPath]) {
         process.stderr.write(`No registered project found at path: ${resolvedPath}\n`);
-        process.exit(1);
+        recordTelemetryOperationFailure("project_remove", { code: "validation_error" }, startedAt);
+        process.exitCode = 1;
+        return;
       }
 
       const entry = globalConfig.projects[resolvedPath];
@@ -2224,6 +2336,10 @@ function registerProjectCommands(program: Command, cliPath: string): void {
       
       process.stdout.write("Auto-syncing managed gateway entries across all supported clients...\n");
       await autoSyncManagedEntries(cliPath);
+      captureTelemetryEvent({
+        name: "operation_completed",
+        properties: { operation: "project_remove", outcome: "success", durationBucket: durationBucket(Date.now() - startedAt) }
+      });
     });
 }
 
@@ -2253,6 +2369,7 @@ function registerPluginCommands(program: Command, _cliPath: string): void {
     .option("-y, --yes", "Confirm marketplace plugin installation")
     .description("Install plugin")
     .action(async (source: string, options: { name?: string; enable?: boolean; yes?: boolean }) => {
+      const startedAt = Date.now();
       try {
         const config = loadConfig();
         const marketplaceName = source.includes("@") ? source.slice(source.lastIndexOf("@") + 1) : "";
@@ -2283,9 +2400,14 @@ function registerPluginCommands(program: Command, _cliPath: string): void {
           p = await installPlugin(source, { name: options.name, enabled: options.enable !== false });
         }
         process.stdout.write(`Plugin installed: ${p.id}\n`);
+        captureTelemetryEvent({
+          name: "operation_completed",
+          properties: { operation: "plugin_install", outcome: "success", durationBucket: durationBucket(Date.now() - startedAt) }
+        });
       } catch (e: any) {
         process.stderr.write(`Error: ${e.message}\n`);
-        process.exit(1);
+        recordTelemetryOperationFailure("plugin_install", e, startedAt);
+        process.exitCode = 1;
       }
     });
 
@@ -2304,12 +2426,18 @@ function registerPluginCommands(program: Command, _cliPath: string): void {
     .option("--manifest <path>", "Marketplace manifest path inside the source")
     .description("Add a Claude or Codex plugin marketplace")
     .action(async (source: string, options: { manifest?: string }) => {
+      const startedAt = Date.now();
       try {
         const { addMarketplace } = await import("./core/marketplace.js");
         const added = await addMarketplace(source, options.manifest);
         process.stdout.write(`Marketplace added: ${added.name}\n`);
+        captureTelemetryEvent({
+          name: "operation_completed",
+          properties: { operation: "marketplace_add", outcome: "success", durationBucket: durationBucket(Date.now() - startedAt) }
+        });
       } catch (error) {
         process.stderr.write(`Error: ${error instanceof Error ? error.message : String(error)}\n`);
+        recordTelemetryOperationFailure("marketplace_add", error, startedAt);
         process.exitCode = 1;
       }
     });
@@ -2318,6 +2446,7 @@ function registerPluginCommands(program: Command, _cliPath: string): void {
     .command("update [name]")
     .description("Refresh one marketplace, or every configured marketplace")
     .action(async (name?: string) => {
+      const startedAt = Date.now();
       try {
         const { listMarketplaces, refreshMarketplaceWithPlugins } = await import("./core/marketplace.js");
         const names = name ? [name] : (await listMarketplaces()).map((entry) => entry.name);
@@ -2326,8 +2455,13 @@ function registerPluginCommands(program: Command, _cliPath: string): void {
           process.stdout.write(`Marketplace updated: ${marketplaceName} (${result.updated.length} plugin update(s))\n`);
           for (const error of result.errors) process.stderr.write(`Warning: ${error}\n`);
         }
+        captureTelemetryEvent({
+          name: "operation_completed",
+          properties: { operation: "marketplace_refresh", outcome: "success", durationBucket: durationBucket(Date.now() - startedAt) }
+        });
       } catch (error) {
         process.stderr.write(`Error: ${error instanceof Error ? error.message : String(error)}\n`);
+        recordTelemetryOperationFailure("marketplace_refresh", error, startedAt);
         process.exitCode = 1;
       }
     });
@@ -2337,6 +2471,7 @@ function registerPluginCommands(program: Command, _cliPath: string): void {
     .option("-y, --yes", "Confirm removal and uninstall marketplace plugins")
     .description("Remove a custom marketplace and its installed plugins")
     .action(async (name: string, options: { yes?: boolean }) => {
+      const startedAt = Date.now();
       try {
         if (!options.yes) {
           if (!process.stdin.isTTY || !process.stdout.isTTY) throw new Error("Marketplace removal requires --yes in non-interactive mode");
@@ -2351,8 +2486,13 @@ function registerPluginCommands(program: Command, _cliPath: string): void {
         const { removeMarketplace } = await import("./core/marketplace.js");
         await removeMarketplace(name);
         process.stdout.write(`Marketplace removed: ${name}\n`);
+        captureTelemetryEvent({
+          name: "operation_completed",
+          properties: { operation: "marketplace_remove", outcome: "success", durationBucket: durationBucket(Date.now() - startedAt) }
+        });
       } catch (error) {
         process.stderr.write(`Error: ${error instanceof Error ? error.message : String(error)}\n`);
+        recordTelemetryOperationFailure("marketplace_remove", error, startedAt);
         process.exitCode = 1;
       }
     });
@@ -2415,13 +2555,19 @@ function registerPluginCommands(program: Command, _cliPath: string): void {
     .command("update <name>")
     .description("Update plugin to latest version")
     .action(async (name: string) => {
+      const startedAt = Date.now();
       const { updatePlugin } = await import("./core/plugin-manager.js");
       try {
         const p = await updatePlugin(name);
         process.stdout.write(`Plugin ${name} updated to ${p.version}\n`);
+        captureTelemetryEvent({
+          name: "operation_completed",
+          properties: { operation: "plugin_update", outcome: "success", durationBucket: durationBucket(Date.now() - startedAt) }
+        });
       } catch (e: any) {
         process.stderr.write(`Error: ${e.message}\n`);
-        process.exit(1);
+        recordTelemetryOperationFailure("plugin_update", e, startedAt);
+        process.exitCode = 1;
       }
     });
 
@@ -2430,13 +2576,19 @@ function registerPluginCommands(program: Command, _cliPath: string): void {
     .option("--keep-data", "Keep plugin data after uninstall")
     .description("Uninstall plugin")
     .action(async (name: string, options: { keepData?: boolean }) => {
+      const startedAt = Date.now();
       const { uninstallPlugin } = await import("./core/plugin-manager.js");
       try {
         await uninstallPlugin(name, options.keepData || false);
         process.stdout.write(`Plugin ${name} uninstalled\n`);
+        captureTelemetryEvent({
+          name: "operation_completed",
+          properties: { operation: "plugin_uninstall", outcome: "success", durationBucket: durationBucket(Date.now() - startedAt) }
+        });
       } catch (e: any) {
         process.stderr.write(`Error: ${e.message}\n`);
-        process.exit(1);
+        recordTelemetryOperationFailure("plugin_uninstall", e, startedAt);
+        process.exitCode = 1;
       }
     });
 
@@ -2445,6 +2597,7 @@ function registerPluginCommands(program: Command, _cliPath: string): void {
     .option("--project <path>", "Scope this enable to a single registered project instead of globally")
     .description("Enable plugin (globally, or for one project with --project)")
     .action(async (name: string, options: { project?: string }) => {
+      const startedAt = Date.now();
       try {
         if (options.project) {
           const { setPluginProjectOverride } = await import("./core/plugin-manager.js");
@@ -2456,9 +2609,14 @@ function registerPluginCommands(program: Command, _cliPath: string): void {
           await enablePlugin(name);
           process.stdout.write(`Plugin ${name} enabled\n`);
         }
+        captureTelemetryEvent({
+          name: "operation_completed",
+          properties: { operation: "plugin_toggle", outcome: "success", durationBucket: durationBucket(Date.now() - startedAt) }
+        });
       } catch (e: any) {
         process.stderr.write(`Error: ${e.message}\n`);
-        process.exit(1);
+        recordTelemetryOperationFailure("plugin_toggle", e, startedAt);
+        process.exitCode = 1;
       }
     });
 
@@ -2467,6 +2625,7 @@ function registerPluginCommands(program: Command, _cliPath: string): void {
     .option("--project <path>", "Scope this disable to a single registered project instead of globally")
     .description("Disable plugin (globally, or for one project with --project)")
     .action(async (name: string, options: { project?: string }) => {
+      const startedAt = Date.now();
       try {
         if (options.project) {
           const { setPluginProjectOverride } = await import("./core/plugin-manager.js");
@@ -2478,9 +2637,14 @@ function registerPluginCommands(program: Command, _cliPath: string): void {
           await disablePlugin(name);
           process.stdout.write(`Plugin ${name} disabled\n`);
         }
+        captureTelemetryEvent({
+          name: "operation_completed",
+          properties: { operation: "plugin_toggle", outcome: "success", durationBucket: durationBucket(Date.now() - startedAt) }
+        });
       } catch (e: any) {
         process.stderr.write(`Error: ${e.message}\n`);
-        process.exit(1);
+        recordTelemetryOperationFailure("plugin_toggle", e, startedAt);
+        process.exitCode = 1;
       }
     });
 
@@ -2536,6 +2700,167 @@ function registerMcpCompat(program: Command, cliPath: string): void {
   registerListCommand(mcp);
 }
 
+function registerTelemetryCommands(program: Command): void {
+  const telemetry = program.command("telemetry").description("Manage anonymous analytics and error reporting");
+
+  telemetry
+    .command("status")
+    .description("Show telemetry preferences and effective status")
+    .option("--json", "Print machine-readable JSON")
+    .action((options: { json?: boolean }) => {
+      const status = getTelemetryStatus();
+      if (options.json) {
+        process.stdout.write(`${JSON.stringify(status, null, 2)}\n`);
+        return;
+      }
+      process.stdout.write(`Usage analytics: ${status.usageAnalyticsEnabled ? "enabled" : "disabled"} (${status.usageActive ? "active" : "inactive"})\n`);
+      process.stdout.write(`Error reporting: ${status.errorReportingEnabled ? "enabled" : "disabled"} (${status.errorsActive ? "active" : "inactive"})\n`);
+      process.stdout.write(`Privacy notice: ${status.noticeAcknowledgedVersion >= 1 ? "acknowledged" : "needs review"}\n`);
+      process.stdout.write(`Anonymous installation ID: ${status.installationId ? "set" : "not set"}\n`);
+      if (status.blockedReason) process.stdout.write(`Inactive reason: ${status.blockedReason}\n`);
+    });
+
+  telemetry
+    .command("enable [target]")
+    .description("Enable usage analytics, error reporting, or all telemetry")
+    .action((target?: string) => {
+      const normalized = target ?? "all";
+      if (!["usage", "errors", "all"].includes(normalized)) {
+        throw new Error("Target must be usage, errors, or all.");
+      }
+      const current = loadTelemetryPreferences();
+      const noticeWasAcknowledged = current.noticeAcknowledgedVersion >= 1;
+      acknowledgeTelemetryNotice();
+      updateTelemetryPreferences({
+        usageAnalyticsEnabled: normalized === "usage" || normalized === "all"
+          ? true
+          : noticeWasAcknowledged
+            ? current.usageAnalyticsEnabled
+            : false,
+        errorReportingEnabled: normalized === "errors" || normalized === "all"
+          ? true
+          : noticeWasAcknowledged
+            ? current.errorReportingEnabled
+            : false
+      });
+      process.stdout.write(`Telemetry enabled: ${normalized}.\n`);
+    });
+
+  telemetry
+    .command("disable [target]")
+    .description("Disable usage analytics, error reporting, or all telemetry")
+    .action(async (target?: string) => {
+      const normalized = target ?? "all";
+      if (!["usage", "errors", "all"].includes(normalized)) {
+        throw new Error("Target must be usage, errors, or all.");
+      }
+      const current = loadTelemetryPreferences();
+      updateTelemetryPreferences({
+        usageAnalyticsEnabled: normalized === "usage" || normalized === "all" ? false : current.usageAnalyticsEnabled,
+        errorReportingEnabled: normalized === "errors" || normalized === "all" ? false : current.errorReportingEnabled
+      });
+      if (normalized === "errors" || normalized === "all") {
+        await shutdownNodeErrorReporting(150);
+      }
+      process.stdout.write(`Telemetry disabled: ${normalized}.\n`);
+    });
+
+  telemetry
+    .command("reset-id")
+    .description("Reset the anonymous installation ID")
+    .action(async () => {
+      resetTelemetryInstallationId();
+      await shutdownTelemetry();
+      process.stdout.write("Anonymous installation ID reset.\n");
+    });
+}
+
+type TelemetryLaunchMode = Extract<TelemetryEvent, { name: "runtime_started" }>["properties"]["launchMode"];
+type TelemetryOperation = Extract<TelemetryEvent, { name: "operation_completed" }>["properties"]["operation"];
+
+function telemetryLaunchMode(rawArgs: string[]): TelemetryLaunchMode {
+  const known = new Set<TelemetryLaunchMode>([
+    "add", "remove", "enable", "disable", "list", "sync", "status", "doctor", "daemon", "secret",
+    "auth", "clients", "skill", "plugin-host", "proxy", "mcp", "update", "project", "plugin", "telemetry"
+  ]);
+  const candidate = rawArgs[0] as TelemetryLaunchMode | undefined;
+  return candidate && known.has(candidate) ? candidate : "other";
+}
+
+function telemetryOperation(rawArgs: string[]): Extract<TelemetryEvent, { name: "operation_completed" }>['properties']['operation'] | null {
+  const [group, action] = rawArgs;
+  if (group === "add" || (group === "mcp" && action === "add")) return "server_add";
+  if (group === "remove" || (group === "mcp" && action === "remove")) return "server_remove";
+  if (group === "enable" || group === "disable" || (group === "mcp" && (action === "enable" || action === "disable"))) return "server_toggle";
+  if (group === "sync" || (group === "mcp" && action === "sync")) return "client_sync";
+  if (group === "auth" && action === "login") return "auth_login";
+  if (group === "auth" && action === "logout") return "auth_logout";
+  if (group === "daemon" && (action === "start" || action === "stop" || action === "restart")) return `daemon_${action}` as "daemon_start" | "daemon_stop" | "daemon_restart";
+  if (group === "update" && (action === "check" || action === "install" || action === "rollback")) return `update_${action}` as "update_check" | "update_install" | "update_rollback";
+  if (group === "project" && (action === "init" || action === "remove")) return `project_${action}` as "project_init" | "project_remove";
+  if (group === "skill" && (action === "add" || action === "rm")) return action === "add" ? "skill_add" : "skill_remove";
+  if (group === "plugin" && (action === "install" || action === "update" || action === "uninstall")) return `plugin_${action}` as "plugin_install" | "plugin_update" | "plugin_uninstall";
+  if (group === "plugin" && (action === "enable" || action === "disable")) return "plugin_toggle";
+  if (group === "plugin" && action === "marketplace" && (rawArgs[2] === "add" || rawArgs[2] === "update" || rawArgs[2] === "remove")) {
+    return rawArgs[2] === "update" ? "marketplace_refresh" : `marketplace_${rawArgs[2]}` as "marketplace_add" | "marketplace_remove";
+  }
+  return null;
+}
+
+function telemetryErrorCode(error: unknown): string {
+  const candidate = error && typeof error === "object" && "code" in error
+    ? (error as { code?: unknown }).code
+    : undefined;
+  if (typeof candidate === "string" && [
+    "auth_required", "auth_expired", "auth_cancelled", "daemon_restart_failed", "invalid_pid",
+    "pid_not_found", "rollback_failed", "secret_missing", "sync_error", "timeout", "unreachable",
+    "upstream_error", "unexpected_error", "update_check_failed", "update_check_timeout", "update_failed",
+    "validation_error"
+  ].includes(candidate)) {
+    return candidate;
+  }
+  if (error instanceof Error && error.name === "OAuthCancelledError") return "auth_cancelled";
+  if (error instanceof Error && (error.name === "ZodError" || error.name === "ValidationError")) return "validation_error";
+  if (error instanceof Error && error.name === "SecretNotFoundError") return "secret_missing";
+  return "unexpected_error";
+}
+
+function recordTelemetryOperationFailure(operation: TelemetryOperation, error: unknown, startedAt: number): void {
+  captureTelemetryEvent({
+    name: "operation_completed",
+    properties: {
+      operation,
+      outcome: "failure",
+      errorCode: telemetryErrorCode(error),
+      durationBucket: durationBucket(Date.now() - startedAt)
+    }
+  });
+}
+
+function shouldShowTelemetryNotice(rawArgs: string[]): boolean {
+  const explicitlyEnablingTelemetry = rawArgs[0] === "telemetry" && rawArgs[1] === "enable";
+  return !rawArgs.includes("--json")
+    && (rawArgs[0] !== "telemetry" || explicitlyEnablingTelemetry)
+    && Boolean(process.stdin.isTTY && process.stderr.isTTY);
+}
+
+function showCliTelemetryNotice(rawArgs: string[]): void {
+  const status = getTelemetryStatus();
+  if (status.noticeAcknowledgedVersion >= 1 || status.blockedReason === "environment" || !shouldShowTelemetryNotice(rawArgs)) {
+    return;
+  }
+  process.stderr.write("mcpx collects anonymous usage analytics and crash diagnostics to improve reliability.\n");
+  process.stderr.write("It does not collect server names, prompts, results, URLs, paths, secrets, or raw error messages. Native crash dumps may contain process-memory fragments.\n");
+  process.stderr.write("Change this any time with `mcpx telemetry status`, `mcpx telemetry disable`, or `mcpx telemetry reset-id`.\n\n");
+  if (!(rawArgs[0] === "telemetry" && rawArgs[1] === "enable")) {
+    try {
+      acknowledgeTelemetryNotice();
+    } catch {
+      // A read-only config directory must not change the command's outcome.
+    }
+  }
+}
+
 export async function runCli(argv = process.argv): Promise<void> {
   if (process.env.MCPX_UPDATE_CHILD === "1") {
     await runBackgroundUpdate();
@@ -2543,7 +2868,29 @@ export async function runCli(argv = process.argv): Promise<void> {
   }
 
   const rawArgs = argv.slice(2);
+  const startedAt = Date.now();
   const isUpdateCommand = rawArgs[0] === "update";
+
+  const runtime: TelemetryRuntime = rawArgs[0] === "daemon" && rawArgs[1] === "run" ? "daemon" : "cli";
+  showCliTelemetryNotice(rawArgs);
+  const release = process.env.MCPX_SENTRY_RELEASE || APP_VERSION;
+  const telemetryVersion = release.startsWith("mcpx@") ? release.slice("mcpx@".length) : APP_VERSION;
+  initializeTelemetry(runtime, {
+    release,
+    platform: process.platform,
+    architecture: process.arch
+  });
+  initializeNodeErrorReporting(runtime, release);
+  captureTelemetryEvent({
+    name: "runtime_started",
+    properties: {
+      runtime,
+      version: telemetryVersion,
+      osFamily: platformFamily(),
+      architecture: architecture(),
+      launchMode: telemetryLaunchMode(rawArgs)
+    }
+  });
 
   if (!isUpdateCommand) {
     const stagedCliPath = getStagedCliPath();
@@ -2576,7 +2923,9 @@ export async function runCli(argv = process.argv): Promise<void> {
     // If unsupported client detected, show error and exit
     if (compat.error && compat.client !== null) {
       process.stderr.write(`Error: ${compat.error}\n`);
-      process.exit(1);
+      recordTelemetryOperationFailure("server_add", { code: "validation_error" }, startedAt);
+      process.exitCode = 1;
+      return;
     }
 
     // If valid compatibility command, normalize and inject into add flow
@@ -2611,8 +2960,28 @@ export async function runCli(argv = process.argv): Promise<void> {
   registerUpdateCommand(program);
   registerProjectCommands(program, cliPath);
   registerPluginCommands(program, cliPath);
+  registerTelemetryCommands(program);
 
-  await program.parseAsync(argv);
+  try {
+    await program.parseAsync(argv);
+  } catch (error) {
+    const operation = telemetryOperation(rawArgs);
+    if (operation) {
+      captureTelemetryEvent({
+        name: "operation_completed",
+        properties: { operation, outcome: "failure", errorCode: telemetryErrorCode(error), durationBucket: durationBucket(Date.now() - startedAt) }
+      });
+    }
+    reportTelemetryError(error, {
+      runtime,
+      operation: operation ?? undefined,
+      code: telemetryErrorCode(error)
+    });
+    throw error;
+  } finally {
+    await flushTelemetry(150);
+    await flushNodeErrorReporting(150);
+  }
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(fs.realpathSync(process.argv[1])).href) {
