@@ -37,7 +37,7 @@ Download the latest release from [GitHub Releases](https://github.com/kwonye/mcp
 
 ### Install from source
 
-Prerequisites: [Bun](https://bun.sh) >= 1.2
+Prerequisites: [Bun](https://bun.sh) >= 1.4.0
 
 **macOS:**
 ```bash

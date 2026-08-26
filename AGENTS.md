@@ -108,7 +108,7 @@ The desktop app is tightly integrated with the CLI's core logic. It does not use
 ## Building and Running
 
 ### Prerequisites
-- Bun >= 1.2 (https://bun.sh)
+- Bun >= 1.4.0 (https://bun.sh)
 - macOS (required for desktop app features)
 
 Note: the tray/app icon generation scripts (`generate-status-icons.js`, `generate-app-icons.sh`) have been removed. The committed PNGs in `app/resources/` and `app/build/icons/` are the source of truth.

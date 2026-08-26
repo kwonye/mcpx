@@ -24,6 +24,7 @@
   "license": "MIT",
   "author": "Will Kwon",
   "type": "module",
+  "packageManager": "bun@1.4.0",
   "main": "index.js",
   "exports": {
     ".": "./dist/cli.js",

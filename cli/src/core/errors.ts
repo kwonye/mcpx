@@ -46,7 +46,7 @@ const UNREACHABLE_PATTERNS = [
 ];
 // Bun's native fetch reports connection-level failures with a string `code`
 // instead of a Node-style message; "ConnectionRefused" covers both refused
-// connections and DNS failures (verified on Bun 1.3).
+// connections and DNS failures (verified on Bun 1.4.0).
 const UNREACHABLE_ERROR_CODES = new Set(["ConnectionRefused"]);
 
 export function classifyUpstreamError(
