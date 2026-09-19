@@ -109,6 +109,8 @@ const managedPluginSchema = z.object({
     sourceFingerprint: z.string(),
   }).optional(),
   updateError: z.string().optional(),
+  pinned: z.boolean().default(false),
+  previous: z.object({ version: z.string(), resolvedSha: z.string(), root: z.string() }).optional(),
   projectOverrides: z.record(z.string(), z.object({
     enabled: z.boolean().optional(),
     components: z.record(pluginComponentSchema, z.boolean()).optional(),

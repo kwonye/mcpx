@@ -20,6 +20,14 @@ import {
   getSkill,
   saveSkill,
   deleteSkill,
+  installSkillFromSource,
+  customizeSkill,
+  pinSkill,
+  unpinSkill,
+  updateSkill,
+  rollbackSkill,
+  exportEnvironment,
+  importEnvironment,
   SecretsManager,
   buildStatusReport,
   loadManagedIndex,
@@ -746,6 +754,48 @@ export function registerIpcHandlers(): void {
     return { id, success: true };
   });
 
+  ipcMain.handle(IPC.INSTALL_SKILL, async (_event, source: string, skill?: string) => {
+    const installed = await installSkillFromSource(source, skill);
+    const summary = syncAllClients(loadConfig(), new SecretsManager());
+    await mutateConfig((freshConfig) => persistSyncState(summary, freshConfig));
+    return installed;
+  });
+
+  ipcMain.handle(IPC.CUSTOMIZE_SKILL, async (_event, id: string, name?: string) => {
+    const customized = customizeSkill(id, name);
+    const summary = syncAllClients(loadConfig(), new SecretsManager());
+    await mutateConfig((freshConfig) => persistSyncState(summary, freshConfig));
+    return customized;
+  });
+
+  ipcMain.handle(IPC.PIN_SKILL, (_event, id: string) => { pinSkill(id); return { id, success: true }; });
+  ipcMain.handle(IPC.UNPIN_SKILL, (_event, id: string) => { unpinSkill(id); return { id, success: true }; });
+  ipcMain.handle(IPC.UPDATE_SKILL, async (_event, id: string) => {
+    const result = await updateSkill(id);
+    const summary = syncAllClients(loadConfig(), new SecretsManager());
+    await mutateConfig((freshConfig) => persistSyncState(summary, freshConfig));
+    return result;
+  });
+  ipcMain.handle(IPC.ROLLBACK_SKILL, async (_event, id: string) => {
+    const result = rollbackSkill(id);
+    const summary = syncAllClients(loadConfig(), new SecretsManager());
+    await mutateConfig((freshConfig) => persistSyncState(summary, freshConfig));
+    return result;
+  });
+
+  ipcMain.handle(IPC.SHARE_EXPORT, (_event, directory: string, options?: { skills?: string[]; plugins?: string[] }) => {
+    return exportEnvironment(directory, options);
+  });
+
+  ipcMain.handle(IPC.SHARE_IMPORT, async (_event, directory: string, options?: { locked?: boolean; dryRun?: boolean; inputs?: Record<string, string> }) => {
+    const result = await importEnvironment(directory, options);
+    if (!options?.dryRun) {
+      const summary = syncAllClients(loadConfig(), new SecretsManager());
+      await mutateConfig((freshConfig) => persistSyncState(summary, freshConfig));
+    }
+    return result;
+  });
+
   // Plugin Management
   ipcMain.handle(IPC.PLUGIN_INSPECT, async (_event, source: string) => {
     const { inspectPlugin } = await import("@mcpx/core");
@@ -766,6 +816,21 @@ export function registerIpcHandlers(): void {
   registerTelemetryHandler(IPC.PLUGIN_UPDATE, "plugin_update", async (_event, name: string) => {
     const { updatePlugin } = await import("@mcpx/core");
     return updatePlugin(name);
+  });
+
+  ipcMain.handle(IPC.PLUGIN_PIN, async (_event, name: string) => {
+    const { pinPlugin } = await import("@mcpx/core");
+    await pinPlugin(name);
+    return { name, success: true };
+  });
+  ipcMain.handle(IPC.PLUGIN_UNPIN, async (_event, name: string) => {
+    const { unpinPlugin } = await import("@mcpx/core");
+    await unpinPlugin(name);
+    return { name, success: true };
+  });
+  ipcMain.handle(IPC.PLUGIN_ROLLBACK, async (_event, name: string) => {
+    const { rollbackPlugin } = await import("@mcpx/core");
+    return rollbackPlugin(name);
   });
 
   registerTelemetryHandler(IPC.PLUGIN_UNINSTALL, "plugin_uninstall", async (_event, name: string, options?: unknown) => {

@@ -32,7 +32,9 @@ function loadOwnership(targetDir: string): OwnershipManifest {
   }
   try {
     const parsed = ownershipSchema.safeParse(JSON.parse(fs.readFileSync(manifestPath, "utf8")));
-    if (parsed.success) return parsed.data;
+    if (parsed.success) {
+      return { ...parsed.data, paths: parsed.data.paths.map((ownedPath) => ownedPath.endsWith("/SKILL.md") ? path.dirname(ownedPath) : ownedPath) };
+    }
   } catch {
     console.error(`[mcpx] Warning: corrupt ownership manifest at ${manifestPath}, resetting`);
     return { version: 1, paths: [] };
@@ -50,7 +52,7 @@ function saveOwnership(targetDir: string, manifest: OwnershipManifest): void {
 
 export function projectSkillsToDir(targetDir: string, skills: Skill[], layout: "dir" | "flat"): void {
   const owned = loadOwnership(targetDir);
-  const newPaths = new Set(skills.map(s => layout === "dir" ? `${s.id}/SKILL.md` : `${s.id}.md`));
+  const newPaths = new Set(skills.map(s => layout === "dir" ? s.id : `${s.id}.md`));
 
   for (const ownedPath of owned.paths) {
     if (!newPaths.has(ownedPath)) {
@@ -80,12 +82,34 @@ export function projectSkillsToDir(targetDir: string, skills: Skill[], layout: "
 
   for (const skill of skills) {
     validateSkillId(skill.id);
-    const filePath = layout === "dir"
-      ? path.join(targetDir, skill.id, "SKILL.md")
-      : path.join(targetDir, `${skill.id}.md`);
-    assertWithinBase(targetDir, filePath);
-    ensureDir(path.dirname(filePath));
-    fs.writeFileSync(filePath, skill.content, "utf-8");
+    const ownedTarget = layout === "dir" ? skill.id : `${skill.id}.md`;
+    if ((fs.existsSync(path.join(targetDir, ownedTarget)) || (() => { try { fs.lstatSync(path.join(targetDir, ownedTarget)); return true; } catch { return false; } })()) && !owned.paths.includes(ownedTarget)) {
+      console.error(`[mcpx] Warning: preserving unowned skill projection: ${path.join(targetDir, ownedTarget)}`);
+      continue;
+    }
+    if (layout === "dir" && skill.root && fs.existsSync(skill.root)) {
+      const targetPath = path.join(targetDir, skill.id);
+      assertWithinBase(targetDir, targetPath);
+      if (path.resolve(targetPath) !== path.resolve(skill.root)) {
+        if (fs.existsSync(targetPath) || (() => { try { fs.lstatSync(targetPath); return true; } catch { return false; } })()) {
+          fs.rmSync(targetPath, { recursive: true, force: true });
+        }
+        ensureDir(path.dirname(targetPath));
+        const relativeTarget = path.relative(path.dirname(targetPath), path.resolve(skill.root));
+        try {
+          fs.symlinkSync(relativeTarget, targetPath, process.platform === "win32" ? "junction" : "dir");
+        } catch {
+          fs.cpSync(skill.root, targetPath, { recursive: true, dereference: true });
+        }
+      }
+    } else {
+      const filePath = layout === "dir"
+        ? path.join(targetDir, skill.id, "SKILL.md")
+        : path.join(targetDir, `${skill.id}.md`);
+      assertWithinBase(targetDir, filePath);
+      ensureDir(path.dirname(filePath));
+      fs.writeFileSync(filePath, skill.content, "utf-8");
+    }
   }
 
   saveOwnership(targetDir, { version: 1, paths: Array.from(newPaths) });

@@ -533,6 +533,7 @@ export async function installMarketplacePlugin(id: string): Promise<import("../t
 export async function updateMarketplaceInstalledPlugin(pluginId: string, sync = true): Promise<import("../types.js").ManagedPlugin> {
   const plugin = loadConfig().plugins?.[pluginId];
   if (!plugin?.marketplace) throw new Error(`Plugin ${pluginId} is not marketplace-managed`);
+  if (plugin.pinned) throw new Error(`Plugin ${pluginId} is pinned; unpin it before updating`);
   const qualified = `${plugin.marketplace.pluginName}@${plugin.marketplace.name}`;
   try {
     const detail = await inspectMarketplacePlugin(qualified);

@@ -110,6 +110,12 @@ This produces an NSIS installer and portable `.exe` in `app/dist/`.
 
 ![Skills](docs/images/mcpx-skills.png)
 
+Skills are stored as complete Agent Skill directories (`SKILL.md`, optional
+`scripts/`, `references/`, and `assets/`). Directory-based clients receive a
+link to the managed source when supported; flat clients receive a Markdown
+projection. Installed skills are immutable until copied with `mcpx skill
+customize`.
+
 **Settings tab** — App configuration:
 
 ![Settings](docs/images/mcpx-settings.png)
@@ -276,6 +282,20 @@ mcpx sync --client claude --client codex
 mcpx plugin inspect ./my-plugin
 mcpx plugin install owner/my-plugin
 mcpx plugin marketplace list
+mcpx plugin pin my-plugin
+mcpx plugin rollback my-plugin
+
+### Portable environments
+
+Export a Git-friendly folder containing a manifest, lockfile, and package
+content. Credentials are represented as recipient inputs or secret references;
+they are never copied into the export by default.
+
+```bash
+mcpx share export ./shared-environment
+mcpx share import ./shared-environment --dry-run --locked
+mcpx share import ./shared-environment --locked --input server.docs.header.X-Team=team-a
+```
 ```
 
 ### Config/data/state path overrides

@@ -187,6 +187,7 @@ export class PluginManager {
   async updatePlugin(pluginId: string): Promise<ManagedPlugin> {
     const current = loadConfig(this.configPath).plugins?.[pluginId];
     if (!current) throw new Error(`Plugin ${pluginId} not found`);
+    if (current.pinned) throw new Error(`Plugin ${pluginId} is pinned; unpin it before updating`);
     const info = await this.inspectSource(current.source);
     return this.applyPluginUpdate(pluginId, info, undefined, true);
   }
@@ -196,7 +197,7 @@ export class PluginManager {
     return this.applyPluginUpdate(pluginId, info, sourceFingerprint, sync);
   }
 
-  private async applyPluginUpdate(
+  async applyPluginUpdate(
     pluginId: string,
     info: Awaited<ReturnType<PluginManager["inspectSource"]>>,
     sourceFingerprint?: string,
@@ -219,6 +220,7 @@ export class PluginManager {
       }
 
       // Update plugin record
+      current.previous = { version: current.version, resolvedSha: current.resolvedSha, root: current.root };
       current.version = info.manifest?.version || current.version;
       current.resolvedSha = info.sha;
       current.root = info.root;
@@ -405,11 +407,42 @@ export async function updatePlugin(nameOrId: string): Promise<ManagedPlugin> {
   const manager = new PluginManager();
   const config = loadConfig(manager["configPath"]);
   const id = resolvePluginId(config, nameOrId);
+  if (config.plugins?.[id]?.pinned) throw new Error(`Plugin ${nameOrId} is pinned; unpin it before updating`);
   if (config.plugins?.[id]?.marketplace) {
     const { updateMarketplaceInstalledPlugin } = await import("./marketplace.js");
     return updateMarketplaceInstalledPlugin(id);
   }
   return manager.updatePlugin(id);
+}
+
+export async function pinPlugin(nameOrId: string): Promise<void> {
+  await mutateConfig((config) => {
+    const id = resolvePluginId(config, nameOrId);
+    const plugin = config.plugins?.[id];
+    if (!plugin) throw new Error(`Plugin ${nameOrId} not found`);
+    plugin.pinned = true;
+  });
+}
+
+export async function unpinPlugin(nameOrId: string): Promise<void> {
+  await mutateConfig((config) => {
+    const id = resolvePluginId(config, nameOrId);
+    const plugin = config.plugins?.[id];
+    if (!plugin) throw new Error(`Plugin ${nameOrId} not found`);
+    plugin.pinned = false;
+  });
+}
+
+export async function rollbackPlugin(nameOrId: string): Promise<ManagedPlugin> {
+  const manager = new PluginManager();
+  const config = loadConfig(manager["configPath"]);
+  const id = resolvePluginId(config, nameOrId);
+  const current = config.plugins?.[id];
+  if (!current?.previous) throw new Error(`Plugin ${nameOrId} has no previous revision`);
+  const source = parseSource(current.source);
+  source.resolvedSha = current.previous.resolvedSha;
+  const info = await manager.inspectResolvedSource(source, current.source);
+  return manager["applyPluginUpdate"](id, info, undefined, true);
 }
 
 export async function uninstallPlugin(nameOrId: string, keepData?: boolean): Promise<void> {

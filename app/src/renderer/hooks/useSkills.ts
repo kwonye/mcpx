@@ -47,5 +47,20 @@ export function useSkills() {
     }
   };
 
-  return { skills, loading, error, refresh, saveSkill, deleteSkill };
+  const customizeSkill = async (id: string, name?: string) => {
+    try { await window.mcpx.skills.customize(id, name); await refresh(); return true; }
+    catch (e) { setError(e instanceof Error ? e.message : String(e)); return false; }
+  };
+
+  const updateSkill = async (id: string) => {
+    try { await window.mcpx.skills.update(id); await refresh(); return true; }
+    catch (e) { setError(e instanceof Error ? e.message : String(e)); return false; }
+  };
+
+  const rollbackSkill = async (id: string) => {
+    try { await window.mcpx.skills.rollback(id); await refresh(); return true; }
+    catch (e) { setError(e instanceof Error ? e.message : String(e)); return false; }
+  };
+
+  return { skills, loading, error, refresh, saveSkill, deleteSkill, customizeSkill, updateSkill, rollbackSkill };
 }

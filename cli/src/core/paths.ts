@@ -40,6 +40,14 @@ export function getSkillsDir(): string {
   return path.join(getConfigRoot(), "mcpx", "skills");
 }
 
+export function getSkillPackagesRoot(): string {
+  return path.join(getDataRoot(), "mcpx", "skills", "packages");
+}
+
+export function getSkillStatePath(): string {
+  return path.join(getDataRoot(), "mcpx", "skills", "state.json");
+}
+
 export function getManagedIndexPath(): string {
   return path.join(getDataRoot(), "mcpx", "managed-index.json");
 }

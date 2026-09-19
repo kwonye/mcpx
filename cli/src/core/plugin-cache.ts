@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import crypto from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { getPluginCacheRoot, ensureDir } from "./paths.js";
@@ -75,7 +76,12 @@ export class PluginCache {
     }
 
     if (source.type === "npm") {
-      throw new Error("npm source SHA resolution not yet implemented");
+      const pkg = source.original.replace(/^npm:/, "");
+      const spec = source.ref ? `${pkg}@${source.ref}` : pkg;
+      const { stdout } = await execFileAsync("npm", ["view", spec, "version", "dist.integrity", "--json"], { timeout: 30000 });
+      const metadata = JSON.parse(stdout) as { version?: string; dist?: { integrity?: string }; "dist.integrity"?: string };
+      if (!metadata.version) throw new Error(`Could not resolve npm package ${spec}`);
+      return `npm-${metadata.version}-${metadata.dist?.integrity ?? metadata["dist.integrity"] ?? "unverified"}`;
     }
 
     throw new Error(`Cannot resolve SHA for source type: ${source.type}`);
@@ -162,7 +168,26 @@ export class PluginCache {
     }
 
     if (source.type === "npm") {
-      throw new Error("npm source fetch not yet implemented");
+      const pkg = source.original.replace(/^npm:/, "");
+      const spec = source.ref ? `${pkg}@${source.ref}` : pkg;
+      const tmpDir = fs.mkdtempSync(path.join(this.cacheRoot, TMP_PREFIX));
+      try {
+        const { stdout } = await execFileAsync("npm", ["pack", spec, "--ignore-scripts", "--json", "--pack-destination", tmpDir], { timeout: 120000 });
+        const packed = JSON.parse(stdout) as Array<{ filename?: string; version?: string; integrity?: string }>;
+        const filename = packed[0]?.filename;
+        if (!filename) throw new Error(`npm did not produce an archive for ${spec}`);
+        const archive = path.join(tmpDir, filename);
+        const actualSha = `npm-${packed[0]?.version ?? source.ref ?? "latest"}-${crypto.createHash("sha256").update(fs.readFileSync(archive)).digest("hex")}`;
+        const finalDest = this.shaDir(srcDir, actualSha);
+        if (!fs.existsSync(finalDest)) {
+          ensureDir(finalDest);
+          await execFileAsync("tar", ["-xzf", archive, "--strip-components=1", "-C", finalDest], { timeout: 30000 });
+        }
+        this.updateRef(srcDir, actualSha);
+        return { source: source.original, name: pluginName, sha: actualSha, root: finalDest };
+      } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      }
     }
 
     throw new Error(`Cannot fetch source type: ${source.type}`);
@@ -234,7 +259,6 @@ export class PluginCache {
 
 function computeTreeHash(dir: string): string {
   const entries = fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name));
-  const crypto = require("node:crypto");
   const hash = crypto.createHash("sha256");
   for (const entry of entries) {
     if (entry.name.startsWith(".git")) continue;

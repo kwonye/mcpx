@@ -3,13 +3,14 @@ import { useSkills } from "../hooks/useSkills";
 import { ConfirmDialog } from "./ConfirmDialog";
 
 export function SkillsTab() {
-  const { skills, loading, error, saveSkill, deleteSkill } = useSkills();
+  const { skills, loading, error, refresh, saveSkill, deleteSkill, customizeSkill, updateSkill, rollbackSkill } = useSkills();
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [selectedSkillId, setSelectedSkillId] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
   const [newSkillName, setNewSkillName] = useState("");
   const [content, setContent] = useState("");
   const [saving, setSaving] = useState(false);
+  const [shareMessage, setShareMessage] = useState<string | null>(null);
   const lastSelectedId = useRef<string | null>(null);
 
   const selectedSkill = skills.find(s => s.id === selectedSkillId);
@@ -34,7 +35,7 @@ export function SkillsTab() {
     if (skills.some((skill) => skill.id === id)) {
       return;
     }
-    const success = await saveSkill(id, `# ${newSkillName}\n\nAdd your instructions here.`);
+    const success = await saveSkill(id, `---\nname: ${id}\ndescription: Instructions for using ${id}.\n---\n\nAdd your instructions here.`);
     if (success) {
       setNewSkillName("");
       setIsCreating(false);
@@ -45,7 +46,7 @@ export function SkillsTab() {
   const handleSave = async () => {
     if (!selectedSkill) return;
     setSaving(true);
-    await saveSkill(selectedSkill.id, content);
+    if (!selectedSkill.readOnly) await saveSkill(selectedSkill.id, content);
     setSaving(false);
   };
 
@@ -63,6 +64,25 @@ export function SkillsTab() {
     }
   };
 
+  const handleExport = async () => {
+    const directory = await window.mcpx.selectDirectory();
+    if (!directory) return;
+    try {
+      const result = await window.mcpx.share.export(directory);
+      setShareMessage(`Exported ${result.environment.skills.length} skill(s) and ${result.environment.plugins.length} plugin(s).`);
+    } catch (e) { setShareMessage(e instanceof Error ? e.message : String(e)); }
+  };
+
+  const handleImport = async () => {
+    const directory = await window.mcpx.selectDirectory();
+    if (!directory) return;
+    try {
+      const result = await window.mcpx.share.import(directory, { locked: true });
+      setShareMessage(`Imported ${result.importedSkills.length} skill(s), ${result.importedServers.length} server(s), and ${result.missingInputs.length} pending input(s).`);
+      await refresh();
+    } catch (e) { setShareMessage(e instanceof Error ? e.message : String(e)); }
+  };
+
   if (loading) {
     return <div className="loading-state">Loading skills...</div>;
   }
@@ -71,6 +91,10 @@ export function SkillsTab() {
     <><div className="skills-tab">
       <div className="page-header page-header--split">
         <h1 className="page-title">Shared Skills</h1>
+        <div className="skill-editor-actions">
+          <button className="btn btn-secondary btn-sm" onClick={() => void handleImport()}>Import</button>
+          <button className="btn btn-secondary btn-sm" onClick={() => void handleExport()}>Export</button>
+        </div>
         <button
           className="action-button action-button--primary"
           onClick={() => setIsCreating(true)}
@@ -96,6 +120,7 @@ export function SkillsTab() {
       )}
 
       {error && <div className="error-panel">{error}</div>}
+      {shareMessage && <div className="feedback-message">{shareMessage}</div>}
 
       <div className="skills-layout">
         <div className="skills-list">
@@ -123,6 +148,9 @@ export function SkillsTab() {
               <div className="skill-editor-header">
                 <h2>{selectedSkill.id}</h2>
                 <div className="skill-editor-actions">
+                  {selectedSkill.readOnly && <button className="btn btn-secondary btn-sm" onClick={() => void customizeSkill(selectedSkill.id)}>Customize</button>}
+                  {selectedSkill.readOnly && <button className="btn btn-secondary btn-sm" onClick={() => void updateSkill(selectedSkill.id)}>Update</button>}
+                  {selectedSkill.readOnly && <button className="btn btn-secondary btn-sm" onClick={() => void rollbackSkill(selectedSkill.id)}>Rollback</button>}
                   <button className="btn btn-secondary btn-sm" onClick={() => handleDelete(selectedSkill.id)}>
                     <span className="material-symbols-outlined font-icon-sm">delete</span>
                     Delete
@@ -136,6 +164,7 @@ export function SkillsTab() {
                 className="skill-textarea"
                 value={content}
                 onChange={(e) => setContent(e.target.value)}
+                readOnly={selectedSkill.readOnly}
                 placeholder="Enter skill instructions..."
               />
             </>

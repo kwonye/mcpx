@@ -140,8 +140,12 @@ export interface SyncResult {
 }
 
 export interface Skill {
-  id: string; // The filename without .md
+  id: string;
   content: string;
+  /** Canonical directory containing SKILL.md and optional resources. */
+  root?: string;
+  source?: "authored" | "installed";
+  readOnly?: boolean;
 }
 
 export interface PluginSyncInput {
@@ -361,6 +365,8 @@ export interface ManagedPlugin {
     sourceFingerprint: string;
   };
   updateError?: string;
+  pinned?: boolean;
+  previous?: { version: string; resolvedSha: string; root: string };
   projectOverrides?: Record<string, {
     enabled?: boolean;
     components?: Partial<Record<PluginComponent, boolean>>;

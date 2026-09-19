@@ -575,6 +575,30 @@ function copyPluginDir(src: string, dest: string, exclude: string[] = [], errors
 
 function copyFileOrDir(src: string, dest: string, errors?: string[]): void {
   try {
+    // Agent Skills are directories, even when discovery reports their
+    // SKILL.md path. Preserve scripts/, references/, and assets/ and expose
+    // the immutable plugin snapshot through a link when the platform allows it.
+    if (path.basename(src).toLowerCase() === "skill.md") {
+      const sourceRoot = path.dirname(src);
+      const targetRoot = path.dirname(dest);
+      ensureDir(path.dirname(targetRoot));
+      if (fs.existsSync(targetRoot)) {
+        const stat = fs.lstatSync(targetRoot);
+        if (stat.isSymbolicLink()) fs.rmSync(targetRoot, { force: true });
+        else if (stat.isDirectory() && fs.readdirSync(targetRoot).length === 0) fs.rmSync(targetRoot, { recursive: true, force: true });
+      }
+      if (!fs.existsSync(targetRoot)) {
+        const relativeTarget = path.relative(path.dirname(targetRoot), path.resolve(sourceRoot));
+        try {
+          fs.symlinkSync(relativeTarget, targetRoot, process.platform === "win32" ? "junction" : "dir");
+        } catch {
+          fs.cpSync(sourceRoot, targetRoot, { recursive: true, dereference: true });
+        }
+      } else {
+        fs.cpSync(sourceRoot, targetRoot, { recursive: true, dereference: true });
+      }
+      return;
+    }
     ensureDir(path.dirname(dest));
     if (fs.statSync(src).isDirectory()) {
       copyPluginDir(src, dest, [], errors);

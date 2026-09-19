@@ -75,7 +75,9 @@ export type { SyncSummary } from "./sync.js";
 export { addServer, removeServer, updateServer, setServerEnabled, setProjectServerEnabled, registerProject, unregisterProject, ensureGatewayToken, rotateGatewayToken } from "./registry.js";
 
 // Skills
-export { listSkills, getSkill, saveSkill, deleteSkill } from "./skills.js";
+export { listSkills, getSkill, saveSkill, deleteSkill, customizeSkill, installSkillFromSource, validateSkillPackage, pinSkill, unpinSkill, updateSkill, rollbackSkill } from "./skills.js";
+export { exportEnvironment, importEnvironment } from "./share.js";
+export type { ShareEnvironment, ShareLock } from "./share.js";
 
 // Secrets
 export { SecretsManager } from "./secrets.js";
@@ -126,10 +128,10 @@ export {
 export { startMarketplaceAutoUpdater, runMarketplaceAutoUpdate } from "./marketplace-updater.js";
 
 // Plugin management functions
-export { inspectPlugin, installPlugin, preparePlugin, updatePlugin, uninstallPlugin, enablePlugin, disablePlugin, setPluginProjectOverride, resetPluginProjectOverride, approvePluginComponent, getPluginStatus, listPlugins, pluginConfigSet, pluginSync, resolvePluginId } from "./plugin-manager.js";
+export { inspectPlugin, installPlugin, preparePlugin, updatePlugin, pinPlugin, unpinPlugin, rollbackPlugin, uninstallPlugin, enablePlugin, disablePlugin, setPluginProjectOverride, resetPluginProjectOverride, approvePluginComponent, getPluginStatus, listPlugins, pluginConfigSet, pluginSync, resolvePluginId } from "./plugin-manager.js";
 
 // Paths
-export { getConfigPath, getManagedIndexPath, getTelemetryPath } from "./paths.js";
+export { getConfigPath, getManagedIndexPath, getTelemetryPath, getSkillsDir, getSkillPackagesRoot } from "./paths.js";
 
 // Update
 export { checkForUpdates, getStagedUpdate, getStagedCliPath, clearStagedUpdate, compareVersions, shouldUseStagedCli } from "./update.js";

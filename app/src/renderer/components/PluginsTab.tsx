@@ -179,6 +179,24 @@ export function PluginsTab() {
     }
   }
 
+  async function togglePin(plugin: ManagedPlugin) {
+    try {
+      await (plugin.pinned ? window.mcpx.plugins.unpin(plugin.id) : window.mcpx.plugins.pin(plugin.id));
+      await loadPlugins();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    }
+  }
+
+  async function rollback(plugin: ManagedPlugin) {
+    try {
+      await window.mcpx.plugins.rollback(plugin.id);
+      await loadPlugins();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    }
+  }
+
   async function addMarketplace(event: React.FormEvent) {
     event.preventDefault();
     if (!marketplaceInput.trim()) return;
@@ -343,7 +361,7 @@ export function PluginsTab() {
                 {expanded.has(plugin.id) && <div className="plugin-card__detail">
                    <div className="plugin-card__components">{Object.entries(plugin.components).filter(([, enabled]) => enabled).map(([key]) => { const needsApproval = gatedComponents.includes(key as typeof gatedComponents[number]) && (plugin.approvals?.[key as PluginComponent] === false || (key === "hooks" && plugin.approvals?.[key as PluginComponent] !== true)); return <span key={key} className="plugin-component-chip">{key}{needsApproval && <button type="button" className="plugin-approve-btn" onClick={() => void approve(plugin.id, key)}>Approve</button>}</span>; })}</div>
                   {plugin.updateError && <div className="feedback-message error">Update failed: {plugin.updateError}</div>}
-                  <div className="plugin-card__footer"><button type="button" className="btn btn-sm btn-secondary" onClick={() => void update(plugin)}>Update</button><button type="button" className="btn btn-sm btn-danger" onClick={() => void uninstall(plugin)}>Uninstall</button></div>
+                  <div className="plugin-card__footer"><button type="button" className="btn btn-sm btn-secondary" onClick={() => void update(plugin)}>Update</button><button type="button" className="btn btn-sm btn-secondary" onClick={() => void togglePin(plugin)}>{plugin.pinned ? "Unpin" : "Pin"}</button>{plugin.previous && <button type="button" className="btn btn-sm btn-secondary" onClick={() => void rollback(plugin)}>Rollback</button>}<button type="button" className="btn btn-sm btn-danger" onClick={() => void uninstall(plugin)}>Uninstall</button></div>
                 </div>}
               </div>
             ))}

@@ -81,13 +81,26 @@ const api = {
     list: () => invokeIpc<Skill[]>(IPC.LIST_SKILLS),
     get: (id: string) => invokeIpc<Skill | null>(IPC.GET_SKILL, id),
     save: (id: string, content: string) => invokeIpc<{ id: string; success: true }>(IPC.SAVE_SKILL, id, content),
-    delete: (id: string) => invokeIpc<{ id: string; success: true }>(IPC.DELETE_SKILL, id)
+    delete: (id: string) => invokeIpc<{ id: string; success: true }>(IPC.DELETE_SKILL, id),
+    install: (source: string, skill?: string) => invokeIpc(IPC.INSTALL_SKILL, source, skill),
+    customize: (id: string, name?: string) => invokeIpc(IPC.CUSTOMIZE_SKILL, id, name),
+    pin: (id: string) => invokeIpc(IPC.PIN_SKILL, id),
+    unpin: (id: string) => invokeIpc(IPC.UNPIN_SKILL, id),
+    update: (id: string) => invokeIpc(IPC.UPDATE_SKILL, id),
+    rollback: (id: string) => invokeIpc(IPC.ROLLBACK_SKILL, id)
+  },
+  share: {
+    export: (directory: string, options?: unknown) => invokeIpc(IPC.SHARE_EXPORT, directory, options),
+    import: (directory: string, options?: unknown) => invokeIpc(IPC.SHARE_IMPORT, directory, options)
   },
   plugins: {
     inspect: (source: string) => invokeIpc(IPC.PLUGIN_INSPECT, source),
     install: (source: string, options?: unknown) => invokeIpc(IPC.PLUGIN_INSTALL, source, options),
     prepare: (name: string) => invokeIpc(IPC.PLUGIN_PREPARE, name),
     update: (name: string) => invokeIpc(IPC.PLUGIN_UPDATE, name),
+    pin: (name: string) => invokeIpc(IPC.PLUGIN_PIN, name),
+    unpin: (name: string) => invokeIpc(IPC.PLUGIN_UNPIN, name),
+    rollback: (name: string) => invokeIpc(IPC.PLUGIN_ROLLBACK, name),
     uninstall: (name: string, options?: unknown) => invokeIpc(IPC.PLUGIN_UNINSTALL, name, options),
     enable: (name: string) => invokeIpc(IPC.PLUGIN_ENABLE, name),
     disable: (name: string) => invokeIpc(IPC.PLUGIN_DISABLE, name),

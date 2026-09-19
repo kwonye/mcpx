@@ -93,4 +93,20 @@ describe("projectSkillsToDir", () => {
 
     env.restore();
   });
+
+  it("links complete authored skill directories and preserves supporting files", () => {
+    const env = setupTempEnv("skill-link-");
+    const source = path.join(env.root, "source-skill");
+    const targetDir = path.join(env.root, "client", "skills");
+    fs.mkdirSync(path.join(source, "references"), { recursive: true });
+    fs.writeFileSync(path.join(source, "SKILL.md"), "# Linked");
+    fs.writeFileSync(path.join(source, "references", "guide.md"), "Guide");
+
+    projectSkillsToDir(targetDir, [{ id: "linked", content: "# Linked", root: source, source: "authored" }], "dir");
+
+    const projection = path.join(targetDir, "linked");
+    expect(fs.lstatSync(projection).isSymbolicLink()).toBe(true);
+    expect(fs.readFileSync(path.join(projection, "references", "guide.md"), "utf8")).toBe("Guide");
+    env.restore();
+  });
 });

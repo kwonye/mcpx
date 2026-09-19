@@ -81,7 +81,7 @@ describe("SkillsTab", () => {
 
     expect(window.mcpx.skills.save).toHaveBeenCalledWith(
       "my-new-skill",
-      "# My New Skill\n\nAdd your instructions here."
+      "---\nname: my-new-skill\ndescription: Instructions for using my-new-skill.\n---\n\nAdd your instructions here."
     );
   });
 
