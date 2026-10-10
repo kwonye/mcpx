@@ -5,7 +5,6 @@ import {
   stopDaemon,
   getDaemonStatus,
   SecretsManager,
-  startMarketplaceAutoUpdater,
 } from "@mcpx/core";
 import { createTray, setStartDaemonHandler, setStopDaemonHandler, updateTrayForDaemonStatus } from "./tray";
 import { buildApplicationMenu } from "./menu";
@@ -218,11 +217,10 @@ async function startMainProcessImpl(): Promise<void> {
   }
 
   // Register IPC handlers
-  registerIpcHandlers();
+  registerIpcHandlers({ controlService: true });
 
   // Surface upstream call-time / re-auth errors as macOS notifications.
   startErrorNotifier();
-  startMarketplaceAutoUpdater();
 
   // Set up daemon start/stop handlers from tray
   setStartDaemonHandler(() => {

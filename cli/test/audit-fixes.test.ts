@@ -141,7 +141,7 @@ describe("PLUG-02: Projection containment checks", () => {
     }]);
 
     // The sanitized ID should be safe and stay within the base directory
-    const codexSkillsDir = path.join(env.root, ".codex", "skills");
+    const codexSkillsDir = path.join(env.root, ".agents", "skills");
     if (fs.existsSync(codexSkillsDir)) {
       const projectedPath = path.join(codexSkillsDir, maliciousSkillId);
       const resolvedBase = path.resolve(codexSkillsDir);
@@ -208,7 +208,7 @@ describe("GW-03: Managed-index locking", () => {
     saveManagedIndex({ schemaVersion: 1, managed: {} }, indexPath);
 
     // Create a stale lock file (older than 5 seconds)
-    fs.writeFileSync(lockPath, `${process.pid}\n`);
+    fs.writeFileSync(lockPath, "999999999\n");
     const oldTime = Date.now() - 10000; // 10 seconds ago
     fs.utimesSync(lockPath, oldTime / 1000, oldTime / 1000);
 
@@ -314,20 +314,16 @@ describe("SYNC-03: Drift detection", () => {
   });
 });
 
-describe("GW-05: Proxy bridge version pinning", () => {
-  it("uses APP_VERSION instead of @latest in proxy fallback", async () => {
+describe("GW-05: Claude Desktop proxy runtime", () => {
+  it("uses the installed CLI and per-consumer proxy token", async () => {
     // This test verifies the fix is in place by checking the source code
     const claudeDesktopPath = path.join(process.cwd(), "src/adapters/claude-desktop.ts");
     const source = fs.readFileSync(claudeDesktopPath, "utf8");
-    
-    // Should contain APP_VERSION import
-    expect(source).toContain("APP_VERSION");
-    
-    // Should use APP_VERSION in the fallback
-    expect(source).toContain("@kwonye/mcpx@${APP_VERSION}");
-    
-    // Should NOT contain @latest
-    expect(source).not.toContain("@kwonye/mcpx@latest");
+
+    expect(source).toContain("localCliCommand");
+    expect(source).toContain("MCPX_CLI_ENTRY");
+    expect(source).toContain("MCPX_PROXY_TOKEN");
+    expect(source).not.toContain("@kwonye/mcpx@");
   });
 });
 
@@ -441,9 +437,9 @@ describe("SYNC-01: Adapter disable/enable fixes", () => {
   });
 
   it("opencode uses enabled-only names", async () => {
-    const opencodePath = path.join(process.cwd(), "src/adapters/opencode.ts");
+    const opencodePath = path.join(process.cwd(), "src/adapters/json.ts");
     const source = fs.readFileSync(opencodePath, "utf8");
-    expect(source).toContain("enabledManagedNames");
+    expect(source).toContain("managedEntries.filter(e => e.enabled)");
   });
 
   it("kiro uses enabled-only names", async () => {

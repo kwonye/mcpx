@@ -2,6 +2,11 @@
 /**
  * mcpx CLI - HTTP-first Model Context Protocol gateway
  */
+import { controlRequest, ensureControlService } from "./core/control.js";
+import { runManagementTui } from "./core/tui.js";
+import { planSynchronization } from "./core/sync-plan.js";
+import { planAdoption, applyAdoption } from "./core/adoption.js";
+import type { AdoptionPlan } from "./core/adoption.js";
 import { Command } from "commander";
 import fs from "node:fs";
 import path from "node:path";
@@ -42,7 +47,7 @@ import {
 import { getConfigPath, getManagedIndexPath, getSecretsStorePath, findProjectConfigPath } from "./core/paths.js";
 import { exportEnvironment, importEnvironment } from "./core/share.js";
 import { loadManagedIndex } from "./core/managed-index.js";
-import { STATUS_CLIENTS, buildStatusReport, type StatusAuthBinding, type StatusReport, type StatusServerEntry } from "./core/status.js";
+import { buildStatusReport, type StatusAuthBinding, type StatusReport, type StatusServerEntry } from "./core/status.js";
 import { APP_VERSION } from "./version.js";
 import { getStagedCliPath, getStagedUpdate, clearStagedUpdate, checkForUpdates, shouldUseStagedCli } from "./core/update.js";
 import { performUpdate, performRollback, runBackgroundUpdate } from "./core/update-manager.js";
@@ -74,8 +79,9 @@ import {
   getOAuthCredentialStatus,
   type OAuthCredentialStatus
 } from "./core/oauth.js";
+import { capture, captureException, shutdown } from "./core/analytics.js";
+import { listHarnesses } from "./core/harnesses.js";
 
-const VALID_CLIENTS: ClientId[] = STATUS_CLIENTS;
 
 interface AddCommandOptions {
   transport?: string;
@@ -232,10 +238,10 @@ function parseClientList(values: string[] | undefined): ClientId[] | undefined {
 
   const normalized = values.flatMap((value) => value.split(",")).map((value) => value.trim()).filter(Boolean);
   const unique = Array.from(new Set(normalized));
-
+  const validClients = listHarnesses(loadConfig()).map(installation => installation.id);
   for (const client of unique) {
-    if (!VALID_CLIENTS.includes(client as ClientId)) {
-      throw new Error(`Unknown client: ${client}. Valid clients: ${VALID_CLIENTS.join(", ")}`);
+    if (!validClients.includes(client as ClientId)) {
+      throw new Error(`Unknown client: ${client}. Valid clients: ${validClients.join(", ")}`);
     }
   }
 
@@ -679,7 +685,7 @@ function printStatusReportText(report: StatusReport): void {
   }
 
   process.stdout.write("Client sync states:\n");
-  for (const client of STATUS_CLIENTS) {
+  for (const client of new Set([...getAdapters().map(adapter => adapter.id), ...Object.keys(report.clients)])) {
     const state = report.clients[client];
     if (!state) {
       process.stdout.write(`- ${clientStatusEmoji("SKIPPED")} ${client}: SKIPPED\n`);
@@ -1296,6 +1302,7 @@ function registerEnabledCommand(parent: Command, enabled: boolean, cliPath: stri
       }
 
       process.stdout.write(`${enabled ? "Enabled" : "Disabled"} server: ${name} (${type} config)\n`);
+      capture(enabled ? "server_enabled" : "server_disabled", { scope: type });
       process.stdout.write("Auto-syncing managed gateway entries across all supported clients...\n");
       await autoSyncManagedEntries(cliPath);
       captureTelemetryEvent({
@@ -1393,6 +1400,7 @@ function registerAddCommand(parent: Command, cliPath: string): void {
         }
 
         process.stdout.write(`Added server: ${shortName} (${spec.transport}) from registry "${registryName}"${type === "project" ? ` (project: ${projectPath})` : ""}\n`);
+        capture("server_added", { transport: spec.transport, from_registry: true, registry_name: registryName, scope: type });
         if (authSetup.deferredOAuthLogin && spec.transport === "http") {
           await runDeferredOAuthLogin(shortName, spec, secrets, configPath);
         }
@@ -1411,6 +1419,7 @@ function registerAddCommand(parent: Command, cliPath: string): void {
         }
 
         process.stdout.write(`Added server: ${parsed.name} (${parsed.spec.transport})${type === "project" ? ` (project: ${projectPath})` : ""}\n`);
+        capture("server_added", { transport: parsed.spec.transport, from_registry: false, scope: type });
         if (authSetup.deferredOAuthLogin && parsed.spec.transport === "http") {
           await runDeferredOAuthLogin(parsed.name, parsed.spec, secrets, configPath);
         }
@@ -1448,6 +1457,7 @@ function registerRemoveCommand(parent: Command, cliPath: string): void {
       }
 
       process.stdout.write(`Removed server: ${name} ${type === "project" ? `from project: ${projectPath}` : "globally"}\n`);
+      capture("server_removed", { scope: type });
       process.stdout.write("Auto-syncing managed gateway entries across all supported clients...\n");
       await autoSyncManagedEntries(cliPath);
       captureTelemetryEvent({
@@ -1540,16 +1550,23 @@ function registerSyncCommand(program: Command, cliPath: string): void {
   program
     .command("sync [clients...]")
     .option("--client <id>", "Limit sync to specific client(s), comma-separated or repeated", (value, prev: string[] = []) => [...prev, value], [])
+    .option("--dry-run", "Preview synchronization without writing native configurations")
     .option("--import", "Also scan clients for unmanaged servers and adopt them into the mcpx catalog", false)
     .option("--json", "Output JSON")
     .description("Sync gateway configuration to supported clients (e.g. `mcpx sync claude`)")
-    .action(async (clients: string[], options: { client: string[]; json?: boolean; import?: boolean }) => {
+    .action(async (clients: string[], options: { client: string[]; json?: boolean; import?: boolean; dryRun?: boolean }) => {
       const startedAt = Date.now();
-      const config = loadConfig();
+      let config = loadConfig();
       const targetClients = parseClientList([...(clients ?? []), ...(options.client ?? [])]);
+      if (options.dryRun) { process.stdout.write(JSON.stringify(planSynchronization(targetClients), null, 2) + "\n"); return; }
       const secrets = new SecretsManager();
       await ensureDaemonIfEnabled(cliPath, secrets);
-      const summary = syncAllClients(config, secrets, { targetClients, importScan: options.import ?? false });
+      if (options.import && process.env.MCPX_CONTROL_CHILD === "1") {
+        const plan = planAdoption(targetClients);
+        if (plan.items.some(item => ["import", "reuse"].includes(item.action))) await applyAdoption(plan);
+        config = loadConfig();
+      }
+      const summary = syncAllClients(config, secrets, { targetClients, importScan: options.import && process.env.MCPX_CONTROL_CHILD !== "1" });
       await mutateConfig((freshConfig) => {
         persistSyncState(summary, freshConfig);
       });
@@ -1584,7 +1601,7 @@ function registerStatusCommand(program: Command, cliPath: string): void {
 
       const interactive = (options.interactive ?? true) && process.stdin.isTTY && process.stdout.isTTY;
       if (interactive) {
-        await runInteractiveStatusMenu(cliPath);
+        await runManagementTui(cliPath);
         return;
       }
 
@@ -1677,8 +1694,8 @@ function registerDaemonCommands(program: Command): void {
   daemon
     .command("stop")
     .description("Stop background daemon")
-    .action(() => {
-      const result = stopDaemon();
+    .action(async () => {
+      const result = await stopDaemon();
       process.stdout.write(`${result.message}\n`);
     });
 
@@ -1896,6 +1913,7 @@ function registerAuthCommands(program: Command): void {
         applyAuthReference(freshSpec, target, toSecretRef(secretName));
       });
 
+      capture("auth_configured", { target_kind: target.kind });
       process.stdout.write(`Configured auth for server "${server}" via ${target.kind} "${target.key}".\n`);
       process.stdout.write(`Stored secret: ${secretName}\n`);
     });
@@ -3065,10 +3083,61 @@ export async function runCli(argv = process.argv): Promise<void> {
   registerProjectCommands(program, cliPath);
   registerPluginCommands(program, cliPath);
   registerTelemetryCommands(program);
+  program.command("tui").description("Open the integration control center").action(() => runManagementTui(cliPath));
+  program.command("harnesses").option("--json").description("Inspect harness installations and capabilities").action(async options => {
+    await ensureControlService(cliPath);
+    const snapshot = await controlRequest<any>("snapshot");
+    process.stdout.write(options.json ? JSON.stringify(snapshot.harnesses, null, 2) + "\n" : snapshot.harnesses.map((h: any) => `${h.label}  ${h.mode}  ${h.detected ? "detected" : "not detected"}  ${h.configPath ?? ""}`).join("\n") + "\n");
+  });
+  program.command("adopt").option("--dry-run", "Only preview native ownership transfers").option("--harness <id>", "Limit discovery to a harness installation").option("--apply <plan>", "Apply a previously saved JSON plan").option("--yes", "Apply supported discoveries").option("--json").description("Discover, preview, and adopt native integrations").action(async options => {
+    await ensureControlService(cliPath);
+    if (options.dryRun && (options.apply || options.yes)) throw new Error("--dry-run cannot be combined with --apply or --yes");
+    const plan = options.apply ? JSON.parse(fs.readFileSync(path.resolve(options.apply), "utf8")) : await controlRequest<AdoptionPlan>("adoption.plan", [options.harness ? [options.harness] : undefined]);
+    if (options.apply || options.yes) {
+      const result = await controlRequest("adoption.apply", [plan]);
+      process.stdout.write(JSON.stringify(result, null, 2) + "\n");
+    } else if (options.json) process.stdout.write(JSON.stringify(plan, null, 2) + "\n");
+    else {
+      for (const item of plan.items) process.stdout.write(`${item.action.padEnd(12)} ${item.harness} · ${item.kind} · ${item.name}${item.reason ? ` — ${item.reason}` : ""}\n`);
+      for (const error of plan.errors) process.stderr.write(error + "\n");
+      process.stdout.write("Review with mcpx tui, or save --json output and apply it with --apply <plan>.\n");
+    }
+  });
+  program.command("activity").option("--json").action(async options => {
+    await ensureControlService(cliPath);
+    const snapshot = await controlRequest<any>("snapshot");
+    process.stdout.write(options.json ? JSON.stringify(snapshot.operations, null, 2) + "\n" : snapshot.operations.map((op: any) => `${op.id}  ${op.phase}  ${op.label}`).join("\n") + "\n");
+  });
+  program.command("undo <id>").description("Undo an operation using its encrypted receipt").action(async id => { await ensureControlService(cliPath); process.stdout.write(JSON.stringify(await controlRequest("operation.rollback", [id]), null, 2) + "\n"); });
+  const nativePackage = program.command("package").description("Manage adopted native package revisions");
+  nativePackage.command("list").action(async () => { await ensureControlService(cliPath); const state = await controlRequest<any>("snapshot"); process.stdout.write(JSON.stringify(state.packages, null, 2) + "\n"); });
+  for (const pinned of [true, false]) nativePackage.command(`${pinned ? "pin" : "unpin"} <id>`).action(async id => { await ensureControlService(cliPath); await controlRequest("package.pin", [id, pinned]); });
+  nativePackage.command("update <id>").description("Review and adopt a changed native source revision").action(async id => {
+    await ensureControlService(cliPath);
+    const state = await controlRequest<any>("snapshot");
+    const pkg = state.packages.find((pkg: any) => pkg.id === id);
+    if (!pkg) throw new Error("Unknown native package");
+    const plan = await controlRequest<AdoptionPlan>("adoption.plan", [[pkg.harness]]);
+    const items = plan.items.filter(item => item.kind === "package" && item.canonicalId === id);
+    if (items.some(item => item.action === "conflict")) throw new Error(items.find(item => item.action === "conflict")!.reason);
+    const updates = items.filter(item => item.action === "import");
+    if (!updates.length) { process.stdout.write("No native source update was discovered.\n"); return; }
+    process.stdout.write(JSON.stringify(await controlRequest("adoption.apply", [plan, updates.map(item => item.id)]), null, 2) + "\n");
+  });
+  program.command("harness-mode <id> <mode>").description("Set observe, selected, or automatic synchronization").action(async (id, mode) => { await ensureControlService(cliPath); await controlRequest("harness.mode", [id, mode]); });
 
+  let lease: string | undefined;
+  let commandFailed = false;
+  const managedRoots = new Set(["add", "remove", "enable", "disable", "sync", "skill", "plugin", "project", "secret", "auth", "share"]);
+  if (managedRoots.has(argv[2]) && !argv.includes("--help") && !argv.includes("--dry-run") && process.env.MCPX_CONTROL_CHILD !== "1" && process.env.MCPX_SKIP_DAEMON_AUTOSTART !== "1") {
+    await ensureControlService(cliPath);
+    lease = await controlRequest<string>("lease.acquire", [process.pid, argv[2]]);
+    process.env.MCPX_CONTROL_CHILD = "1";
+  }
   try {
     await program.parseAsync(argv);
   } catch (error) {
+    commandFailed = true;
     const operation = telemetryOperation(rawArgs);
     if (operation) {
       captureTelemetryEvent({
@@ -3083,13 +3152,16 @@ export async function runCli(argv = process.argv): Promise<void> {
     });
     throw error;
   } finally {
+    if (lease) { delete process.env.MCPX_CONTROL_CHILD; await controlRequest("lease.release", [lease, !commandFailed && !process.exitCode]); }
     await flushTelemetry(150);
     await flushNodeErrorReporting(150);
+    await shutdown();
   }
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(fs.realpathSync(process.argv[1])).href) {
   void runCli().catch((error) => {
+    captureException(error);
     if (error instanceof ConfigLoadError) {
       process.stderr.write(`Config error: ${error.message}\n`);
       if (error.backupPath) {

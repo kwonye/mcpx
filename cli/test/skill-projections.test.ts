@@ -110,3 +110,55 @@ describe("projectSkillsToDir", () => {
     env.restore();
   });
 });
+
+describe("projection ownership safety", () => {
+  it("migrates unchanged legacy ownership and can update and prune it", () => {
+    const env = setupTempEnv("skill-legacy-");
+    try {
+      const dir = path.join(env.root, "skills");
+      fs.mkdirSync(dir);
+      fs.writeFileSync(path.join(dir, "same.md"), "managed");
+      fs.writeFileSync(path.join(dir, "mcpx-skills.json"), JSON.stringify({ version: 1, paths: ["same.md"] }));
+      projectSkillsToDir(dir, [{ id: "same", content: "managed" }], "flat");
+      projectSkillsToDir(dir, [{ id: "same", content: "updated" }], "flat");
+      expect(fs.readFileSync(path.join(dir, "same.md"), "utf8")).toBe("updated");
+      projectSkillsToDir(dir, [], "flat");
+      expect(fs.existsSync(path.join(dir, "same.md"))).toBe(false);
+    } finally { env.restore(); }
+  });
+  it("retains ambiguous legacy paths for review without overwriting or forgetting them", () => {
+    const env = setupTempEnv("skill-legacy-edited-");
+    try {
+      const dir = path.join(env.root, "skills");
+      fs.mkdirSync(dir);
+      fs.writeFileSync(path.join(dir, "same.md"), "user edit");
+      fs.writeFileSync(path.join(dir, "mcpx-skills.json"), JSON.stringify({ version: 1, paths: ["same.md"] }));
+      expect(() => projectSkillsToDir(dir, [{ id: "same", content: "managed" }], "flat")).toThrow();
+      expect(() => projectSkillsToDir(dir, [], "flat")).toThrow();
+      expect(JSON.parse(fs.readFileSync(path.join(dir, "mcpx-skills.json"), "utf8")).paths).toContain("same.md");
+      expect(fs.readFileSync(path.join(dir, "same.md"), "utf8")).toBe("user edit");
+    } finally { env.restore(); }
+  });
+  it("never claims or later deletes a colliding user file", () => {
+    const env = setupTempEnv("skill-collision-");
+    try {
+      const dir = path.join(env.root, "skills");
+      fs.mkdirSync(dir);
+      fs.writeFileSync(path.join(dir, "same.md"), "user");
+      expect(() => projectSkillsToDir(dir, [{ id: "same", content: "managed" }], "flat")).toThrow("preserved local files");
+      projectSkillsToDir(dir, [], "flat");
+      expect(fs.readFileSync(path.join(dir, "same.md"), "utf8")).toBe("user");
+    } finally { env.restore(); }
+  });
+  it("preserves edits when updating or pruning a managed skill", () => {
+    const env = setupTempEnv("skill-drift-");
+    try {
+      const dir = path.join(env.root, "skills");
+      projectSkillsToDir(dir, [{ id: "same", content: "managed" }], "flat");
+      fs.writeFileSync(path.join(dir, "same.md"), "edited");
+      expect(() => projectSkillsToDir(dir, [{ id: "same", content: "new" }], "flat")).toThrow();
+      expect(() => projectSkillsToDir(dir, [], "flat")).toThrow();
+      expect(fs.readFileSync(path.join(dir, "same.md"), "utf8")).toBe("edited");
+    } finally { env.restore(); }
+  });
+});

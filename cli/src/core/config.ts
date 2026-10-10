@@ -28,6 +28,7 @@ const clientStateSchema = z.object({
 });
 
 const httpServerSchema = z.object({
+  scope: z.string().optional(),
   transport: z.literal("http"),
   url: z.url(),
   headers: z.record(z.string(), z.string()).optional(),
@@ -35,6 +36,7 @@ const httpServerSchema = z.object({
 });
 
 const stdioServerSchema = z.object({
+  scope: z.string().optional(),
   transport: z.literal("stdio"),
   command: z.string().min(1),
   args: z.array(z.string()).optional(),
@@ -113,7 +115,7 @@ const managedPluginSchema = z.object({
   previous: z.object({ version: z.string(), resolvedSha: z.string(), root: z.string() }).optional(),
   projectOverrides: z.record(z.string(), z.object({
     enabled: z.boolean().optional(),
-    components: z.record(pluginComponentSchema, z.boolean()).optional(),
+    components: z.partialRecord(pluginComponentSchema, z.boolean()).optional(),
     config: z.record(z.string(), z.unknown()).optional(),
   })).optional(),
 });
@@ -137,9 +139,14 @@ const managedMarketplaceSchema = z.object({
 
 const configSchema = z.object({
   schemaVersion: z.literal(1).default(1),
+  consumers: z.record(z.string(), z.object({ tokenRef: z.string().regex(/^secret:\/\/[A-Za-z0-9._-]+$/), projectPath: z.string().optional() })).default({}),
+  packages: z.record(z.string(), z.object({ id: z.string(), root: z.string(), source: z.string(), harness: z.string(), fingerprint: z.string(), pinned: z.boolean(), name: z.string().optional(), identity: z.string().optional(), servers: z.array(z.string()).optional(), skills: z.array(z.object({ id: z.string(), path: z.string(), projectionPath: z.string() })).optional(), scope: z.string().optional(), previous: z.object({ root: z.string(), fingerprint: z.string() }).optional() })).default({}),
+  revision: z.number().int().nonnegative().default(0),
+  harnesses: z.record(z.string(), z.object({ mode: z.enum(["observe", "selected", "automatic"]) })).default({}),
+  origins: z.record(z.string(), z.object({ id: z.string(), kind: z.string(), harness: z.string(), source: z.string(), nativeKey: z.string(), fingerprint: z.string(), operationId: z.string() })).default({}),
   gateway: z.object({
     port: z.number().int().min(1).max(65535).default(37373),
-    tokenRef: z.string().default("secret://local_gateway_token"),
+    tokenRef: z.string().regex(/^secret:\/\/[A-Za-z0-9._-]+$/).default("secret://local_gateway_token"),
     autoStart: z.boolean().default(true)
   }).default({
     port: 37373,
@@ -219,9 +226,7 @@ export function loadConfig(configPath = getConfigPath()): McpxConfig {
 
   const clientEntries: Partial<Record<ClientId, McpxConfig["clients"][ClientId]>> = {};
   for (const [key, value] of Object.entries(parsed.data.clients)) {
-    if (["claude", "claude-desktop", "codex", "cursor", "cline", "opencode", "kiro", "vscode", "qwen", "openclaw", "hermes"].includes(key)) {
-      clientEntries[key as ClientId] = value;
-    }
+    clientEntries[key as ClientId] = value;
   }
 
   const servers = Object.fromEntries(
@@ -230,6 +235,11 @@ export function loadConfig(configPath = getConfigPath()): McpxConfig {
 
   return repairConfig({
     schemaVersion: 1,
+    consumers: parsed.data.consumers,
+    packages: parsed.data.packages,
+    revision: parsed.data.revision,
+    harnesses: parsed.data.harnesses,
+    origins: parsed.data.origins,
     gateway: parsed.data.gateway,
     servers,
     clients: clientEntries,

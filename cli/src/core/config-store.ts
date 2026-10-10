@@ -4,7 +4,7 @@ import { loadConfig, saveConfig, loadProjectConfig, saveProjectConfig, type Proj
 import type { McpxConfig, UpstreamServerSpec } from "../types.js";
 import { getConfigPath, findProjectConfigPath } from "./paths.js";
 
-const LOCK_STALE_MS = 5000;
+import { lockOwnerAlive } from "./file-state.js";
 const LOCK_RETRY_MS = 50;
 const LOCK_MAX_RETRIES = 40;
 
@@ -31,8 +31,7 @@ function acquireLock(filePath: string): boolean {
     }
     // Stale lock check
     try {
-      const stat = fs.statSync(lockPath);
-      if (Date.now() - stat.mtimeMs > LOCK_STALE_MS) {
+      if (!lockOwnerAlive(lockPath)) {
         fs.unlinkSync(lockPath);
         return acquireLock(filePath);
       }
@@ -109,7 +108,11 @@ export function mutateConfig<T>(
   fn: (config: McpxConfig) => T | Promise<T>,
   configPath?: string
 ): Promise<T> {
-  return mutateFile(configPath ?? getConfigPath(), loadConfig, saveConfig, fn);
+  return mutateFile(configPath ?? getConfigPath(), loadConfig, saveConfig, async config => {
+    const result = await fn(config);
+    config.revision = (config.revision ?? 0) + 1;
+    return result;
+  });
 }
 
 export function mutateProjectConfig<T>(

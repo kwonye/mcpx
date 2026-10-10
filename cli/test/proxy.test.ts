@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "bun:test";
 import { createGatewayServer } from "../src/gateway/server.js";
 import { defaultConfig, saveConfig } from "../src/core/config.js";
+import { consumerToken } from "../src/core/consumers.js";
 import { SecretsManager } from "../src/core/secrets.js";
 import { setupTempEnv } from "./helpers.js";
 
@@ -84,7 +85,8 @@ function respondWithDiscover(res: http.ServerResponse, id: string | number | nul
  */
 async function setupProxyFixture(
   prefix: string,
-  cleanups: Array<() => Promise<void> | void>
+  cleanups: Array<() => Promise<void> | void>,
+  useConsumerToken = false
 ): Promise<{ env: NodeJS.ProcessEnv; serverName: string }> {
   const tempEnv = setupTempEnv(prefix);
   cleanups.push(tempEnv.restore);
@@ -122,10 +124,13 @@ async function setupProxyFixture(
     transport: "http",
     url: `http://127.0.0.1:${upstream.port}/mcp`
   };
+  const proxyToken = useConsumerToken
+    ? consumerToken(config, "claude-desktop", undefined, new SecretsManager())
+    : LOCAL_TOKEN;
 
   const gateway = createGatewayServer({
     port: 0,
-    expectedToken: LOCAL_TOKEN,
+    expectedToken: proxyToken,
     secrets: new SecretsManager()
   });
   await waitForListening(gateway);
@@ -151,7 +156,8 @@ async function setupProxyFixture(
       // The proxy auto-starts the background daemon when none is detected running;
       // that daemon would try to bind config.gateway.port itself and collide with
       // the fixture gateway above, so tell it to skip that entirely.
-      MCPX_SKIP_DAEMON_AUTOSTART: "1"
+      MCPX_SKIP_DAEMON_AUTOSTART: "1",
+      ...(useConsumerToken ? { MCPX_PROXY_TOKEN: proxyToken } : {})
     },
     serverName
   };
@@ -265,6 +271,30 @@ describe("stdio proxy (mcpx proxy <name>)", () => {
 
   it("completes MCP v2 discovery over stdio through the real gateway", async () => {
     const { env, serverName } = await setupProxyFixture("mcpx-proxy-init-", cleanups);
+    const proxy = spawnProxy(serverName, env);
+    cleanups.push(() => killProxy(proxy.proc));
+
+    proxy.writeMessage({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "server/discover",
+      params: {
+        _meta: {
+          "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+          "io.modelcontextprotocol/clientInfo": { name: "proxy-test-client", version: "2.0.0" },
+          "io.modelcontextprotocol/clientCapabilities": {}
+        }
+      }
+    });
+
+    const response = await proxy.readMessage();
+    expect(response.id).toBe(1);
+    expect(response.error).toBeUndefined();
+    expect(response.result.supportedVersions).toContain("2026-07-28");
+  }, 15_000);
+
+  it("uses the per-consumer token supplied by a Claude Desktop proxy entry", async () => {
+    const { env, serverName } = await setupProxyFixture("mcpx-proxy-consumer-", cleanups, true);
     const proxy = spawnProxy(serverName, env);
     cleanups.push(() => killProxy(proxy.proc));
 

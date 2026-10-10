@@ -1,116 +1,79 @@
 import fs from "node:fs";
 import path from "node:path";
-import { ensureDir } from "./paths.js";
 import type { Skill } from "../types.js";
 import { z } from "zod";
 import { validateSkillId } from "./identifiers.js";
+import { pathFingerprint } from "./file-state.js";
+import { writeJsonAtomic } from "../util/fs.js";
 
 const OWNERSHIP_MANIFEST = "mcpx-skills.json";
-
-interface OwnershipManifest {
-  version: 1;
-  paths: string[];
-}
-
 const ownershipSchema = z.object({
   version: z.literal(1),
   paths: z.array(z.string()),
+  hashes: z.record(z.string(), z.string()).default({}),
 });
 
-function assertWithinBase(base: string, target: string): void {
-  const resolvedBase = path.resolve(base);
-  const resolvedTarget = path.resolve(target);
-  if (resolvedTarget !== resolvedBase && !resolvedTarget.startsWith(resolvedBase + path.sep)) {
-    throw new Error(`Refusing to access path outside projection base: ${target}`);
-  }
-}
-
-function loadOwnership(targetDir: string): OwnershipManifest {
-  const manifestPath = path.join(targetDir, OWNERSHIP_MANIFEST);
-  if (!fs.existsSync(manifestPath)) {
-    return { version: 1, paths: [] };
-  }
-  try {
-    const parsed = ownershipSchema.safeParse(JSON.parse(fs.readFileSync(manifestPath, "utf8")));
-    if (parsed.success) {
-      return { ...parsed.data, paths: parsed.data.paths.map((ownedPath) => ownedPath.endsWith("/SKILL.md") ? path.dirname(ownedPath) : ownedPath) };
-    }
-  } catch {
-    console.error(`[mcpx] Warning: corrupt ownership manifest at ${manifestPath}, resetting`);
-    return { version: 1, paths: [] };
-  }
-  return { version: 1, paths: [] };
-}
-
-function saveOwnership(targetDir: string, manifest: OwnershipManifest): void {
-  ensureDir(targetDir);
-  fs.writeFileSync(
-    path.join(targetDir, OWNERSHIP_MANIFEST),
-    JSON.stringify(manifest, null, 2)
-  );
+function within(base: string, relative: string): string {
+  const target = path.resolve(base, relative);
+  if (!relative || target === path.resolve(base) || !target.startsWith(path.resolve(base) + path.sep)) throw new Error("Invalid skill projection path");
+  return target;
 }
 
 export function projectSkillsToDir(targetDir: string, skills: Skill[], layout: "dir" | "flat"): void {
-  const owned = loadOwnership(targetDir);
-  const newPaths = new Set(skills.map(s => layout === "dir" ? s.id : `${s.id}.md`));
-
-  for (const ownedPath of owned.paths) {
-    if (!newPaths.has(ownedPath)) {
-      const fullPath = path.join(targetDir, ownedPath);
-      try {
-        assertWithinBase(targetDir, fullPath);
-        if (fs.existsSync(fullPath)) {
-          fs.rmSync(fullPath, { recursive: true, force: true });
-        }
-        if (layout === "dir") {
-          const dirPath = path.join(targetDir, path.dirname(ownedPath));
-          assertWithinBase(targetDir, dirPath);
-          try {
-            const remaining = fs.readdirSync(dirPath);
-            if (remaining.length === 0) {
-              fs.rmSync(dirPath, { recursive: true, force: true });
-            }
-          } catch {
-            // dir may not exist
-          }
-        }
-      } catch {
-        console.error(`[mcpx] Warning: could not remove stale skill projection: ${fullPath}`);
-      }
+  const manifestPath = path.join(targetDir, OWNERSHIP_MANIFEST);
+  let owned: z.infer<typeof ownershipSchema> = { version: 1, paths: [], hashes: {} };
+  if (fs.existsSync(manifestPath)) {
+    // Fail closed: corrupt ownership cannot authorize overwriting or deletion.
+    owned = ownershipSchema.parse(JSON.parse(fs.readFileSync(manifestPath, "utf8")));
+  }
+  const wanted = new Set(skills.map(skill => layout === "dir" ? skill.projectionPath ?? skill.id : `${skill.id}.md`));
+  const written: Record<string, string> = {};
+  const retained = new Set<string>();
+  const conflicts: string[] = [];
+  for (const relative of owned.paths) {
+    const target = within(targetDir, relative);
+    const current = pathFingerprint(target);
+    if (!wanted.has(relative) && current !== null) {
+      if (owned.hashes[relative] === current) fs.rmSync(target, { recursive: true, force: true });
+      else { conflicts.push(relative); retained.add(relative); if (owned.hashes[relative]) written[relative] = owned.hashes[relative]; }
     }
   }
-
   for (const skill of skills) {
     validateSkillId(skill.id);
-    const ownedTarget = layout === "dir" ? skill.id : `${skill.id}.md`;
-    if ((fs.existsSync(path.join(targetDir, ownedTarget)) || (() => { try { fs.lstatSync(path.join(targetDir, ownedTarget)); return true; } catch { return false; } })()) && !owned.paths.includes(ownedTarget)) {
-      console.error(`[mcpx] Warning: preserving unowned skill projection: ${path.join(targetDir, ownedTarget)}`);
+    const relative = layout === "dir" ? skill.projectionPath ?? skill.id : `${skill.id}.md`;
+    const target = within(targetDir, relative);
+    const current = pathFingerprint(target);
+    if (current !== null && owned.paths.includes(relative) && !owned.hashes[relative]) {
+      // Old manifests lacked hashes. Migrate only projections matching their source.
+      const stat = fs.lstatSync(target);
+      let matches = false;
+      if (layout === "flat") matches = stat.isFile() && fs.readFileSync(target, "utf8") === skill.content;
+      else if (skill.root && fs.existsSync(skill.root)) matches = stat.isSymbolicLink() ? fs.realpathSync(target) === fs.realpathSync(skill.root) : current === pathFingerprint(skill.root);
+      else if (stat.isDirectory() && fs.readdirSync(target).length === 1) {
+        const file = path.join(target, "SKILL.md");
+        matches = fs.existsSync(file) && fs.lstatSync(file).isFile() && fs.readFileSync(file, "utf8") === skill.content;
+      }
+      if (matches) owned.hashes[relative] = current;
+    }
+    if (current !== null && (!owned.paths.includes(relative) || owned.hashes[relative] !== current)) {
+      conflicts.push(relative);
+      if (owned.paths.includes(relative)) retained.add(relative);
+      if (owned.hashes[relative]) written[relative] = owned.hashes[relative];
       continue;
     }
     if (layout === "dir" && skill.root && fs.existsSync(skill.root)) {
-      const targetPath = path.join(targetDir, skill.id);
-      assertWithinBase(targetDir, targetPath);
-      if (path.resolve(targetPath) !== path.resolve(skill.root)) {
-        if (fs.existsSync(targetPath) || (() => { try { fs.lstatSync(targetPath); return true; } catch { return false; } })()) {
-          fs.rmSync(targetPath, { recursive: true, force: true });
-        }
-        ensureDir(path.dirname(targetPath));
-        const relativeTarget = path.relative(path.dirname(targetPath), path.resolve(skill.root));
-        try {
-          fs.symlinkSync(relativeTarget, targetPath, process.platform === "win32" ? "junction" : "dir");
-        } catch {
-          fs.cpSync(skill.root, targetPath, { recursive: true, dereference: true });
-        }
-      }
+      if (path.resolve(target) === path.resolve(skill.root)) continue; // canonical source is never a projection
+      if (current !== null) fs.rmSync(target, { recursive: true, force: true });
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      try { fs.symlinkSync(path.relative(path.dirname(target), path.resolve(skill.root)), target, process.platform === "win32" ? "junction" : "dir"); }
+      catch { fs.cpSync(skill.root, target, { recursive: true, dereference: true }); }
     } else {
-      const filePath = layout === "dir"
-        ? path.join(targetDir, skill.id, "SKILL.md")
-        : path.join(targetDir, `${skill.id}.md`);
-      assertWithinBase(targetDir, filePath);
-      ensureDir(path.dirname(filePath));
-      fs.writeFileSync(filePath, skill.content, "utf-8");
+      const file = layout === "dir" ? path.join(target, "SKILL.md") : target;
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, skill.content, { mode: 0o600 });
     }
+    written[relative] = pathFingerprint(target)!;
   }
-
-  saveOwnership(targetDir, { version: 1, paths: Array.from(newPaths) });
+  writeJsonAtomic(manifestPath, { version: 1, paths: [...new Set([...Object.keys(written), ...retained])], hashes: written });
+  if (conflicts.length) throw new Error(`Skill projections preserved local files: ${conflicts.join(", ")}`);
 }

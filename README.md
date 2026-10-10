@@ -42,7 +42,9 @@ Prerequisites: [Bun](https://bun.sh) >= 1.4.0
 **macOS:**
 ```bash
 git clone https://github.com/kwonye/mcpx.git
-cd mcpx/app
+cd mcpx/cli
+bun install
+cd ../app
 bun install
 bun run desktop-install
 ```
@@ -274,6 +276,23 @@ mcpx sync claude
 mcpx sync --client claude --client codex
 ```
 
+### Local gateway control
+
+The desktop Control Center and management CLI share the local control service.
+See the [gateway architecture guide](docs/local-gateway.md) for its control
+socket, adoption and recovery behavior.
+
+```bash
+mcpx tui
+mcpx harnesses --json
+mcpx adopt --dry-run
+mcpx adopt --yes
+mcpx harness-mode pi automatic
+mcpx activity
+mcpx package list
+mcpx undo <operation-id>
+```
+
 ### Agent Plugins
 
 `mcpx plugin` installs Claude, Codex, and [Agent Plugins v1](https://agent-plugins.org/) packages from a local directory, Git URL, or GitHub shorthand. Agent Plugins v1 packages use a root `plugin.json`, optional `skills/`, and optional `mcp.json`; `stdio` and streamable HTTP MCP entries are managed through the normal gateway and client projection flow.
@@ -349,6 +368,49 @@ This is a monorepo containing:
 - **`app/`** — The desktop app (Electron + React) for macOS, Linux, and Windows
 
 The desktop app imports the CLI's core logic directly via a `@mcpx/core` TypeScript alias, so both packages share identical configuration parsing, sync logic, and secret management.
+
+The target architecture consolidates MCP traffic and harness-native skills and plugins through one local service:
+
+```mermaid
+flowchart TB
+    subgraph Harnesses["Coding harnesses"]
+        Claude["Claude Code"]
+        Codex["Codex"]
+        Others["Other harnesses"]
+    end
+
+    Claude & Codex & Others --> HTTP["MCP over HTTP"]
+    Claude & Codex & Others --> Stdio["MCP over stdio"]
+    Claude & Codex & Others -.-> Native["Native configuration,<br/>skills and plugins"]
+
+    HTTP --> Gateway
+    Stdio --> Proxy
+    Native -.-> Adapters
+
+    subgraph MCPX["mcpx · Local service"]
+        Proxy["Stdio proxy"] --> Gateway["Authenticated MCP gateway"]
+
+        Gateway --> Router["Routing and access policy"]
+        Router --> Runtime["Upstream runtime"]
+        Runtime --> Secrets["Encrypted credentials"]
+
+        Adapters["Harness adapters"] --> Sync["Sync and ownership engine"]
+        Sync --> Catalog["MCP · Skill · Plugin catalog"]
+        Sync --> Recovery["Operation journal and recovery"]
+
+        Control["Management API"] --> Catalog
+        Control --> Sync
+        Control --> Lifecycle["Daemon lifecycle"]
+    end
+
+    Runtime --> Local["Local MCP processes"]
+    Runtime --> Remote["Remote MCP servers"]
+
+    GUI["Desktop GUI"] --> Control
+    TUI["CLI / TUI"] --> Control
+```
+
+Claude Desktop uses the stdio proxy to reach the local mcpx gateway. Its [remote HTTP connectors](https://support.claude.com/en/articles/11175166-get-started-with-custom-connectors-using-remote-mcp) connect from Anthropic's cloud and require a publicly reachable server; they cannot connect directly to mcpx on localhost.
 
 ## Notes
 

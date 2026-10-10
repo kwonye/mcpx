@@ -19,8 +19,13 @@ export function writeJsonAtomic(filePath: string, data: unknown): void {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   const tempPath = `${filePath}.tmp-${process.pid}-${Date.now()}`;
   const content = `${JSON.stringify(data, null, 2)}\n`;
-  fs.writeFileSync(tempPath, content, { mode: 0o600 });
+  const descriptor = fs.openSync(tempPath, "w", 0o600);
+  try { fs.writeFileSync(descriptor, content); fs.fsyncSync(descriptor); } finally { fs.closeSync(descriptor); }
   fs.renameSync(tempPath, filePath);
+  if (process.platform !== "win32") {
+    const directory = fs.openSync(path.dirname(filePath), "r");
+    try { fs.fsyncSync(directory); } finally { fs.closeSync(directory); }
+  }
 }
 
 export function sha256(value: string): string {
@@ -33,4 +38,14 @@ export function safeReadFile(filePath: string): string | null {
   } catch {
     return null;
   }
+}
+
+/** Native configuration must fail closed; malformed files are never reset. */
+export function readJsonStrict<T>(filePath: string, fallback: T): T {
+  if (!fs.existsSync(filePath)) return fallback;
+  try {
+    const value = JSON.parse(fs.readFileSync(filePath, "utf8"));
+    if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Expected an object");
+    return value as T;
+  } catch { throw new Error(`Native configuration is invalid JSON: ${filePath}`); }
 }

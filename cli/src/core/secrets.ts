@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { withManagedIndexLock } from "./managed-index-lock.js";
 import fs from "node:fs";
 import { getSecretsStorePath, getSecretsKeyPath, ensureParentDir } from "./paths.js";
 import { readJsonFile, writeJsonAtomic } from "../util/fs.js";
@@ -108,6 +109,7 @@ export class SecretsManager {
   }
 
   setSecret(name: string, value: string): void {
+    return withManagedIndexLock(`${this.storePath}.lock`, () => {
     let map = this.readStore();
     if (map === null) {
       // readStore() returns null both when the store simply doesn't exist yet
@@ -124,13 +126,16 @@ export class SecretsManager {
     map[name] = value;
     const envelope = buildEnvelope(this.keyPath, { secrets: map });
     writeJsonAtomic(this.storePath, envelope);
+    });
   }
 
   removeSecret(name: string): void {
+    return withManagedIndexLock(`${this.storePath}.lock`, () => {
     const map = this.readStore() ?? {};
     delete map[name];
     const envelope = buildEnvelope(this.keyPath, { secrets: map });
     writeJsonAtomic(this.storePath, envelope);
+    });
   }
 
   getSecret(name: string): string | null {

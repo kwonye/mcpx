@@ -3,6 +3,7 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { Dashboard } from "../../src/renderer/components/Dashboard";
 
 const mockMcpx = {
+  management: { snapshot: vi.fn().mockResolvedValue({ revision: 0, capturedAt: new Date().toISOString(), harnesses: [], operations: [], servers: [], skills: [], packages: [], plugins: [] }), onChange: vi.fn().mockReturnValue(() => {}) },
   getStatus: vi.fn().mockResolvedValue({
     daemon: { running: true, pid: 1234, pidFile: "", logFile: "", port: 37373 },
     upstreamCount: 2,
@@ -43,6 +44,7 @@ const mockMcpx = {
   daemonRestart: vi.fn(),
   removeServer: vi.fn().mockResolvedValue({}),
   getDesktopSettings: vi.fn().mockResolvedValue({
+    activeTab: "servers",
     autoUpdateEnabled: true,
     startOnLoginEnabled: true
   }),
@@ -85,11 +87,11 @@ describe("Dashboard", () => {
     expect(await screen.findByRole("button", { name: /My Servers/i })).toBeDefined();
     expect(screen.queryByRole("button", { name: /Browse Registry/i })).toBeNull();
     expect(screen.getByRole("button", { name: /Projects/i })).toBeDefined();
-    expect(screen.getByRole("button", { name: /Plugins/i })).toBeDefined();
+    expect(screen.getByRole("button", { name: /Library/i })).toBeDefined();
     expect(screen.getByRole("button", { name: /Settings/i })).toBeDefined();
   });
 
-  it("falls back to servers for stale browse settings", async () => {
+  it("falls back to overview for stale browse settings", async () => {
     mockMcpx.getDesktopSettings.mockResolvedValueOnce({
       autoUpdateEnabled: true,
       startOnLoginEnabled: true,
@@ -98,7 +100,7 @@ describe("Dashboard", () => {
 
     render(<Dashboard />);
 
-    expect(await screen.findByRole("heading", { name: "My Servers" })).toBeDefined();
+    expect(await screen.findByRole("heading", { name: "Everything, connected." })).toBeDefined();
     expect(screen.queryByText("Registry")).toBeNull();
   });
 

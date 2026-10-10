@@ -186,3 +186,12 @@ export type {
   PluginSyncResult,
   Skill
 } from "../types.js";
+
+// Local management service and shared presentation contracts.
+export { controlRequest, ensureControlService, subscribeControlEvents } from "./control.js";
+export { getManagementSnapshot } from "./management.js";
+export type { ManagementSnapshot } from "./management.js";
+export type { AdoptionPlan, AdoptionItem } from "./adoption.js";
+export type { HarnessInstallation, SyncMode } from "./harnesses.js";
+export type { Operation } from "./operations.js";
+export { registerHarness } from "../adapters/index.js";

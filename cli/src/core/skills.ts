@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { loadConfig } from "./config.js";
 import path from "node:path";
 import { getSkillsDir, getSkillPackagesRoot, getSkillStatePath, ensureDir } from "./paths.js";
 import type { Skill } from "../types.js";
@@ -64,7 +65,14 @@ export function listSkills(): Skill[] {
   }
 
   const authoredIds = new Set(skills.map((skill) => skill.id));
-  return [...skills, ...installedSkills().filter((skill) => !authoredIds.has(skill.id))];
+  const native: Skill[] = [];
+  for (const pkg of Object.values(loadConfig().packages ?? {})) for (const skill of pkg.skills ?? []) {
+    const root = path.resolve(pkg.root, skill.path);
+    if (!root.startsWith(path.resolve(pkg.root) + path.sep)) continue;
+    const file = path.join(root, "SKILL.md");
+    if (fs.existsSync(file)) native.push({ id: skill.id, root, content: fs.readFileSync(file, "utf8"), projectionPath: skill.projectionPath, scope: pkg.scope, ownerHarness: pkg.harness, source: "installed", readOnly: true });
+  }
+  return [...skills, ...installedSkills().filter((skill) => !authoredIds.has(skill.id)), ...native];
 }
 
 export function getSkill(id: string): Skill | null {
@@ -76,7 +84,7 @@ export function getSkill(id: string): Skill | null {
   const filePath = fs.existsSync(packagePath) ? packagePath : legacyPath;
   if (!fs.existsSync(filePath)) {
     const installedPath = path.join(getSkillPackagesRoot(), id, "SKILL.md");
-    if (!fs.existsSync(installedPath)) return null;
+    if (!fs.existsSync(installedPath)) return listSkills().find(skill => skill.id === id) ?? null;
     const installedRoot = path.dirname(installedPath);
     return { id, content: fs.readFileSync(installedPath, "utf8"), root: installedRoot, source: "installed", readOnly: true };
   }

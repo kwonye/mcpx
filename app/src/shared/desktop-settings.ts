@@ -1,4 +1,4 @@
-export type DesktopTab = "servers" | "projects" | "plugins" | "settings";
+export type DesktopTab = "overview" | "harnesses" | "activity" | "servers" | "projects" | "plugins" | "settings";
 
 export interface DesktopSettings {
   autoUpdateEnabled: boolean;
@@ -13,5 +13,5 @@ export const DEFAULT_DESKTOP_SETTINGS: DesktopSettings = {
   autoUpdateEnabled: true,
   startOnLoginEnabled: true,
   errorNotificationsEnabled: true,
-  activeTab: "servers"
+  activeTab: "overview"
 };

@@ -1,3 +1,4 @@
+import { ControlCenter } from "./ControlCenter";
 import { useState, useEffect } from "react";
 import logoSvg from "../assets/logo.svg";
 import { useStatus } from "../hooks/useMcpx";
@@ -17,11 +18,11 @@ import { ContextBudgetCard } from "./ContextBudgetCard";
 
 type OAuthSupport = "supported" | "unsupported" | "unknown";
 type PendingAuthEntry = { serverName: string; oauthLikely?: boolean; oauthSupport?: OAuthSupport; status?: number };
-const VALID_TABS: DesktopTab[] = ["servers", "projects", "plugins", "settings"];
+const VALID_TABS: DesktopTab[] = ["overview", "harnesses", "activity", "servers", "projects", "plugins", "settings"];
 
 export function Dashboard() {
-  const { status, loading, refresh } = useStatus();
-  const [tab, setTab] = useState<DesktopTab>("servers");
+  const { status, loading, error, refresh } = useStatus();
+  const [tab, setTab] = useState<DesktopTab>("overview");
   const [selectedServer, setSelectedServer] = useState<string | null>(null);
   const [selectedProjectPath, setSelectedProjectPath] = useState<string | null>(null);
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(() => new Set());
@@ -66,7 +67,7 @@ export function Dashboard() {
   const handleTabChange = async (newTab: DesktopTab) => {
     setTab(newTab);
     setSelectedServer(null);
-    void window.mcpx.captureDesktopTabViewed?.(newTab);
+    if (["servers", "projects", "plugins", "settings"].includes(newTab)) void window.mcpx.captureDesktopTabViewed?.(newTab as "servers" | "projects" | "plugins" | "settings");
     try {
       await window.mcpx.updateDesktopSettings({ activeTab: newTab });
     } catch {
@@ -77,7 +78,7 @@ export function Dashboard() {
   if (loading || !status || !settingsLoaded) {
     return (
       <div className="dashboard-container dashboard-loading">
-        Loading...
+        {error ? <div role="alert"><p>{error}</p><button className="control-button" onClick={() => void refresh()}>Retry connection</button></div> : "Loading..."}
       </div>
     );
   }
@@ -120,6 +121,7 @@ export function Dashboard() {
         </div>
         <DaemonControls daemon={report.daemon} onRefresh={() => { void refresh(); }} />
         <div className="sidebar-inner glass-panel">
+          {([ ["overview", "space_dashboard", "Overview"], ["harnesses", "terminal", "Harnesses"] ] as const).map(([id, icon, label]) => <button key={id} className="nav-button" data-active={tab === id} onClick={() => void handleTabChange(id)}><span className="material-symbols-outlined">{icon}</span><span className="nav-button__label">{label}</span></button>)}
           <button
             className="nav-button"
             data-active={tab === "servers"}
@@ -197,8 +199,9 @@ export function Dashboard() {
             onClick={() => void handleTabChange("plugins")}
           >
             <span className="material-symbols-outlined">extension</span>
-            <span className="nav-button__label">Plugins</span>
+            <span className="nav-button__label">Library</span>
           </button>
+          <button className="nav-button" data-active={tab === "activity"} onClick={() => void handleTabChange("activity")}><span className="material-symbols-outlined">history</span><span className="nav-button__label">Activity</span></button>
           <div className="nav-spacer" />
           <button
             className="nav-button"
@@ -213,6 +216,7 @@ export function Dashboard() {
 
       <main className="main-content">
         <div className="main-content-inner">
+          {error && <div className="control-notice control-notice--error" role="alert">Showing the last available status. {error}<button onClick={() => void refresh()}>Retry</button></div>}
           {activeServer ? (
             <ServerDetail
               server={activeServer}
@@ -221,6 +225,7 @@ export function Dashboard() {
             />
           ) : (
             <>
+              {(tab === "overview" || tab === "harnesses" || tab === "activity") && <ControlCenter view={tab} onChanged={() => { void refresh(); }} />}
               {tab === "servers" && (
                 <>
                   <div className="page-header page-header--split">

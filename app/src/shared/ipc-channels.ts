@@ -1,4 +1,6 @@
 export const IPC = {
+  MANAGEMENT_COMMAND: "mcpx:management-command",
+  MANAGEMENT_EVENT: "mcpx:management-event",
   GET_STATUS: "mcpx:get-status",
   GET_SERVERS: "mcpx:get-servers",
   GET_DESKTOP_SETTINGS: "mcpx:get-desktop-settings",

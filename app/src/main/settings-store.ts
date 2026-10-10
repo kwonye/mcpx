@@ -7,7 +7,7 @@ import {
   type DesktopSettingsPatch
 } from "../shared/desktop-settings";
 
-const VALID_TABS = ["servers", "projects", "plugins", "settings"] as const;
+const VALID_TABS = ["overview", "harnesses", "activity", "servers", "projects", "plugins", "settings"] as const;
 
 function settingsPath(): string {
   return path.join(app.getPath("userData"), "settings.json");
@@ -22,7 +22,7 @@ function normalizeSettings(value: unknown): DesktopSettings {
   const activeTab = typeof legacyTab === "string" &&
     VALID_TABS.includes(legacyTab as typeof VALID_TABS[number])
     ? legacyTab
-    : "servers";
+    : "overview";
 
   return {
     autoUpdateEnabled: typeof partial.autoUpdateEnabled === "boolean"

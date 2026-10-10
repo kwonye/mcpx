@@ -1,4 +1,5 @@
 import path from "node:path";
+import fs from "node:fs";
 import { spawn } from "node:child_process";
 import { loadConfig } from "./config.js";
 import { resolvePluginVars } from "./plugin-parse.js";
@@ -76,6 +77,8 @@ export function runPluginHost(pluginNameOrId: string, serverId: string): void {
       env[k] = v;
     }
   }
+  const venvBin = path.join(dataDir, "venv", process.platform === "win32" ? "Scripts" : "bin");
+  if (fs.existsSync(venvBin)) { env.PATH = `${venvBin}${path.delimiter}${env.PATH ?? ""}`; env.VIRTUAL_ENV = path.dirname(venvBin); }
   env.MCPX_PLUGIN_ROOT = pluginRoot;
   env.MCPX_PLUGIN_DATA = dataDir;
   env.CLAUDE_PLUGIN_ROOT = pluginRoot;

@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { localCliCommand } from "./runtime-entry.js";
 import path from "node:path";
 import { getConfigPath, getPluginDataRoot, ensureDir } from "./paths.js";
 import { PluginCache } from "./plugin-cache.js";
@@ -15,6 +16,7 @@ import type {
   DiscoveredComponents
 } from "../types.js";
 import { normalizePluginName } from "./identifiers.js";
+import { capture } from "./analytics.js";
 
 interface InstallPluginOptions {
   name?: string;
@@ -162,8 +164,7 @@ export class PluginManager {
           ? { transport: "http", url: new URL(mcp.url).toString(), enabled: enabled && approved }
           : {
               transport: "stdio",
-              command: "npx",
-              args: ["-y", "@kwonye/mcpx@latest", "plugin-host", pluginId, mcp.id],
+              ...localCliCommand(["plugin-host", pluginId, mcp.id]),
               enabled: enabled && approved,
             };
       }
@@ -236,8 +237,7 @@ export class PluginManager {
           ? { transport: "http", url: new URL(mcp.url).toString(), enabled: current.enabled && approved }
           : {
               transport: "stdio",
-              command: "npx",
-              args: ["-y", "@kwonye/mcpx@latest", "plugin-host", pluginId, mcp.id],
+              ...localCliCommand(["plugin-host", pluginId, mcp.id]),
               enabled: current.enabled && approved,
             };
       }
@@ -374,7 +374,14 @@ export class PluginManager {
     const resolvedId = resolvePluginId(config, pluginId);
     const plugin = config.plugins[resolvedId];
     if (!plugin) throw new Error(`Plugin ${pluginId} not found`);
-    await this.lifecycle.prepareDependencies(resolvedId, plugin.root);
+    await mutateConfig(fresh => { fresh.plugins![resolvedId].status = "preparing"; }, this.configPath);
+    try {
+      await this.lifecycle.prepareDependencies(resolvedId, plugin.root);
+      await mutateConfig(fresh => { fresh.plugins![resolvedId].status = "healthy"; delete fresh.plugins![resolvedId].error; }, this.configPath);
+    } catch (error) {
+      await mutateConfig(fresh => { fresh.plugins![resolvedId].status = "error"; fresh.plugins![resolvedId].error = "Dependency preparation failed. Retry preparation to repair this installation."; }, this.configPath);
+      throw error;
+    }
   }
 }
 
@@ -449,21 +456,27 @@ export async function uninstallPlugin(nameOrId: string, keepData?: boolean): Pro
   const manager = new PluginManager();
   const config = loadConfig(manager["configPath"]);
   const id = resolvePluginId(config, nameOrId);
+  const plugin = config.plugins?.[id];
   await manager.uninstallPlugin(id, keepData);
+  capture("plugin_uninstalled", { plugin_name: plugin?.name, from_marketplace: !!plugin?.marketplace });
 }
 
 export async function enablePlugin(nameOrId: string): Promise<void> {
   const manager = new PluginManager();
   const config = loadConfig(manager["configPath"]);
   const id = resolvePluginId(config, nameOrId);
+  const plugin = config.plugins?.[id];
   await manager.enablePlugin(id);
+  capture("plugin_enabled", { from_marketplace: !!plugin?.marketplace });
 }
 
 export async function disablePlugin(nameOrId: string): Promise<void> {
   const manager = new PluginManager();
   const config = loadConfig(manager["configPath"]);
   const id = resolvePluginId(config, nameOrId);
+  const plugin = config.plugins?.[id];
   await manager.disablePlugin(id);
+  capture("plugin_disabled", { from_marketplace: !!plugin?.marketplace });
 }
 
 export async function setPluginProjectOverride(

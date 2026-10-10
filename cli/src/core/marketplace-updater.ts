@@ -67,7 +67,7 @@ export async function runMarketplaceAutoUpdate(options?: { force?: boolean }): P
 export function startMarketplaceAutoUpdater(): () => void {
   if (process.env.MCPX_NO_UPDATE === "1") return () => {};
   let stopped = false;
-  const run = () => { if (!stopped) void runMarketplaceAutoUpdate().catch(() => undefined); };
+  const run = () => { if (!stopped) void import("./control.js").then(({ coordinate }) => coordinate(() => runMarketplaceAutoUpdate())).catch(() => undefined); };
   const initial = setTimeout(run, INITIAL_DELAY_MS);
   initial.unref?.();
   const interval = setInterval(run, MARKETPLACE_UPDATE_INTERVAL_MS);

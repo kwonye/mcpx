@@ -63,7 +63,7 @@ function PopoverServerRow({ server, onRefresh, onAuthClick }: PopoverServerRowPr
 }
 
 export function StatusPopover() {
-  const { status, loading, refresh } = useStatus();
+  const { status, loading, error, refresh } = useStatus();
   const [showAddServer, setShowAddServer] = useState(true);
   const [showMenu, setShowMenu] = useState(false);
   const [pendingAuth, setPendingAuth] = useState<Array<{ serverName: string; oauthLikely?: boolean }>>([]);
@@ -81,7 +81,7 @@ export function StatusPopover() {
   }, []);
 
   if (loading || !status) {
-    return <div className="popover">Loading...</div>;
+    return <div className="popover">{error ? <div role="alert"><p>{error}</p><button className="control-button" onClick={() => void refresh()}>Retry connection</button></div> : "Loading..."}</div>;
   }
 
   const report = status;

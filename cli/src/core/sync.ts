@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import path from "node:path";
 import type {
   ClientAdapter,
   ClientId,
@@ -15,6 +17,13 @@ import { managedGatewayEntryName } from "../adapters/utils/index.js";
 import { getAdapters } from "../adapters/index.js";
 import { serverSpecsEqual } from "../adapters/utils/index.js";
 import { loadManagedIndex, saveManagedIndex } from "./managed-index.js";
+import { installationAdapters } from "./harnesses.js";
+import { syncProjectPluginSkills } from "./plugin-projections.js";
+import { projectSkillsToDir } from "./skill-projections.js";
+import { skillVisible } from "./served-skills.js";
+import { protectServerSecrets } from "./adoption.js";
+import { consumerToken } from "./consumers.js";
+import { saveConfig } from "./config.js";
 import { getManagedIndexPath } from "./paths.js";
 import { ensureGatewayToken } from "./registry.js";
 import { SecretsManager } from "./secrets.js";
@@ -100,9 +109,10 @@ function isClientInternalServerCommand(candidate: { spec: { transport: string; c
   return candidate.spec.transport === "stdio" && /\.app\/Contents\//.test(candidate.spec.command ?? "");
 }
 
-function getFilteredAdapters(targetClients?: ClientId[]): ClientAdapter[] {
-  const adapters = getAdapters();
-  if (targetClients && targetClients.length > 0) {
+function getFilteredAdapters(config: McpxConfig, targetClients?: ClientId[]): ClientAdapter[] {
+  const managedContext = process.env.MCPX_DAEMON_CHILD === "1" || process.env.MCPX_CONTROL_CHILD === "1";
+  const adapters = installationAdapters(config).filter(({ installation }) => installation.mode !== "observe" && (targetClients !== undefined || !managedContext || installation.detected || config.harnesses?.[installation.id])).map(item => item.adapter);
+  if (targetClients !== undefined) {
     return adapters.filter((a) => targetClients!.includes(a.id));
   }
   return adapters;
@@ -136,7 +146,7 @@ function runImportPhase(
 
         const existing = config.servers[candidate.serverName];
         if (!existing) {
-          config.servers[candidate.serverName] = candidate.spec;
+          config.servers[candidate.serverName] = protectServerSecrets(candidate.serverName, candidate.spec);
           imports.imported.push({
             clientId: candidate.clientId,
             configPath: candidate.configPath,
@@ -189,12 +199,17 @@ function runImportPhase(
   return { imports, sourceEntriesToRemove, phaseErrors };
 }
 
-function runSkillsPhase(adapters: ClientAdapter[], skills: ReturnType<typeof listSkills>): SyncSummary["phaseErrors"] {
+function runSkillsPhase(config: McpxConfig, adapters: ClientAdapter[], skills: ReturnType<typeof listSkills>): SyncSummary["phaseErrors"] {
   const phaseErrors: SyncSummary["phaseErrors"] = [];
   for (const adapter of adapters) {
     if (adapter.syncSkills) {
       try {
-        adapter.syncSkills(skills);
+        const installation = installationAdapters(config).find(item => item.installation.id === adapter.id)!.installation;
+        const visible = skills.filter(skill => (!skill.scope || skill.scope === installation.projectPath) && skill.ownerHarness !== installation.harness && skillVisible(config, skill.id, installation.projectPath) && !(installation.scope === "global" && adapter.additionalSkillDirectories?.().some(directory => {
+          try { return Boolean(skill.root && fs.realpathSync(path.join(directory, skill.id)) === fs.realpathSync(skill.root)); } catch { return false; }
+        })));
+        if (installation.scope === "project") projectSkillsToDir(installation.skillPaths[0], visible, adapter.descriptor?.skillLayout ?? "dir");
+        else adapter.syncSkills(visible);
       } catch (error) {
         phaseErrors.push({
           clientId: adapter.id,
@@ -208,6 +223,7 @@ function runSkillsPhase(adapters: ClientAdapter[], skills: ReturnType<typeof lis
 }
 
 function runPluginsPhase(
+  config: McpxConfig,
   adapters: ClientAdapter[],
   pluginInputs: PluginSyncInput[],
 ): { pluginResults: PluginSyncResult[]; phaseErrors: SyncSummary["phaseErrors"] } {
@@ -217,7 +233,22 @@ function runPluginsPhase(
   for (const adapter of adapters) {
     if (adapter.syncPlugins) {
       try {
-        const result = adapter.syncPlugins(pluginInputs);
+        const installation = installationAdapters(config).find(item => item.installation.id === adapter.id)?.installation;
+        const projectSkillComponents = adapter.descriptor?.pluginComponents;
+        const result = installation?.scope === "project" && installation.projectPath && projectSkillComponents?.includes("skills")
+          ? syncProjectPluginSkills(
+            adapter.id,
+            installation.skillPaths[0],
+            pluginInputs.map(plugin => {
+              const override = config.plugins?.[plugin.pluginId]?.projectOverrides?.[installation.projectPath!];
+              return {
+                ...plugin,
+                enabled: plugin.enabled && override?.enabled !== false,
+                components: { ...plugin.components, ...override?.components },
+              };
+            }),
+          )
+          : adapter.syncPlugins(pluginInputs);
         if (result) pluginResults.push(result);
       } catch (error) {
         phaseErrors.push({
@@ -256,7 +287,10 @@ function runGatewayPhase(
 
     try {
       const result = adapter.syncGateway(config, {
-        managedEntries,
+        managedEntries: managedEntries.filter(entry => {
+          const name = entry.name.replace(/ \(mcpx\)$/, "");
+          return !config.servers[name]?.scope || adapter.id.endsWith(`@${config.servers[name].scope}`);
+        }).map(entry => ({ ...entry, headers: { Authorization: `Bearer ${consumerToken(config, adapter.id, installationAdapters(config).find(item => item.installation.id === adapter.id)?.installation.projectPath)}` } })),
         managedIndex,
         managedIndexPath,
         sourceEntriesToRemove: Array.from(sourceEntriesToRemove.get(adapter.id) ?? []),
@@ -292,7 +326,7 @@ export function syncAllClients(
   const managedIndexPath = getManagedIndexPath();
   return withManagedIndexLock(`${managedIndexPath}.lock`, () => {
     const managedIndex = loadManagedIndex(managedIndexPath);
-    const adapters = getFilteredAdapters(opts.targetClients);
+    const adapters = getFilteredAdapters(config, opts.targetClients);
     const allPhaseErrors: SyncSummary["phaseErrors"] = [];
 
     // Phase 1: Import (optional, gated by importScan option)
@@ -303,11 +337,18 @@ export function syncAllClients(
       imports = importResult.imports;
       sourceEntriesToRemove = importResult.sourceEntriesToRemove;
       allPhaseErrors.push(...(importResult.phaseErrors ?? []));
+      // Commit canonical ownership before any native registration is retired.
+      if (imports.imported.length) saveConfig(config);
     }
 
     // Phase 2: Gateway entries
     const localToken = ensureGatewayToken(config, secrets);
     const gatewayUrl = getGatewayUrl(config);
+    for (const adapter of adapters) {
+      const installation = installationAdapters(config).find(item => item.installation.id === adapter.id)!.installation;
+      consumerToken(config, adapter.id, installation.projectPath, secrets);
+    }
+    saveConfig(config);
     const managedEntries = buildManagedEntries(config, gatewayUrl, localToken);
 
     const gatewayResult = runGatewayPhase(
@@ -319,7 +360,7 @@ export function syncAllClients(
 
     // Phase 3: Skills
     const skills = listSkills();
-    const skillsErrors = runSkillsPhase(adapters, skills);
+    const skillsErrors = runSkillsPhase(config, adapters, skills);
     allPhaseErrors.push(...(skillsErrors ?? []));
 
     // Phase 4: Plugins (always dispatched, even with zero inputs — handles pruning)
@@ -336,7 +377,7 @@ export function syncAllClients(
       agents: p.discovered.agents,
       hooks: p.discovered.hooks,
     }));
-    const pluginResult = runPluginsPhase(adapters, pluginInputs);
+    const pluginResult = runPluginsPhase(config, adapters, pluginInputs);
     const pluginResults = pluginResult.pluginResults;
     allPhaseErrors.push(...(pluginResult.phaseErrors ?? []));
 
@@ -352,9 +393,19 @@ export function syncAllClients(
       };
     }
 
+    for (const failure of allPhaseErrors) {
+      const state = clientStates[failure.clientId];
+      if (state) { state.status = "ERROR"; state.message = `${failure.phase}: ${failure.message}`; }
+    }
+    for (const plugin of pluginResults) if (plugin.status === "ERROR" || plugin.error) {
+      const state = clientStates[plugin.clientId];
+      if (state) { state.status = "ERROR"; state.message = plugin.error ?? "Plugin projection failed"; }
+    }
     const hasErrors = results.some((r) => r.status === "ERROR")
       || imports.conflicts.length > 0
-      || imports.errors.length > 0;
+      || imports.errors.length > 0
+      || allPhaseErrors.length > 0
+      || pluginResults.some(result => result.status === "ERROR" || Boolean(result.error));
 
     return {
       gatewayUrl,

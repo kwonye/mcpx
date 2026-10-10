@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { NativePackages } from "./NativePackages";
 import { SkillsTab } from "./SkillsTab";
 import { Toggle } from "./ui/Toggle";
 import { ConfirmDialog } from "./ConfirmDialog";
@@ -10,7 +11,7 @@ import type {
   PluginComponent,
 } from "@mcpx/core";
 
-type View = "discover" | "installed" | "marketplaces" | "skills";
+type View = "discover" | "installed" | "marketplaces" | "skills" | "packages";
 
 export function PluginsTab() {
   const [view, setView] = useState<View>("discover");
@@ -278,9 +279,9 @@ export function PluginsTab() {
       />
 
       <div className="plugin-view-tabs" role="tablist" aria-label="Plugin views">
-        {(["discover", "installed", "marketplaces", "skills"] as View[]).map((item) => (
+        {(["discover", "installed", "marketplaces", "skills", "packages"] as View[]).map((item) => (
           <button key={item} role="tab" aria-selected={view === item} className="plugin-view-tab" data-active={view === item} onClick={() => setView(item)}>
-            {item === "skills" ? "Shared Skills" : item[0].toUpperCase() + item.slice(1)}
+            {item === "skills" ? "Shared Skills" : item === "packages" ? "Native Packages" : item[0].toUpperCase() + item.slice(1)}
             {item === "installed" && plugins.length > 0 ? ` (${plugins.length})` : ""}
           </button>
         ))}
@@ -386,6 +387,7 @@ export function PluginsTab() {
         </section>
       )}
 
+      {view === "packages" && <NativePackages />}
       {view === "skills" && <SkillsTab />}
     </div>
   );

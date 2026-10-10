@@ -1,4 +1,8 @@
 import fs from "node:fs";
+import { getAdapters } from "../adapters/index.js";
+import { z } from "zod";
+import { writeJsonAtomic } from "../util/fs.js";
+import { pathFingerprint } from "./file-state.js";
 import path from "node:path";
 import { homeDir, ensureDir } from "./paths.js";
 import type { PluginSyncInput, PluginSyncResult, ClientId, PluginComponent } from "../types.js";
@@ -11,6 +15,7 @@ interface OwnershipManifest {
     pluginId: string;
     paths: string[];
     installedAt: string;
+    hashes?: Record<string, string>;
   }>;
 }
 
@@ -20,19 +25,15 @@ function loadOwnership(targetDir: string): OwnershipManifest {
     return { version: 1, plugins: {} };
   }
   try {
-    return JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+    return z.object({ version: z.literal(1), plugins: z.record(z.string(), z.object({ pluginId: z.string(), paths: z.array(z.string()), installedAt: z.string(), hashes: z.record(z.string(), z.string()).optional() })) }).parse(JSON.parse(fs.readFileSync(manifestPath, "utf8")));
   } catch {
     console.error(`[mcpx] Warning: corrupt plugin ownership manifest at ${manifestPath}, resetting`);
-    return { version: 1, plugins: {} };
+    throw new Error(`Invalid plugin ownership manifest: ${manifestPath}`);
   }
 }
 
 function saveOwnership(targetDir: string, manifest: OwnershipManifest): void {
-  ensureDir(targetDir);
-  fs.writeFileSync(
-    path.join(targetDir, OWNERSHIP_MANIFEST),
-    JSON.stringify(manifest, null, 2)
-  );
+  writeJsonAtomic(path.join(targetDir, OWNERSHIP_MANIFEST), manifest);
 }
 
 function recordOwned(targetDir: string, pluginId: string, paths: string[]): void {
@@ -44,7 +45,7 @@ function recordOwned(targetDir: string, pluginId: string, paths: string[]): void
     const stalePath = path.join(targetDir, stale);
     try {
       assertWithinBase(targetDir, stalePath);
-      fs.rmSync(stalePath, { recursive: true, force: true });
+      if (manifest.plugins[pluginId]?.hashes?.[stale] === pathFingerprint(stalePath)) fs.rmSync(stalePath, { recursive: true, force: true });
     } catch {
       // Never remove a path outside the projection base.
     }
@@ -53,6 +54,7 @@ function recordOwned(targetDir: string, pluginId: string, paths: string[]): void
     pluginId,
     paths,
     installedAt: new Date().toISOString(),
+    hashes: Object.fromEntries(paths.map(p => [p, pathFingerprint(path.join(targetDir, p)) ?? ""])),
   };
   saveOwnership(targetDir, manifest);
 }
@@ -69,12 +71,13 @@ function removeOwned(targetDir: string, pluginId: string): string[] {
 }
 
 export function prunePluginProjections(targetDir: string, pluginId: string): void {
+  const entry = loadOwnership(targetDir).plugins[pluginId];
   const paths = removeOwned(targetDir, pluginId);
   for (const p of paths) {
     const fullPath = path.join(targetDir, p);
     try {
       assertWithinBase(targetDir, fullPath);
-      if (fs.existsSync(fullPath)) {
+      if (entry?.hashes?.[p] && entry.hashes[p] === pathFingerprint(fullPath)) {
         fs.rmSync(fullPath, { recursive: true, force: true });
       }
     } catch {
@@ -125,6 +128,17 @@ function isComponentApproved(plugin: PluginSyncInput, component: PluginComponent
   return plugin.components[component] ?? false;
 }
 
+
+function assertProjectionWritable(base: string, relative: string, pluginId: string): void {
+  const target = path.join(base, relative);
+  assertWithinBase(base, target);
+  const current = pathFingerprint(target);
+  if (current === null) return;
+  const prior = loadOwnership(base).plugins[pluginId];
+  if (!prior?.paths.includes(relative)) throw new Error(`Preserving unowned plugin projection: ${relative}`);
+  if (!prior.hashes?.[relative] || prior.hashes[relative] !== current) throw new Error(`Plugin projection was edited locally: ${relative}`);
+}
+
 // --- Claude Code: materialize whole plugin into ~/.claude/skills/<plugin>/ ---
 function syncClaude(plugins: PluginSyncInput[]): PluginSyncResult {
   const targetBase = path.join(homeDir(), ".claude", "skills");
@@ -135,12 +149,16 @@ function syncClaude(plugins: PluginSyncInput[]): PluginSyncResult {
   for (const plugin of plugins) {
     if (!plugin.enabled) continue;
     if (!isComponentApproved(plugin, "skills")) {
+      prunePluginProjections(targetBase, plugin.pluginId);
       skippedUnapproved.push(`${plugin.pluginName}:skills`);
       continue;
     }
 
     const targetDir = path.join(targetBase, plugin.pluginName);
     assertWithinBase(targetBase, targetDir);
+    const prior = loadOwnership(targetBase).plugins[plugin.pluginId];
+    if (pathFingerprint(targetDir) !== null && !prior?.paths.includes(plugin.pluginName)) throw new Error(`Preserving unowned plugin projection: ${targetDir}`);
+    if (prior && (!prior.hashes?.[plugin.pluginName] || prior.hashes[plugin.pluginName] !== pathFingerprint(targetDir))) throw new Error(`Plugin projection was edited locally: ${targetDir}`);
     ensureDir(targetDir);
 
     const mcpJsonSrc = path.join(plugin.pluginRoot, ".mcp.json");
@@ -200,10 +218,11 @@ function syncNamespacedComponents(config: NamespacedProjectionConfig, plugins: P
     for (const skill of plugin.skills) {
       try {
         const name = nsName(plugin.pluginName, skill.id);
+        assertProjectionWritable(config.skillsBase, name, plugin.pluginId);
         const targetDir = path.join(config.skillsBase, name);
         assertWithinBase(config.skillsBase, targetDir);
         ensureDir(targetDir);
-        copyFileOrDir(skill.path, path.join(targetDir, "SKILL.md"));
+        copyFileOrDir(skill.path, path.join(targetDir, "SKILL.md"), errors);
         owned.push(name);
         projectedDirs.push(targetDir);
       } catch (error) {
@@ -224,6 +243,7 @@ function syncNamespacedComponents(config: NamespacedProjectionConfig, plugins: P
     const owned: string[] = [];
     for (const command of plugin.commands) {
       try {
+        assertProjectionWritable(config.commandsBase, `${nsName(plugin.pluginName, command.id)}.md`, plugin.pluginId);
         const targetPath = path.join(config.commandsBase, `${nsName(plugin.pluginName, command.id)}.md`);
         assertWithinBase(config.commandsBase, targetPath);
         copyFileOrDir(command.path, targetPath);
@@ -242,7 +262,7 @@ function syncNamespacedComponents(config: NamespacedProjectionConfig, plugins: P
   }
   return {
     clientId: config.clientId,
-    status: "SYNCED",
+    status: errors.length ? "ERROR" : "SYNCED",
     projectedDirs,
     unsupported: config.unsupported,
     ...(errors.length > 0 ? { error: errors.join("; ") } : {}),
@@ -513,7 +533,7 @@ export function syncPluginsToClient(clientId: string, plugins: PluginSyncInput[]
   const syncMap: Record<string, (plugins: PluginSyncInput[]) => PluginSyncResult> = {
     claude: syncClaude,
     "claude-desktop": syncClaudeDesktop,
-    codex: (plugins) => syncNamespacedComponents({ clientId: "codex", skillsBase: path.join(homeDir(), ".codex", "skills"), unsupported: ["hooks", "agents"] }, plugins),
+    codex: (plugins) => syncNamespacedComponents({ clientId: "codex", skillsBase: path.join(homeDir(), ".agents", "skills"), unsupported: ["hooks", "agents"] }, plugins),
     cursor: (plugins) => syncNamespacedComponents({ clientId: "cursor", skillsBase: path.join(homeDir(), ".cursor", "skills"), commandsBase: path.join(homeDir(), ".cursor", "commands"), unsupported: ["hooks", "agents"] }, plugins),
     vscode: (plugins) => syncNamespacedComponents({ clientId: "vscode", skillsBase: path.join(homeDir(), ".copilot", "skills"), unsupported: ["hooks", "agents"] }, plugins),
     qwen: (plugins) => syncNamespacedComponents({ clientId: "qwen", skillsBase: path.join(homeDir(), ".qwen", "skills"), unsupported: ["hooks", "agents", "commands"] }, plugins),
@@ -524,14 +544,21 @@ export function syncPluginsToClient(clientId: string, plugins: PluginSyncInput[]
 
   const syncFn = syncMap[clientId];
   if (!syncFn) {
-    return { clientId: clientId as ClientId, status: "SKIPPED", projectedDirs: [], unsupported: [] };
+    const adapter = getAdapters().find(adapter => adapter.id === clientId);
+    const supported = adapter?.descriptor?.pluginComponents ?? [];
+    const base = adapter?.skillDirectory?.() ?? (adapter?.descriptor?.skillPath ? path.join(homeDir(), adapter.descriptor.skillPath) : undefined);
+    if (base && supported.includes("skills")) {
+      pruneUnlistedPlugins(base, plugins.filter(plugin => plugin.enabled).map(plugin => plugin.pluginId));
+      return syncNamespacedComponents({ clientId, skillsBase: base, unsupported: (["skills", "hooks", "agents", "commands"] as PluginComponent[]).filter(component => !supported.includes(component)) }, plugins);
+    }
+    return { clientId, status: "SKIPPED", projectedDirs: [], unsupported: ["skills", "hooks", "agents", "commands"] };
   }
 
   // Prune unlisted plugins before projecting
   const targetBaseMap: Record<string, string> = {
     claude: path.join(homeDir(), ".claude", "skills"),
     "claude-desktop": "",
-    codex: path.join(homeDir(), ".codex", "skills"),
+    codex: path.join(homeDir(), ".agents", "skills"),
     cursor: path.join(homeDir(), ".cursor", "skills"),
     vscode: path.join(homeDir(), ".copilot", "skills"),
     qwen: path.join(homeDir(), ".qwen", "skills"),
@@ -550,6 +577,15 @@ export function syncPluginsToClient(clientId: string, plugins: PluginSyncInput[]
   }
 
   return syncFn(plugins);
+}
+
+export function syncProjectPluginSkills(clientId: string, skillsBase: string, plugins: PluginSyncInput[]): PluginSyncResult {
+  pruneUnlistedPlugins(skillsBase, plugins.filter(plugin => plugin.enabled).map(plugin => plugin.pluginId));
+  return syncNamespacedComponents({
+    clientId,
+    skillsBase,
+    unsupported: ["hooks", "agents", "commands"],
+  }, plugins);
 }
 
 // --- File copy helpers ---

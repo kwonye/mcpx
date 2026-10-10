@@ -29,6 +29,20 @@ function invokeIpc<T>(channel: string, ...args: unknown[]): Promise<T> {
 }
 
 const api = {
+  management: {
+    snapshot: () => invokeIpc<import("@mcpx/core").ManagementSnapshot>(IPC.MANAGEMENT_COMMAND, "snapshot", []),
+    plan: (harnesses?: string[]) => invokeIpc<import("@mcpx/core").AdoptionPlan>(IPC.MANAGEMENT_COMMAND, "adoption.plan", [harnesses]),
+    apply: (plan: import("@mcpx/core").AdoptionPlan, ids: string[]) => invokeIpc<import("@mcpx/core").Operation>(IPC.MANAGEMENT_COMMAND, "adoption.apply", [plan, ids]),
+    rollback: (id: string) => invokeIpc<import("@mcpx/core").Operation>(IPC.MANAGEMENT_COMMAND, "operation.rollback", [id]),
+    mode: (id: string, mode: import("@mcpx/core").SyncMode) => invokeIpc(IPC.MANAGEMENT_COMMAND, "harness.mode", [id, mode]),
+    pinPackage: (id: string, pinned: boolean) => invokeIpc(IPC.MANAGEMENT_COMMAND, "package.pin", [id, pinned]),
+    sync: () => invokeIpc<SyncSummary>(IPC.MANAGEMENT_COMMAND, "sync", []),
+    onChange: (callback: () => void) => {
+      const listener = () => callback();
+      ipcRenderer.on(IPC.MANAGEMENT_EVENT, listener);
+      return () => ipcRenderer.removeListener(IPC.MANAGEMENT_EVENT, listener);
+    }
+  },
   getStatus: () => invokeIpc<StatusReport>(IPC.GET_STATUS),
   getServers: () => invokeIpc<Array<Record<string, unknown>>>(IPC.GET_SERVERS),
   getDesktopSettings: () => invokeIpc<DesktopSettings>(IPC.GET_DESKTOP_SETTINGS),
@@ -90,8 +104,8 @@ const api = {
     rollback: (id: string) => invokeIpc(IPC.ROLLBACK_SKILL, id)
   },
   share: {
-    export: (directory: string, options?: unknown) => invokeIpc(IPC.SHARE_EXPORT, directory, options),
-    import: (directory: string, options?: unknown) => invokeIpc(IPC.SHARE_IMPORT, directory, options)
+    export: (directory: string, options?: unknown) => invokeIpc<ReturnType<typeof import("@mcpx/core").exportEnvironment>>(IPC.SHARE_EXPORT, directory, options),
+    import: (directory: string, options?: unknown) => invokeIpc<Awaited<ReturnType<typeof import("@mcpx/core").importEnvironment>>>(IPC.SHARE_IMPORT, directory, options)
   },
   plugins: {
     inspect: (source: string) => invokeIpc(IPC.PLUGIN_INSPECT, source),

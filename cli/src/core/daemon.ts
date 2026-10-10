@@ -6,13 +6,17 @@ import { createGatewayServer } from "../gateway/server.js";
 import { SecretsManager } from "./secrets.js";
 import { ensureGatewayToken } from "./registry.js";
 import type { McpxConfig } from "../types.js";
-import { saveConfig } from "./config.js";
+import { loadConfig } from "./config.js";
+import { mutateConfig } from "./config-store.js";
+import { lockOwnerAlive } from "./file-state.js";
+import { controlRequest, startControlServer } from "./control.js";
 import { syncAllClients, persistSyncState } from "./sync.js";
 import { startBackgroundUpdateCheck } from "./update-manager.js";
 import { withManagedIndexLock } from "./managed-index-lock.js";
 import { getManagedIndexPath } from "./paths.js";
 import { startMarketplaceAutoUpdater } from "./marketplace-updater.js";
 import { captureTelemetryEvent, durationBucket } from "./telemetry.js";
+import { capture } from "./analytics.js";
 
 export interface DaemonStatus {
   running: boolean;
@@ -103,18 +107,7 @@ export async function resolveGatewayPort(config: McpxConfig, secrets?: SecretsMa
     if (await isPortAvailable(candidate)) {
       const oldPort = config.gateway.port;
       config.gateway.port = candidate;
-      saveConfig(config);
-
-      // Sync clients so their URLs reflect the new port
-      if (secrets) {
-        try {
-          const summary = syncAllClients(config, secrets);
-          persistSyncState(summary, config);
-          saveConfig(config);
-        } catch {
-          // Best-effort sync after port change
-        }
-      }
+      await mutateConfig(fresh => { fresh.gateway.port = candidate; });
 
       return { port: candidate, fellBackFrom: oldPort };
     }
@@ -123,7 +116,7 @@ export async function resolveGatewayPort(config: McpxConfig, secrets?: SecretsMa
   throw new Error(`No available local port found near ${config.gateway.port}.`);
 }
 
-async function waitForGatewayReady(port: number, token: string, timeoutMs = 15000): Promise<void> {
+async function waitForGatewayReady(port: number, token: string, timeoutMs = 15000, expectedPid?: number): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   let lastError: unknown;
 
@@ -137,7 +130,8 @@ async function waitForGatewayReady(port: number, token: string, timeoutMs = 1500
         signal: AbortSignal.timeout(500)
       });
       if (response.ok) {
-        return;
+        const health = await response.json() as { pid?: number; server?: string };
+        if (health.server === "mcpx" && (!expectedPid || health.pid === expectedPid)) return;
       }
       lastError = new Error(`Gateway returned HTTP ${response.status}.`);
     } catch (error) {
@@ -175,6 +169,23 @@ export function getDaemonStatus(config: McpxConfig): DaemonStatus {
 }
 
 export async function startDaemon(config: McpxConfig, cliPath: string, secrets: SecretsManager): Promise<DaemonStartResult> {
+  const lockPath = `${getPidPath()}.start.lock`;
+  ensureParentDir(lockPath);
+  const deadline = Date.now() + 30000;
+  while (true) {
+    try { fs.writeFileSync(lockPath, String(process.pid), { flag: "wx", mode: 0o600 }); break; }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      if (!lockOwnerAlive(lockPath)) { try { fs.unlinkSync(lockPath); } catch {} continue; }
+      if (Date.now() > deadline) throw new Error("Another mcpx startup did not finish.");
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+  }
+  try { return await startDaemonWithLease(config, cliPath, secrets); }
+  finally { fs.rmSync(lockPath, { force: true }); }
+}
+
+async function startDaemonWithLease(config: McpxConfig, cliPath: string, secrets: SecretsManager): Promise<DaemonStartResult> {
   const startedAt = Date.now();
   const existingStatus = getDaemonStatus(config);
   if (existingStatus.running && existingStatus.pid) {
@@ -191,6 +202,7 @@ export async function startDaemon(config: McpxConfig, cliPath: string, secrets: 
       name: "operation_completed",
       properties: { operation: "daemon_start", outcome: "success", durationBucket: durationBucket(Date.now() - startedAt) }
     });
+    await waitForGatewayReady(result.port, ensureGatewayToken(config, secrets), 15000, result.pid);
     return result;
   }
 
@@ -220,16 +232,27 @@ export async function startDaemon(config: McpxConfig, cliPath: string, secrets: 
   const child = spawn(process.execPath, [cliPath, "daemon", "run", "--port", String(port)], {
     detached: true,
     stdio: ["ignore", logFd, logFd],
-    env: buildDaemonChildEnv()
+    env: { ...buildDaemonChildEnv(), MCPX_CLI_ENTRY: cliPath }
   });
 
+  fs.closeSync(logFd);
   child.unref();
 
   fs.writeFileSync(pidPath, `${child.pid}:${port}\n`, { mode: 0o600 });
 
   startBackgroundUpdateCheck();
-  await waitForGatewayReady(port, token);
+  try { await waitForGatewayReady(port, token, 15000, child.pid); }
+  catch (error) { child.kill("SIGTERM"); fs.rmSync(pidPath, { force: true }); throw error; }
+  if (fellBackFrom) {
+    const fresh = loadConfig();
+    const targets = Object.keys(fresh.clients);
+    if (targets.length) {
+      const summary = syncAllClients(fresh, secrets, { targetClients: targets });
+      await mutateConfig(latest => persistSyncState(summary, latest));
+    }
+  }
 
+  capture("daemon_started", { port });
   const result = {
     started: true,
     pid: child.pid ?? -1,
@@ -243,7 +266,7 @@ export async function startDaemon(config: McpxConfig, cliPath: string, secrets: 
   return result;
 }
 
-export function stopDaemon(): { stopped: boolean; message: string } {
+export async function stopDaemon(): Promise<{ stopped: boolean; message: string }> {
   const startedAt = Date.now();
   const pidPath = getPidPath();
   const pid = readPidFromFile(pidPath);
@@ -258,6 +281,14 @@ export function stopDaemon(): { stopped: boolean; message: string } {
       properties: { operation: "daemon_stop", outcome: "success", durationBucket: durationBucket(Date.now() - startedAt) }
     });
     return result;
+  }
+
+  try {
+    const health = await controlRequest<{ pid: number; activeWriters: number }>("service.health");
+    if (health.pid !== pid) throw new Error("The PID record does not identify the running mcpx service.");
+    if (health.activeWriters > 0) throw new Error("mcpx is applying changes. Let the active operation finish before stopping the service.");
+  } catch (error) {
+    if (!["ENOENT", "ECONNREFUSED", "FailedToOpenSocket"].includes((error as NodeJS.ErrnoException).code ?? "")) throw error;
   }
 
   // PID safety: verify the process is actually a mcpx daemon before killing
@@ -296,12 +327,17 @@ export function stopDaemon(): { stopped: boolean; message: string } {
     // Ignore already dead process.
   }
 
+  const deadline = Date.now() + 10000;
+  while (processExists(pid) && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 50));
+  if (processExists(pid)) throw new Error(`mcpx daemon ${pid} did not stop; its PID record was retained.`);
+
   try {
     fs.unlinkSync(pidPath);
   } catch {
     // Ignore cleanup failure.
   }
 
+  capture("daemon_stopped", {});
   const result = {
     stopped: true,
     message: `Stopped mcpx daemon (pid ${pid}).`
@@ -315,7 +351,7 @@ export function stopDaemon(): { stopped: boolean; message: string } {
 
 export async function restartDaemon(config: McpxConfig, cliPath: string, secrets: SecretsManager): Promise<DaemonStartResult> {
   const startedAt = Date.now();
-  stopDaemon();
+  await stopDaemon();
   try {
     const result = await startDaemon(config, cliPath, secrets);
     captureTelemetryEvent({
@@ -342,27 +378,21 @@ export function readDaemonLogs(maxLines = 200): string {
   return lines.slice(Math.max(lines.length - maxLines, 0)).join("\n");
 }
 
-export function runDaemonForeground(config: McpxConfig, port: number, secrets: SecretsManager): Promise<void> {
+export async function runDaemonForeground(config: McpxConfig, port: number, secrets: SecretsManager): Promise<void> {
+  const stopControl = await startControlServer();
   return new Promise((resolve, reject) => {
-    const token = ensureGatewayToken(config, secrets);
-
-    const server = createGatewayServer({
-      port,
-      expectedToken: token,
-      secrets
-    });
+    const server = createGatewayServer({ port, expectedToken: ensureGatewayToken(config, secrets), secrets });
     const stopMarketplaceUpdater = startMarketplaceAutoUpdater();
-
+    let closing = false;
     const cleanup = () => {
+      if (closing) return;
+      closing = true;
       stopMarketplaceUpdater();
-      server.close(() => resolve());
+      void stopControl().finally(() => server.close(() => resolve()));
+      server.closeIdleConnections();
     };
-
-    process.on("SIGINT", cleanup);
-    process.on("SIGTERM", cleanup);
-
-    server.on("error", (error) => {
-      reject(error);
-    });
+    process.once("SIGINT", cleanup);
+    process.once("SIGTERM", cleanup);
+    server.on("error", error => { void stopControl().finally(() => reject(error)); });
   });
 }

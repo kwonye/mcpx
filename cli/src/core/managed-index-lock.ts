@@ -1,14 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
-function isStale(lockPath: string, maxAgeMs = 5000): boolean {
-  try {
-    const stat = fs.statSync(lockPath);
-    return Date.now() - stat.mtimeMs > maxAgeMs;
-  } catch {
-    return true;
-  }
-}
+import { lockOwnerAlive } from "./file-state.js";
 
 export function withManagedIndexLock<T>(lockPath: string, fn: () => T): T {
   fs.mkdirSync(path.dirname(lockPath), { recursive: true });
@@ -18,10 +11,11 @@ export function withManagedIndexLock<T>(lockPath: string, fn: () => T): T {
       fs.writeFileSync(lockPath, `${process.pid}\n`, { flag: "wx" });
       break;
     } catch {
-      if (isStale(lockPath)) {
+      if (!lockOwnerAlive(lockPath)) {
         try { fs.unlinkSync(lockPath); } catch {}
         continue;
       }
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
       if (Date.now() > deadline) {
         throw new Error(`Timed out waiting for managed-index lock: ${lockPath}`);
       }

@@ -11,7 +11,8 @@ const build = await Bun.build({
   format: "esm",
   splitting: true,
   sourcemap: "external",
-  external: ["commander", "hono", "zod", "@modelcontextprotocol/client", "@modelcontextprotocol/client/stdio", "@modelcontextprotocol/node", "@modelcontextprotocol/server", "@modelcontextprotocol/server/stdio", "@iarna/toml", "yaml"],
+  // The desktop ships cli/dist without node_modules; the CLI must be self-contained.
+  external: [],
   define: {
     "process.env.MCPX_POSTHOG_PROJECT_TOKEN": JSON.stringify(process.env.MCPX_POSTHOG_PROJECT_TOKEN ?? ""),
     "process.env.POSTHOG_PROJECT_TOKEN": JSON.stringify(process.env.POSTHOG_PROJECT_TOKEN ?? ""),

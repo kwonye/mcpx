@@ -12,8 +12,7 @@ import { APP_VERSION } from "../version.js";
 export async function runStdioProxy(serverName: string): Promise<void> {
   const config = loadConfig();
   const secrets = new SecretsManager();
-  const localToken = ensureGatewayToken(config, secrets);
-  const gatewayUrl = getGatewayUrl(config);
+  const localToken = process.env.MCPX_PROXY_TOKEN ?? ensureGatewayToken(config, secrets);
 
   if (process.env.MCPX_SKIP_DAEMON_AUTOSTART !== "1") {
     const status = getDaemonStatus(config);
@@ -23,6 +22,7 @@ export async function runStdioProxy(serverName: string): Promise<void> {
     }
   }
 
+  const gatewayUrl = getGatewayUrl(loadConfig());
   const upstreamUrl = new URL(`${gatewayUrl}?upstream=${encodeURIComponent(serverName)}`);
   let activeClient: Client | undefined;
   let closed = false;

@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "bun:test";
 import { defaultConfig } from "../src/core/config.js";
-import { ensureGatewayToken, getGatewayTokenSecretName, rotateGatewayToken, setProjectServerEnabled, registerProject, removeServer } from "../src/core/registry.js";
+import { ensureGatewayToken, getGatewayTokenSecretName, rotateGatewayToken, setProjectServerEnabled, registerProject, removeServer, updateServer } from "../src/core/registry.js";
 import { getGatewayTokenPath } from "../src/core/paths.js";
 import { SecretsManager } from "../src/core/secrets.js";
 import { setupTempEnv } from "./helpers.js";
@@ -88,6 +88,26 @@ describe("setProjectServerEnabled", () => {
     config.servers.github = { transport: "http", url: "https://github.com/mcp", enabled: true };
 
     expect(() => setProjectServerEnabled(config, "/not/registered", "github", false)).toThrow();
+  });
+});
+
+describe("updateServer", () => {
+  it("preserves an existing project scope when the update omits it", () => {
+    const config = defaultConfig();
+    config.servers.github = { transport: "stdio", command: "old-command", scope: "/my/project" };
+
+    updateServer(config, "github", { transport: "stdio", command: "new-command" });
+
+    expect(config.servers.github).toEqual({ transport: "stdio", command: "new-command", scope: "/my/project", enabled: true });
+  });
+
+  it("uses an explicitly provided project scope", () => {
+    const config = defaultConfig();
+    config.servers.github = { transport: "stdio", command: "old-command", scope: "/my/project" };
+
+    updateServer(config, "github", { transport: "stdio", command: "new-command", scope: "/other/project" });
+
+    expect(config.servers.github.scope).toBe("/other/project");
   });
 });
 

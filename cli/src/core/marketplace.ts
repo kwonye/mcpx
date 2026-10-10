@@ -22,6 +22,7 @@ import { discoverComponents, hasManifest, readManifest } from "./plugin-parse.js
 
 const execFileAsync = promisify(execFile);
 import { PluginManager, uninstallPlugin } from "./plugin-manager.js";
+import { capture } from "./analytics.js";
 
 const CLAUDE_MANIFEST = ".claude-plugin/marketplace.json";
 const CODEX_MANIFEST = ".agents/plugins/marketplace.json";
@@ -392,6 +393,7 @@ export async function addMarketplace(source: string, manifestPath?: string): Pro
     if (fresh.marketplaces[catalog.name]?.builtIn) throw new Error(`Built-in marketplace ${catalog.name} cannot be replaced`);
     fresh.marketplaces[catalog.name] = marketplace;
   });
+  capture("marketplace_added", { source_type: marketplace.sourceType, format: marketplace.format });
   return marketplace;
 }
 
@@ -449,6 +451,7 @@ export async function removeMarketplace(name: string): Promise<void> {
   const installed = Object.values(config.plugins ?? {}).filter((plugin) => plugin.marketplace?.name === name);
   for (const plugin of installed) await uninstallPlugin(plugin.id, true);
   await mutateConfig((fresh) => { delete fresh.marketplaces?.[name]; });
+  capture("marketplace_removed", { source_type: marketplace.sourceType, installed_plugin_count: installed.length });
 }
 
 export async function listMarketplacePlugins(query?: string): Promise<MarketplaceListing[]> {
@@ -523,11 +526,13 @@ export async function installMarketplacePlugin(id: string): Promise<import("../t
     if (SUPPORTED.has(capability)) approvals[capability as PluginComponent] = true;
   }
   const manager = new PluginManager();
-  return manager.installResolvedPlugin(source, {
+  const installed = await manager.installResolvedPlugin(source, {
     name: pluginName,
     approvals,
     marketplace: { name: marketplaceName, pluginName, sourceFingerprint: detail.sourceFingerprint },
   });
+  capture("plugin_installed", { marketplace: marketplaceName, capabilities: detail.supportedCapabilities });
+  return installed;
 }
 
 export async function updateMarketplaceInstalledPlugin(pluginId: string, sync = true): Promise<import("../types.js").ManagedPlugin> {
@@ -545,7 +550,9 @@ export async function updateMarketplaceInstalledPlugin(pluginId: string, sync = 
     const entry = catalog.entries.find((candidate) => candidate.name === plugin.marketplace!.pluginName);
     if (!entry) throw new Error(`Plugin ${qualified} is no longer listed`);
     const source = resolveMarketplacePluginSource(catalog, entry);
-    return await new PluginManager().updateResolvedPlugin(pluginId, source, detail.sourceFingerprint, sync);
+    const updated = await new PluginManager().updateResolvedPlugin(pluginId, source, detail.sourceFingerprint, sync);
+    capture("plugin_updated", { marketplace: plugin.marketplace.name, plugin_name: plugin.marketplace.pluginName });
+    return updated;
   } catch (error) {
     await mutateConfig((config) => {
       const current = config.plugins?.[pluginId];

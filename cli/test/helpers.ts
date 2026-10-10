@@ -11,6 +11,7 @@ export function setupTempEnv(prefix: string): TempEnvContext {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
   const original = {
     HOME: process.env.HOME,
+    MCPX_SKIP_DAEMON_AUTOSTART: process.env.MCPX_SKIP_DAEMON_AUTOSTART,
     MCPX_CONFIG_HOME: process.env.MCPX_CONFIG_HOME,
     MCPX_DATA_HOME: process.env.MCPX_DATA_HOME,
     MCPX_STATE_HOME: process.env.MCPX_STATE_HOME,
@@ -19,6 +20,7 @@ export function setupTempEnv(prefix: string): TempEnvContext {
   };
 
   process.env.HOME = root;
+  process.env.MCPX_SKIP_DAEMON_AUTOSTART = "1";
   process.env.MCPX_CONFIG_HOME = path.join(root, "config");
   process.env.MCPX_DATA_HOME = path.join(root, "data");
   process.env.MCPX_STATE_HOME = path.join(root, "state");
@@ -26,6 +28,7 @@ export function setupTempEnv(prefix: string): TempEnvContext {
 
   const restore = () => {
     process.env.HOME = original.HOME;
+    process.env.MCPX_SKIP_DAEMON_AUTOSTART = original.MCPX_SKIP_DAEMON_AUTOSTART;
     process.env.MCPX_CONFIG_HOME = original.MCPX_CONFIG_HOME;
     process.env.MCPX_DATA_HOME = original.MCPX_DATA_HOME;
     process.env.MCPX_STATE_HOME = original.MCPX_STATE_HOME;

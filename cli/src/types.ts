@@ -1,8 +1,10 @@
-export type ClientId = "claude" | "claude-desktop" | "codex" | "cursor" | "cline" | "opencode" | "kiro" | "vscode" | "qwen" | "openclaw" | "hermes";
+/** Harness IDs come from the adapter registry, including project installations. */
+export type ClientId = string;
 
 export type PluginComponent = "mcpServers" | "skills" | "hooks" | "agents" | "commands";
 
 export interface HttpServerSpec {
+  scope?: string;
   transport: "http";
   url: string;
   headers?: Record<string, string>;
@@ -10,6 +12,7 @@ export interface HttpServerSpec {
 }
 
 export interface StdioServerSpec {
+  scope?: string;
   transport: "stdio";
   command: string;
   args?: string[];
@@ -48,6 +51,11 @@ export interface ProjectScope {
 
 export interface McpxConfig {
   schemaVersion: 1;
+  consumers?: Record<string, { tokenRef: string; projectPath?: string }>;
+  packages?: Record<string, { id: string; root: string; source: string; harness: string; fingerprint: string; pinned: boolean; name?: string; identity?: string; servers?: string[]; skills?: Array<{ id: string; path: string; projectionPath: string }>; scope?: string; previous?: { root: string; fingerprint: string } }>;
+  revision?: number;
+  harnesses?: Record<string, { mode: "observe" | "selected" | "automatic" }>;
+  origins?: Record<string, { id: string; kind: string; harness: string; source: string; nativeKey: string; fingerprint: string; operationId: string }>;
   name?: string;
   gateway: GatewayConfig;
   servers: Record<string, UpstreamServerSpec>;
@@ -140,6 +148,9 @@ export interface SyncResult {
 }
 
 export interface Skill {
+  projectionPath?: string;
+  scope?: string;
+  ownerHarness?: string;
   id: string;
   content: string;
   /** Canonical directory containing SKILL.md and optional resources. */
@@ -170,12 +181,24 @@ export interface PluginSyncResult {
   error?: string;
 }
 
+export interface HarnessDescriptor {
+  label?: string;
+  projectConfig?: string;
+  skillPath?: string;
+  projectSkills?: string;
+  skillLayout?: "dir" | "flat";
+  pluginComponents?: PluginComponent[];
+}
 export interface ClientAdapter {
+  descriptor?: HarnessDescriptor;
+  managedName?(serverName: string): string;
   id: ClientId;
   detectConfigPath(): string | null;
   supportsHttp(): boolean;
   scanForImports(config: McpxConfig, managedIndex: ManagedIndex): ClientImportScanResult;
   syncGateway(config: McpxConfig, options: SyncClientOptions): SyncResult;
+  skillDirectory?(): string;
+  additionalSkillDirectories?(): string[];
   syncSkills?(skills: Skill[]): void;
   syncPlugins?(plugins: PluginSyncInput[]): PluginSyncResult;
 }
