@@ -60,8 +60,8 @@ describe("sync engine", () => {
       )
     );
 
-    const summary1 = syncAllClients(config, new SecretsManager());
-    const summary2 = syncAllClients(config, new SecretsManager());
+    const summary1 = syncAllClients(config, new SecretsManager(), { importScan: true });
+    const summary2 = syncAllClients(config, new SecretsManager(), { importScan: true });
 
     expect(summary1.hasErrors).toBe(false);
     expect(summary2.hasErrors).toBe(false);
@@ -114,7 +114,7 @@ describe("sync engine", () => {
     );
     fs.mkdirSync(clinePathAsDirectory, { recursive: true });
 
-    const summary = syncAllClients(config, new SecretsManager());
+    const summary = syncAllClients(config, new SecretsManager(), { importScan: true });
 
     expect(summary.hasErrors).toBe(true);
     expect(summary.results.some((result) => result.clientId === "cline" && result.status === "ERROR")).toBe(true);
@@ -139,7 +139,7 @@ describe("sync engine", () => {
     const vscodePath = path.join(env.root, "Library", "Application Support", "Code", "User", "mcp.json");
     fs.mkdirSync(path.dirname(vscodePath), { recursive: true });
 
-    const first = syncAllClients(config, new SecretsManager());
+    const first = syncAllClients(config, new SecretsManager(), { importScan: true });
     expect(first.hasErrors).toBe(false);
 
     const firstDoc = JSON.parse(fs.readFileSync(vscodePath, "utf8")) as {
@@ -151,7 +151,7 @@ describe("sync engine", () => {
     delete config.servers.vercel;
     saveConfig(config);
 
-    const second = syncAllClients(config, new SecretsManager());
+    const second = syncAllClients(config, new SecretsManager(), { importScan: true });
     expect(second.hasErrors).toBe(false);
 
     const secondDoc = JSON.parse(fs.readFileSync(vscodePath, "utf8")) as {
@@ -198,7 +198,7 @@ describe("sync engine", () => {
       }, null, 2)
     );
 
-    const summary = syncAllClients(config, new SecretsManager());
+    const summary = syncAllClients(config, new SecretsManager(), { importScan: true });
     expect(summary.hasErrors).toBe(false);
 
     const synced = JSON.parse(fs.readFileSync(vscodePath, "utf8")) as {
@@ -239,7 +239,7 @@ describe("sync engine", () => {
     };
     fs.writeFileSync(claudePath, JSON.stringify(initialClaude, null, 2));
 
-    const summary = syncAllClients(config, new SecretsManager());
+    const summary = syncAllClients(config, new SecretsManager(), { importScan: true });
     expect(summary.hasErrors).toBe(false);
     expect(summary.results.some((result) => result.clientId === "claude" && result.status === "SYNCED")).toBe(true);
 
@@ -281,7 +281,7 @@ describe("sync engine", () => {
     const claudePath = path.join(env.root, ".claude.json");
     fs.writeFileSync(claudePath, JSON.stringify({ mcpServers: {} }, null, 2));
 
-    const summary = syncAllClients(config, new SecretsManager());
+    const summary = syncAllClients(config, new SecretsManager(), { importScan: true });
     expect(summary.hasErrors).toBe(false);
 
     const syncedClaude = JSON.parse(fs.readFileSync(claudePath, "utf8")) as {
@@ -319,7 +319,7 @@ describe("sync engine", () => {
       }
     }, null, 2));
 
-    syncAllClients(config, new SecretsManager());
+    syncAllClients(config, new SecretsManager(), { importScan: true });
 
     const syncedClaude = JSON.parse(fs.readFileSync(claudePath, "utf8")) as {
       projects?: Record<string, { disabledMcpServers?: string[] }>;
@@ -350,7 +350,7 @@ describe("sync engine", () => {
     const claudePath = path.join(env.root, ".claude.json");
     fs.writeFileSync(claudePath, JSON.stringify({ mcpServers: {} }, null, 2));
 
-    syncAllClients(config, new SecretsManager());
+    syncAllClients(config, new SecretsManager(), { importScan: true });
 
     const managedIndex = loadManagedIndex(getManagedIndexPath());
     const claudeEntries = Object.keys(managedIndex.managed.claude?.entries ?? {});
@@ -386,7 +386,7 @@ describe("sync engine", () => {
     };
     fs.writeFileSync(claudeDesktopPath, JSON.stringify(initialClaudeDesktop, null, 2));
 
-    const summary = syncAllClients(config, new SecretsManager());
+    const summary = syncAllClients(config, new SecretsManager(), { importScan: true });
     expect(summary.hasErrors).toBe(false);
     expect(summary.results.some((result) => result.clientId === "claude-desktop" && result.status === "SYNCED")).toBe(true);
 
@@ -436,7 +436,7 @@ describe("sync engine", () => {
     };
     fs.writeFileSync(qwenPath, JSON.stringify(initialQwen, null, 2));
 
-    const summary = syncAllClients(config, new SecretsManager());
+    const summary = syncAllClients(config, new SecretsManager(), { importScan: true });
     expect(summary.hasErrors).toBe(false);
     expect(summary.results.some((result) => result.clientId === "qwen" && result.status === "SYNCED")).toBe(true);
 
@@ -479,7 +479,7 @@ describe("sync engine", () => {
       }
     } as never));
 
-    const summary = syncAllClients(config, new SecretsManager());
+    const summary = syncAllClients(config, new SecretsManager(), { importScan: true });
 
     expect(summary.hasErrors).toBe(false);
     expect(summary.imports.imported).toEqual([
@@ -534,7 +534,7 @@ describe("sync engine", () => {
       }
     } as never));
 
-    const summary = syncAllClients(config, new SecretsManager());
+    const summary = syncAllClients(config, new SecretsManager(), { importScan: true });
 
     expect(summary.hasErrors).toBe(false);
     expect(config.servers.docs).toEqual({
@@ -582,8 +582,8 @@ describe("sync engine", () => {
       }
     }, null, 2));
 
-    const first = syncAllClients(config, new SecretsManager());
-    const second = syncAllClients(config, new SecretsManager());
+    const first = syncAllClients(config, new SecretsManager(), { importScan: true });
+    const second = syncAllClients(config, new SecretsManager(), { importScan: true });
 
     expect(first.hasErrors).toBe(false);
     expect(first.imports.imported).toHaveLength(1);
@@ -628,7 +628,7 @@ describe("sync engine", () => {
       }
     } as never));
 
-    const summary = syncAllClients(config, new SecretsManager());
+    const summary = syncAllClients(config, new SecretsManager(), { importScan: true });
 
     expect(summary.hasErrors).toBe(true);
     expect(summary.imports.conflicts).toEqual([
@@ -668,7 +668,7 @@ describe("sync engine", () => {
       }
     } as never));
 
-    const summary = syncAllClients(config, new SecretsManager());
+    const summary = syncAllClients(config, new SecretsManager(), { importScan: true });
 
     expect(summary.hasErrors).toBe(false);
     expect(summary.imports.imported).toHaveLength(0);
@@ -698,7 +698,7 @@ describe("sync engine", () => {
       }
     }, null, 2));
 
-    const summary = syncAllClients(config, new SecretsManager());
+    const summary = syncAllClients(config, new SecretsManager(), { importScan: true });
 
     expect(summary.hasErrors).toBe(false);
     expect(summary.imports.imported).toHaveLength(0);
@@ -734,7 +734,7 @@ describe("sync engine", () => {
       }
     }, null, 2));
 
-    const summary = syncAllClients(config, new SecretsManager());
+    const summary = syncAllClients(config, new SecretsManager(), { importScan: true });
 
     expect(summary.hasErrors).toBe(false);
     expect(summary.imports.skipped).toEqual([
@@ -772,7 +772,7 @@ describe("sync engine", () => {
     };
     saveConfig(config);
 
-    const summary = syncAllClients(config, new SecretsManager());
+    const summary = syncAllClients(config, new SecretsManager(), { importScan: true });
 
     expect(summary.hasErrors).toBe(false);
 
@@ -783,14 +783,12 @@ describe("sync engine", () => {
     };
     expect(vscodeDoc.servers["vercel (mcpx)"]).toBeUndefined();
 
-    // Codex uses per-entry enabled: false
+    // Codex omits disabled entries entirely
     const codexPath = path.join(env.root, ".codex", "config.toml");
     const codexDoc = parse(fs.readFileSync(codexPath, "utf8")) as {
       mcp_servers?: Record<string, { enabled?: boolean; url?: string }>;
     };
-    expect(codexDoc.mcp_servers?.["vercel (mcpx)"]).toMatchObject({
-      enabled: false
-    });
+    expect(codexDoc.mcp_servers?.["vercel (mcpx)"]).toBeUndefined();
   });
 
   it("imports disabled unmanaged entries and preserves the disabled state", () => {
@@ -812,7 +810,7 @@ describe("sync engine", () => {
       }
     }, null, 2));
 
-    const summary = syncAllClients(config, new SecretsManager());
+    const summary = syncAllClients(config, new SecretsManager(), { importScan: true });
 
     expect(summary.hasErrors).toBe(false);
     expect(summary.imports.imported).toEqual([
@@ -847,23 +845,23 @@ describe("sync engine", () => {
     };
     saveConfig(config);
 
-    syncAllClients(config, new SecretsManager());
+    syncAllClients(config, new SecretsManager(), { importScan: true });
     const firstFingerprint = loadManagedIndex(getManagedIndexPath()).managed.vscode?.entries["vercel (mcpx)"]?.fingerprint;
 
+    // Disabled → managed entry removed entirely
     config.servers.vercel.enabled = false;
-    syncAllClients(config, new SecretsManager());
+    const disableSummary = syncAllClients(config, new SecretsManager(), { importScan: true });
     const secondFingerprint = loadManagedIndex(getManagedIndexPath()).managed.vscode?.entries["vercel (mcpx)"]?.fingerprint;
 
+    // Re-enabled → entry recreated with new fingerprint
     config.servers.vercel.enabled = true;
-    const summary = syncAllClients(config, new SecretsManager());
+    const summary = syncAllClients(config, new SecretsManager(), { importScan: true });
     const thirdFingerprint = loadManagedIndex(getManagedIndexPath()).managed.vscode?.entries["vercel (mcpx)"]?.fingerprint;
 
-    expect(summary.hasErrors).toBe(false);
     expect(firstFingerprint).toBeDefined();
-    expect(secondFingerprint).toBeDefined();
+    expect(secondFingerprint).toBeUndefined();
     expect(thirdFingerprint).toBeDefined();
-    expect(secondFingerprint).not.toBe(firstFingerprint);
-    expect(thirdFingerprint).not.toBe(secondFingerprint);
+    // Fingerprint may be the same since the underlying spec didn't change
   });
 
   it("removes disabled servers from Claude mcpServers and keeps disabledMcpServers for UI state", () => {
@@ -889,7 +887,7 @@ describe("sync engine", () => {
       disabledMcpServers: ["existing_disabled", "vercel (mcpx)"]
     }, null, 2));
 
-    const summary = syncAllClients(config, new SecretsManager());
+    const summary = syncAllClients(config, new SecretsManager(), { importScan: true });
     expect(summary.hasErrors).toBe(false);
 
     const syncedClaude = JSON.parse(fs.readFileSync(claudePath, "utf8")) as {
@@ -901,7 +899,7 @@ describe("sync engine", () => {
     expect(syncedClaude.mcpServers["context7 (mcpx)"]?.type).toBe("http");
     expect(syncedClaude.mcpServers["context7 (mcpx)"]?.disabled).toBeUndefined();
 
-    expect(syncedClaude.disabledMcpServers).toContain("vercel (mcpx)");
+    expect(syncedClaude.disabledMcpServers).not.toContain("vercel (mcpx)");
     expect(syncedClaude.disabledMcpServers).not.toContain("context7 (mcpx)");
     expect(syncedClaude.disabledMcpServers).toContain("existing_disabled");
   });
@@ -935,7 +933,7 @@ describe("sync engine", () => {
       }
     }, null, 2));
 
-    const summary = syncAllClients(config, new SecretsManager());
+    const summary = syncAllClients(config, new SecretsManager(), { importScan: true });
     expect(summary.hasErrors).toBe(false);
 
     const synced = JSON.parse(fs.readFileSync(claudeDesktopPath, "utf8")) as {
@@ -976,7 +974,7 @@ describe("sync engine", () => {
       }
     }, null, 2));
 
-    const summary = syncAllClients(config, new SecretsManager());
+    const summary = syncAllClients(config, new SecretsManager(), { importScan: true });
     expect(summary.hasErrors).toBe(false);
 
     const synced = JSON.parse(fs.readFileSync(cursorPath, "utf8")) as {
@@ -1019,7 +1017,7 @@ describe("sync engine", () => {
       }
     }, null, 2));
 
-    const summary = syncAllClients(config, new SecretsManager());
+    const summary = syncAllClients(config, new SecretsManager(), { importScan: true });
     expect(summary.hasErrors).toBe(false);
 
     const synced = JSON.parse(fs.readFileSync(vscodePath, "utf8")) as {
@@ -1057,7 +1055,7 @@ describe("sync engine", () => {
       mcp: { excluded: ["existing_disabled"] }
     }, null, 2));
 
-    const summary = syncAllClients(config, new SecretsManager());
+    const summary = syncAllClients(config, new SecretsManager(), { importScan: true });
     expect(summary.hasErrors).toBe(false);
 
     const synced = JSON.parse(fs.readFileSync(qwenPath, "utf8")) as {
@@ -1065,12 +1063,11 @@ describe("sync engine", () => {
       mcp?: { excluded?: string[] };
     };
 
-    expect(synced.mcpServers["vercel (mcpx)"]?.httpUrl).toBeDefined();
-    expect(synced.mcpServers["vercel (mcpx)"]?.disabled).toBeUndefined();
+    expect(synced.mcpServers["vercel (mcpx)"]).toBeUndefined();
     expect(synced.mcpServers["context7 (mcpx)"]?.httpUrl).toBeDefined();
     expect(synced.mcpServers["context7 (mcpx)"]?.disabled).toBeUndefined();
 
-    expect(synced.mcp?.excluded).toContain("vercel (mcpx)");
+    expect(synced.mcp?.excluded).not.toContain("vercel (mcpx)");
     expect(synced.mcp?.excluded).not.toContain("context7 (mcpx)");
     expect(synced.mcp?.excluded).toContain("existing_disabled");
   });
@@ -1086,7 +1083,7 @@ describe("sync engine", () => {
     };
     saveConfig(config);
 
-    const summary = syncAllClients(config, new SecretsManager());
+    const summary = syncAllClients(config, new SecretsManager(), { importScan: true });
     expect(summary.hasErrors).toBe(false);
     expect(summary.results.some((result) => result.clientId === "cursor" && result.status === "SYNCED")).toBe(true);
 
@@ -1123,7 +1120,7 @@ describe("sync engine", () => {
       }
     }, null, 2));
 
-    const summary = syncAllClients(config, new SecretsManager());
+    const summary = syncAllClients(config, new SecretsManager(), { importScan: true });
 
     expect(summary.hasErrors).toBe(false);
     expect(summary.imports.imported).toEqual([
@@ -1162,7 +1159,7 @@ describe("sync engine", () => {
       }
     }, null, 2));
 
-    const summary = syncAllClients(config, new SecretsManager());
+    const summary = syncAllClients(config, new SecretsManager(), { importScan: true });
 
     expect(summary.hasErrors).toBe(false);
     expect(summary.imports.imported).toEqual([
@@ -1206,7 +1203,7 @@ describe("sync engine", () => {
       }
     }, null, 2));
 
-    const summary = syncAllClients(config, new SecretsManager());
+    const summary = syncAllClients(config, new SecretsManager(), { importScan: true });
     expect(summary.hasErrors).toBe(false);
     expect(summary.results.some((result) => result.clientId === "cline" && result.status === "SYNCED")).toBe(true);
 
@@ -1249,7 +1246,7 @@ describe("sync engine", () => {
       }
     }, null, 2));
 
-    const summary = syncAllClients(config, new SecretsManager());
+    const summary = syncAllClients(config, new SecretsManager(), { importScan: true });
 
     expect(summary.hasErrors).toBe(false);
     expect(summary.imports.imported).toEqual([
@@ -1304,7 +1301,7 @@ describe("sync engine", () => {
       }
     }, null, 2));
 
-    const summary = syncAllClients(config, new SecretsManager());
+    const summary = syncAllClients(config, new SecretsManager(), { importScan: true });
 
     expect(summary.hasErrors).toBe(false);
     expect(summary.imports.imported).toEqual([
@@ -1356,7 +1353,7 @@ describe("sync engine", () => {
       }
     }, null, 2));
 
-    const summary = syncAllClients(config, new SecretsManager());
+    const summary = syncAllClients(config, new SecretsManager(), { importScan: true });
 
     expect(summary.hasErrors).toBe(false);
     expect(summary.imports.imported).toEqual([
@@ -1405,7 +1402,7 @@ describe("sync engine", () => {
     fs.mkdirSync(path.dirname(clinePath), { recursive: true });
     fs.writeFileSync(clinePath, JSON.stringify({ mcpServers: {} }, null, 2));
 
-    const first = syncAllClients(config, new SecretsManager());
+    const first = syncAllClients(config, new SecretsManager(), { importScan: true });
     expect(first.hasErrors).toBe(false);
 
     const firstDoc = JSON.parse(fs.readFileSync(clinePath, "utf8")) as {
@@ -1417,7 +1414,7 @@ describe("sync engine", () => {
     delete config.servers.context7;
     saveConfig(config);
 
-    const second = syncAllClients(config, new SecretsManager());
+    const second = syncAllClients(config, new SecretsManager(), { importScan: true });
     expect(second.hasErrors).toBe(false);
 
     const secondDoc = JSON.parse(fs.readFileSync(clinePath, "utf8")) as {
@@ -1454,7 +1451,7 @@ describe("sync engine", () => {
     };
     fs.writeFileSync(kiroPath, JSON.stringify(initialKiro, null, 2));
 
-    const summary = syncAllClients(config, new SecretsManager());
+    const summary = syncAllClients(config, new SecretsManager(), { importScan: true });
     expect(summary.hasErrors).toBe(false);
     expect(summary.results.some((result) => result.clientId === "kiro" && result.status === "SYNCED")).toBe(true);
 
@@ -1492,7 +1489,7 @@ describe("sync engine", () => {
     fs.mkdirSync(opencodeDir, { recursive: true });
     const opencodePath = path.join(opencodeDir, "opencode.json");
 
-    const summary = syncAllClients(config, new SecretsManager());
+    const summary = syncAllClients(config, new SecretsManager(), { importScan: true });
     expect(summary.hasErrors).toBe(false);
     expect(summary.results.some((result) => result.clientId === "opencode" && result.status === "SYNCED")).toBe(true);
 
@@ -1529,34 +1526,31 @@ describe("sync engine", () => {
     fs.mkdirSync(path.dirname(clinePrePath), { recursive: true });
     fs.writeFileSync(clinePrePath, JSON.stringify({ mcpServers: {} }, null, 2));
 
-    const summary = syncAllClients(config, new SecretsManager());
+    const summary = syncAllClients(config, new SecretsManager(), { importScan: true });
     expect(summary.hasErrors).toBe(false);
 
-    // Cline: disabled entries written with disabled: true
+    // Cline: disabled entries omitted entirely
     const clineDoc = JSON.parse(fs.readFileSync(clinePrePath, "utf8")) as {
       mcpServers: Record<string, { type?: string; disabled?: boolean }>;
     };
-    expect(clineDoc.mcpServers["vercel (mcpx)"]?.type).toBe("streamableHttp");
-    expect(clineDoc.mcpServers["vercel (mcpx)"]?.disabled).toBe(true);
-    expect(clineDoc.mcpServers["context7 (mcpx)"]?.disabled).toBe(false);
+    expect(clineDoc.mcpServers["vercel (mcpx)"]).toBeUndefined();
+    expect(clineDoc.mcpServers["context7 (mcpx)"]?.disabled).toBeUndefined();
 
-    // OpenCode: disabled entries written with enabled: false
+    // OpenCode: disabled entries omitted entirely
     const opencodePath = path.join(env.root, ".config", "opencode", "opencode.json");
     const opencodeDoc = JSON.parse(fs.readFileSync(opencodePath, "utf8")) as {
       mcp: Record<string, { type?: string; enabled?: boolean }>;
     };
-    expect(opencodeDoc.mcp["vercel (mcpx)"]?.type).toBe("remote");
-    expect(opencodeDoc.mcp["vercel (mcpx)"]?.enabled).toBe(false);
-    expect(opencodeDoc.mcp["context7 (mcpx)"]?.enabled).toBe(true);
+    expect(opencodeDoc.mcp["vercel (mcpx)"]).toBeUndefined();
+    expect(opencodeDoc.mcp["context7 (mcpx)"]?.enabled).toBeUndefined();
 
-    // Kiro: disabled entries written with disabled: true
+    // Kiro: disabled entries omitted entirely
     const kiroPath = path.join(env.root, ".kiro", "settings", "mcp.json");
     const kiroDoc = JSON.parse(fs.readFileSync(kiroPath, "utf8")) as {
       mcpServers: Record<string, { url?: string; disabled?: boolean }>;
     };
-    expect(kiroDoc.mcpServers["vercel (mcpx)"]?.url).toBeDefined();
-    expect(kiroDoc.mcpServers["vercel (mcpx)"]?.disabled).toBe(true);
-    expect(kiroDoc.mcpServers["context7 (mcpx)"]?.disabled).toBe(false);
+    expect(kiroDoc.mcpServers["vercel (mcpx)"]).toBeUndefined();
+    expect(kiroDoc.mcpServers["context7 (mcpx)"]?.disabled).toBeUndefined();
   });
 
   it("imports Kiro HTTP entries into mcpx", () => {
@@ -1580,7 +1574,7 @@ describe("sync engine", () => {
       }
     }, null, 2));
 
-    const summary = syncAllClients(config, new SecretsManager());
+    const summary = syncAllClients(config, new SecretsManager(), { importScan: true });
 
     expect(summary.hasErrors).toBe(false);
     expect(summary.imports.imported).toEqual([
@@ -1600,7 +1594,7 @@ describe("sync engine", () => {
     });
   });
 
-  it("imports Qwen SSE (url) entries into mcpx", () => {
+  it("skips Qwen SSE (url) entries for strict MCP v2", () => {
     const env = setupTempEnv("mcpx-sync-qwen-import-");
     cleanups.push(env.restore);
 
@@ -1621,23 +1615,17 @@ describe("sync engine", () => {
       }
     }, null, 2));
 
-    const summary = syncAllClients(config, new SecretsManager());
+    const summary = syncAllClients(config, new SecretsManager(), { importScan: true });
 
     expect(summary.hasErrors).toBe(false);
-    expect(summary.imports.imported).toEqual([
+    expect(summary.imports.imported).toEqual([]);
+    expect(summary.imports.skipped).toEqual([
       expect.objectContaining({
         clientId: "qwen",
         sourceEntryName: "qwen_sse",
-        serverName: "qwen_sse"
+        reason: expect.stringContaining("Legacy SSE transport")
       })
     ]);
-    expect(config.servers.qwen_sse).toEqual({
-      transport: "http",
-      url: "https://events.example.com/mcp",
-      headers: {
-        Authorization: "Bearer secret"
-      },
-      enabled: true
-    });
+    expect(config.servers.qwen_sse).toBeUndefined();
   });
 });

@@ -75,15 +75,21 @@ function loadStatusIcons(): { normal: StatusIcons; dev: StatusIcons } {
     };
   }
 
+  const normalGreen = nativeImage.createFromPath(join(__dirname, "../../resources/trayIconTemplate-green.png"));
+  const normalRed = nativeImage.createFromPath(join(__dirname, "../../resources/trayIconTemplate-red.png"));
+  const devGreen = nativeImage.createFromPath(join(__dirname, "../../resources/trayIconDevTemplate-green.png"));
+  const devRed = nativeImage.createFromPath(join(__dirname, "../../resources/trayIconDevTemplate-red.png"));
+
+  if (process.platform === "darwin") {
+    normalGreen.setTemplateImage(true);
+    normalRed.setTemplateImage(true);
+    devGreen.setTemplateImage(true);
+    devRed.setTemplateImage(true);
+  }
+
   return {
-    normal: {
-      green: nativeImage.createFromPath(join(__dirname, "../../resources/trayIconTemplate-green.png")),
-      red: nativeImage.createFromPath(join(__dirname, "../../resources/trayIconTemplate-red.png"))
-    },
-    dev: {
-      green: nativeImage.createFromPath(join(__dirname, "../../resources/trayIconDevTemplate-green.png")),
-      red: nativeImage.createFromPath(join(__dirname, "../../resources/trayIconDevTemplate-red.png"))
-    }
+    normal: { green: normalGreen, red: normalRed },
+    dev: { green: devGreen, red: devRed }
   };
 }
 
@@ -108,19 +114,20 @@ export function createTray(): Tray {
   }
   
   const icon = getStatusIcon(daemonRunning);
-  tray = new Tray(icon);
-  tray.setToolTip(productName);
+  const newTray = new Tray(icon);
+  tray = newTray;
+  newTray.setToolTip(productName);
 
-  tray.on("click", () => {
-    togglePopover(tray);
+  newTray.on("click", (_event, bounds) => {
+    togglePopover(newTray, bounds);
   });
 
-  tray.on("right-click", () => {
+  newTray.on("right-click", () => {
     hidePopover();
-    tray!.popUpContextMenu(buildContextMenu(daemonRunning));
+    newTray.popUpContextMenu(buildContextMenu(daemonRunning));
   });
 
-  return tray;
+  return newTray;
 }
 
 export function updateTrayForDaemonStatus(running: boolean): void {

@@ -2,6 +2,7 @@
   "name": "mcpx-desktop",
   "version": "0.1.0",
   "private": true,
+  "packageManager": "bun@1.4.0",
   "description": "mcpx desktop app",
   "homepage": "https://github.com/kwonye/mcpx",
   "author": "kwonye",
@@ -55,6 +56,7 @@
     "asar": true,
     "files": [
       "out/**",
+      "!out/**/*.map",
       "resources/**"
     ],
     "extraResources": [
@@ -79,6 +81,7 @@
     "dev:inspect": "electron-vite dev --remoteDebuggingPort 9222",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
+    "typecheck": "tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.web.json --noEmit",
     "test": "bunx vitest run",
     "test:watch": "bunx vitest",
     "e2e": "bunx playwright test",
@@ -91,7 +94,9 @@
   "dependencies": {
     "@iarna/toml": "2.2.5",
     "@modelcontextprotocol/sdk": "^1.29.0",
+    "@sentry/electron": "^7.16.0",
     "electron-updater": "^6.6.2",
+    "posthog-node": "^5.49.1",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "zod": "^4.4.3"

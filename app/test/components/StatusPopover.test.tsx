@@ -4,12 +4,15 @@ import { StatusPopover } from "../../src/renderer/components/StatusPopover";
 
 const mockMcpx = {
   getStatus: vi.fn().mockResolvedValue({
+    gatewayUrl: "http://127.0.0.1:37373",
     daemon: { running: true, pid: 1234, pidFile: "", logFile: "", port: 37373 },
     upstreamCount: 3,
     servers: [
-      { name: "vercel", enabled: true, transport: "http", target: "https://mcp.vercel.com", authBindings: [], clients: [{ clientId: "claude", status: "ERROR", managed: true }] },
+      { name: "vercel", enabled: true, transport: "http", target: "https://mcp.vercel.com", authBindings: [], clients: [{ clientId: "claude", status: "ERROR", managed: true }], tokenCount: { tools: 12, resources: 0, prompts: 0, total: 1200 } },
       { name: "github", enabled: false, transport: "http", target: "https://mcp.github.com", authBindings: [], clients: [{ clientId: "claude", status: "SYNCED", managed: true }] }
-    ]
+    ],
+    clients: {},
+    totalGlobalTokens: 5000
   }),
   syncAll: vi.fn(),
   daemonStart: vi.fn().mockResolvedValue(undefined),
@@ -17,7 +20,14 @@ const mockMcpx = {
   openDashboard: vi.fn(),
   quitApp: vi.fn(),
   setServerEnabled: vi.fn().mockResolvedValue(undefined),
-  invoke: vi.fn()
+  invoke: vi.fn(),
+  getPendingAuth: vi.fn().mockResolvedValue([]),
+  onAuthStateChanged: vi.fn(() => () => {}),
+  requestAuth: vi.fn().mockResolvedValue({ opened: true }),
+  dismissAuth: vi.fn().mockResolvedValue({ dismissed: "x" }),
+  // Present so the "no longer runs its own OAuth flow" test can assert it
+  // was NOT called, rather than merely being absent from the mock.
+  startOauth: vi.fn().mockResolvedValue(undefined)
 };
 
 beforeEach(() => {
@@ -56,9 +66,11 @@ describe("StatusPopover", () => {
 
   it("shows daemon toggle button in footer when stopped", async () => {
     mockMcpx.getStatus.mockResolvedValueOnce({
+      gatewayUrl: "http://127.0.0.1:37373",
       daemon: { running: false, pid: undefined, pidFile: "", logFile: "", port: 37373 },
       upstreamCount: 3,
-      servers: []
+      servers: [],
+      clients: {}
     });
 
     render(<StatusPopover />);
@@ -115,6 +127,15 @@ describe("StatusPopover", () => {
     expect(mockMcpx.setServerEnabled).toHaveBeenCalledWith("vercel", false);
   });
 
+  it("renders global and per-server token counts from the typed status report", async () => {
+    render(<StatusPopover />);
+
+    // Global total from report.totalGlobalTokens, shown in the header subtitle.
+    expect(await screen.findByText(/~5k Tokens/)).toBeDefined();
+    // Per-server badge from server.tokenCount.total (vercel only; github has no tokenCount).
+    expect(await screen.findByText("~1k")).toBeDefined();
+  });
+
   it("renders the CliCommandInput (Add Server) panel inside the popover", async () => {
     render(<StatusPopover />);
 
@@ -122,5 +143,79 @@ describe("StatusPopover", () => {
     expect(addServerElements.length).toBeGreaterThanOrEqual(1);
     expect(screen.getByLabelText("Paste your mcpx add command")).toBeDefined();
     expect(screen.getByPlaceholderText("Paste your mcpx add command here...")).toBeDefined();
+  });
+
+  describe("pending auth", () => {
+    it("shows a sign-in row for a pending auth entry, with the login button always present", async () => {
+      // Regression test: the login icon used to be gated on entry.oauthLikely,
+      // which was rarely true, so most pending-auth rows had no usable action.
+      mockMcpx.getPendingAuth.mockResolvedValueOnce([{ serverName: "notion" }]);
+
+      render(<StatusPopover />);
+
+      expect(await screen.findByText("notion")).toBeDefined();
+      expect(screen.getByText("Auth required")).toBeDefined();
+      expect(screen.getByTitle("Open mcpx to sign in")).toBeDefined();
+    });
+
+    it("hands off sign-in to the dashboard instead of starting OAuth directly", async () => {
+      // Regression test: the popover previously ran its own bespoke OAuth
+      // flow via startOauth(), whose failures went only to console.error --
+      // the reported "the button doesn't do anything" bug. It should now
+      // simply ask the main process to open the dashboard.
+      mockMcpx.getPendingAuth.mockResolvedValueOnce([{ serverName: "notion" }]);
+
+      render(<StatusPopover />);
+      fireEvent.click(await screen.findByTitle("Open mcpx to sign in"));
+
+      expect(mockMcpx.requestAuth).toHaveBeenCalledWith("notion");
+      expect(mockMcpx.startOauth).not.toHaveBeenCalled();
+    });
+
+    it("dismisses a pending auth entry", async () => {
+      mockMcpx.getPendingAuth.mockResolvedValueOnce([{ serverName: "notion" }]);
+
+      render(<StatusPopover />);
+      fireEvent.click(await screen.findByTitle("Dismiss"));
+
+      expect(mockMcpx.dismissAuth).toHaveBeenCalledWith("notion");
+    });
+
+    it("updates live when the main process broadcasts a new auth state", async () => {
+      // Regression test: the popover's subscription used to be wired to a
+      // channel the main process never actually sent to this window, so
+      // auth state discovered while the popover was open never appeared
+      // until it was closed and reopened.
+      let broadcast: ((entries: Array<{ serverName: string }>) => void) | undefined;
+      mockMcpx.onAuthStateChanged.mockImplementationOnce((cb: (entries: Array<{ serverName: string }>) => void) => {
+        broadcast = cb;
+        return () => {};
+      });
+
+      render(<StatusPopover />);
+      await screen.findByText(/Gateway/i);
+      expect(screen.queryByText("Auth required")).toBeNull();
+
+      broadcast?.([{ serverName: "notion" }]);
+
+      expect(await screen.findByText("Auth required")).toBeDefined();
+    });
+
+    it("routes a server card's generic Configure Auth click through the same hand-off", async () => {
+      mockMcpx.getStatus.mockResolvedValueOnce({
+        gatewayUrl: "http://127.0.0.1:37373",
+        daemon: { running: true, pid: 1234, pidFile: "", logFile: "", port: 37373 },
+        upstreamCount: 1,
+        servers: [
+          { name: "unconfigured", enabled: true, transport: "http", target: "https://mcp.example.com", authBindings: [], clients: [] }
+        ],
+        clients: {}
+      });
+
+      render(<StatusPopover />);
+      fireEvent.click(await screen.findByTitle("Configure Auth"));
+
+      expect(mockMcpx.requestAuth).toHaveBeenCalledWith("unconfigured");
+    });
   });
 });

@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "bun:test";
+import { afterEach, describe, expect, it, spyOn } from "bun:test";
 import { SecretsManager } from "../src/core/secrets.js";
 import { getSecretsStorePath, getSecretsKeyPath } from "../src/core/paths.js";
 import { setupTempEnv } from "./helpers.js";
@@ -126,6 +126,38 @@ describe("SecretsManager with encrypted file store", () => {
     expect(corruptFiles.length).toBeGreaterThanOrEqual(1);
 
     expect(sm.getSecret("after_corrupt")).toBe("works");
+  });
+
+  it("warns instead of silently discarding every secret when the store can't be decrypted", () => {
+    // Regression test: recovering from a corrupt/undecryptable store destroys
+    // every previously stored secret (API keys, OAuth tokens) with no signal
+    // to the user at all -- at minimum this must be a visible warning, not a
+    // silent reset.
+    const env = setupTempEnv("mcpx-secrets-");
+    cleanups.push(env.restore);
+
+    const storePath = getSecretsStorePath();
+    fs.mkdirSync(path.dirname(storePath), { recursive: true });
+    fs.writeFileSync(storePath, "garbage data\n");
+
+    const errorSpy = spyOn(console, "error").mockImplementation(() => {});
+    new SecretsManager().setSecret("after_corrupt", "works");
+
+    expect(errorSpy).toHaveBeenCalled();
+    const warned = errorSpy.mock.calls.some((call) => String(call[0]).includes("could not be read"));
+    expect(warned).toBe(true);
+    errorSpy.mockRestore();
+  });
+
+  it("does not warn on a completely fresh store (no file yet)", () => {
+    const env = setupTempEnv("mcpx-secrets-");
+    cleanups.push(env.restore);
+
+    const errorSpy = spyOn(console, "error").mockImplementation(() => {});
+    new SecretsManager().setSecret("first_secret", "value");
+
+    expect(errorSpy).not.toHaveBeenCalled();
+    errorSpy.mockRestore();
   });
 
   it("returns null for tampered ciphertext (GCM auth failure)", () => {

@@ -5,6 +5,7 @@ import { ServerCard } from "./ServerCard";
 import { ServerDetail } from "./ServerDetail";
 import { AuthModal } from "./AuthModal";
 import { SkillsTab } from "./SkillsTab";
+import { PluginsTab } from "./PluginsTab";
 import { DaemonControls } from "./DaemonControls";
 import { SettingsPanel } from "./SettingsPanel";
 import { CliCommandInput } from "./CliCommandInput";
@@ -14,8 +15,9 @@ import { ProjectsTab } from "./ProjectsTab";
 import { formatTokenApprox } from "../utils/tokenHelper";
 import { ContextBudgetCard } from "./ContextBudgetCard";
 
-type PendingAuthEntry = { serverName: string; oauthLikely?: boolean; status?: number };
-const VALID_TABS: DesktopTab[] = ["servers", "projects", "skills", "settings"];
+type OAuthSupport = "supported" | "unsupported" | "unknown";
+type PendingAuthEntry = { serverName: string; oauthLikely?: boolean; oauthSupport?: OAuthSupport; status?: number };
+const VALID_TABS: DesktopTab[] = ["servers", "projects", "plugins", "settings"];
 
 export function Dashboard() {
   const { status, loading, refresh } = useStatus();
@@ -24,7 +26,7 @@ export function Dashboard() {
   const [selectedProjectPath, setSelectedProjectPath] = useState<string | null>(null);
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(() => new Set());
   const [settingsLoaded, setSettingsLoaded] = useState(false);
-  const [pendingAuth, setPendingAuth] = useState<PendingAuthEntry | null>(null);
+  const [pendingAuth, setPendingAuth] = useState<PendingAuthEntry[]>([]);
 
   useEffect(() => {
     const pendingAuthPromise = window.mcpx.getPendingAuth?.();
@@ -33,16 +35,14 @@ export function Dashboard() {
     }
 
     pendingAuthPromise.then((result: PendingAuthEntry | PendingAuthEntry[] | null) => {
-      const entry = Array.isArray(result) ? result[0] : result;
-      if (entry) {
-        setPendingAuth(entry);
-      }
+      if (!result) return;
+      setPendingAuth(Array.isArray(result) ? result : [result]);
     }).catch(() => {
       // Handler may not be registered yet — ignore
     });
 
-    return window.mcpx.onAuthRequired?.((entry: PendingAuthEntry) => {
-      setPendingAuth(entry);
+    return window.mcpx.onAuthStateChanged?.((entries: PendingAuthEntry[]) => {
+      setPendingAuth(entries);
     });
   }, []);
 
@@ -50,8 +50,10 @@ export function Dashboard() {
     async function loadSettings() {
       try {
         const settings = await window.mcpx.getDesktopSettings();
-        if (settings.activeTab && VALID_TABS.includes(settings.activeTab)) {
-          setTab(settings.activeTab);
+        const rawActiveTab = (settings as { activeTab?: string }).activeTab;
+        const activeTab = rawActiveTab === "skills" ? "plugins" : rawActiveTab;
+        if (activeTab && VALID_TABS.includes(activeTab as DesktopTab)) {
+          setTab(activeTab as DesktopTab);
         }
       } catch {
         // Use defaults if settings fail to load
@@ -64,6 +66,7 @@ export function Dashboard() {
   const handleTabChange = async (newTab: DesktopTab) => {
     setTab(newTab);
     setSelectedServer(null);
+    void window.mcpx.captureDesktopTabViewed?.(newTab);
     try {
       await window.mcpx.updateDesktopSettings({ activeTab: newTab });
     } catch {
@@ -79,24 +82,13 @@ export function Dashboard() {
     );
   }
 
-  const report = status as {
-    daemon: { running: boolean; pid?: number; port: number };
-    servers: Array<{
-      name: string;
-      enabled: boolean;
-      transport: string;
-      target: string;
-      authBindings: Array<{ kind: string; key: string; value: string }>;
-      clients: Array<{ clientId: string; status: string; managed: boolean }>;
-      tokenCount?: { tools: number; resources: number; prompts: number; total: number; error?: string; runtimeError?: string };
-    }>;
-    projects?: Record<string, { name: string; path: string }>;
-    totalGlobalTokens?: number;
-    totalProjectTokens?: Record<string, number>;
-  };
+  const report = status;
 
   const activeServer = selectedServer ? report.servers.find((s) => s.name === selectedServer) : null;
   const projects = Object.values(report.projects ?? {}).sort((left, right) => left.name.localeCompare(right.name));
+
+  const activeAuthEntry = pendingAuth[0];
+  const activeAuthServer = activeAuthEntry ? report.servers.find((s) => s.name === activeAuthEntry.serverName) : undefined;
 
   function getProjectServers(projectName: string) {
     return report.servers.filter((server) => server.name.startsWith(`${projectName}.`));
@@ -126,7 +118,7 @@ export function Dashboard() {
           <img src={logoSvg} alt="mcpx" className="sidebar-logo-icon" />
           <span className="sidebar-logo-text">{DESKTOP_MANAGER_NAME}</span>
         </div>
-        <DaemonControls daemon={report.daemon} onRefresh={refresh} />
+        <DaemonControls daemon={report.daemon} onRefresh={() => { void refresh(); }} />
         <div className="sidebar-inner glass-panel">
           <button
             className="nav-button"
@@ -152,7 +144,7 @@ export function Dashboard() {
           {projects.length > 0 && (
             <div className="project-nav-tree">
               {projects.map((project) => {
-                const isExpanded = expandedProjects.has(project.path) || selectedProjectPath === project.path;
+                const isExpanded = expandedProjects.has(project.path);
                 const projectServers = getProjectServers(project.name);
                 return (
                   <div className="project-nav-group" key={project.path}>
@@ -201,11 +193,11 @@ export function Dashboard() {
           )}
           <button
             className="nav-button"
-            data-active={tab === "skills"}
-            onClick={() => void handleTabChange("skills")}
+            data-active={tab === "plugins"}
+            onClick={() => void handleTabChange("plugins")}
           >
-            <span className="material-symbols-outlined">psychology</span>
-            <span className="nav-button__label">Skills</span>
+            <span className="material-symbols-outlined">extension</span>
+            <span className="nav-button__label">Plugins</span>
           </button>
           <div className="nav-spacer" />
           <button
@@ -261,10 +253,7 @@ export function Dashboard() {
                         tokenCount={server.tokenCount}
                         onRefresh={refresh}
                         onClick={() => setSelectedServer(server.name)}
-                        onAuthClick={() => setPendingAuth({
-                          serverName: server.name,
-                          oauthLikely: server.authBindings.some((b) => b.value.startsWith("oauth://"))
-                        })}
+                        onAuthClick={() => void window.mcpx.requestAuth?.(server.name)}
                       />
                     ))}
                   </div>
@@ -285,8 +274,8 @@ export function Dashboard() {
                 </>
               )}
 
-              {tab === "skills" && (
-                <SkillsTab />
+              {tab === "plugins" && (
+                <PluginsTab />
               )}
 
               {tab === "settings" && (
@@ -302,15 +291,19 @@ export function Dashboard() {
         </div>
       </main>
 
-      {pendingAuth && (
+      {activeAuthEntry && (
         <AuthModal
-          serverName={pendingAuth.serverName}
-          oauthLikely={pendingAuth.oauthLikely}
+          key={activeAuthEntry.serverName}
+          serverName={activeAuthEntry.serverName}
+          transport={activeAuthServer?.transport === "stdio" ? "stdio" : "http"}
+          oauthSupport={activeAuthEntry.oauthSupport}
           onClose={() => {
-            void window.mcpx.dismissAuth?.(pendingAuth.serverName);
-            setPendingAuth(null);
+            void window.mcpx.dismissAuth?.(activeAuthEntry.serverName);
           }}
-          onConfigured={() => { setPendingAuth(null); refresh(); }}
+          onConfigured={() => {
+            void window.mcpx.dismissAuth?.(activeAuthEntry.serverName);
+            refresh();
+          }}
         />
       )}
     </div>

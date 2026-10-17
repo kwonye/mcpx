@@ -2,10 +2,13 @@ import os from "node:os";
 import { homeDir } from "../core/paths.js";
 import path from "node:path";
 import { z } from "zod";
-import type { ClientAdapter, ManagedIndex, McpxConfig, SyncClientOptions, SyncResult } from "../types.js";
+import type { ClientAdapter, ManagedIndex, McpxConfig, Skill, SyncClientOptions, SyncResult, PluginSyncInput, PluginSyncResult } from "../types.js";
+import { syncPluginsToClient } from "../core/plugin-projections.js";
+import { projectSkillsToDir } from "../core/skill-projections.js";
 import { readJsonFile, writeJsonAtomic } from "../util/fs.js";
 import {
   buildImportSkip,
+  detectManagedEntryDrift,
   emptyImportScan,
   ensureManagedEntryWritable,
   errorResult,
@@ -42,6 +45,18 @@ export class OpenCodeAdapter implements ClientAdapter {
 
   supportsHttp(): boolean {
     return true;
+  }
+
+  syncPlugins(plugins: PluginSyncInput[]): PluginSyncResult {
+    return syncPluginsToClient(this.id, plugins);
+  }
+
+  syncSkills(skills: Skill[]): void {
+    const configPath = this.detectConfigPath();
+    if (!configPath) {
+      return;
+    }
+    projectSkillsToDir(path.join(path.dirname(configPath), "skills"), skills, "dir");
   }
 
   scanForImports(_config: McpxConfig, managedIndex: ManagedIndex) {
@@ -128,16 +143,21 @@ export class OpenCodeAdapter implements ClientAdapter {
       };
       removeSourceEntries(mcp, options.sourceEntriesToRemove);
       const managedNames = options.managedEntries.map((entry) => entry.name);
+      const enabledEntries = options.managedEntries.filter((entry) => entry.enabled);
+      const enabledManagedNames = enabledEntries.map((entry) => entry.name);
       const serverEntries = Object.fromEntries(
-        options.managedEntries.map((entry) => [entry.name, {
+        enabledEntries.map((entry) => [entry.name, {
           type: "remote",
           url: entry.url,
           headers: entry.headers,
-          enabled: entry.enabled
         }])
       ) as Record<string, unknown>;
 
-      for (const name of managedNames) {
+      const driftedNames = enabledManagedNames.filter((name) =>
+        detectManagedEntryDrift(options.managedIndex, this.id, name, mcp[name])
+      );
+
+      for (const name of enabledManagedNames) {
         const conflict = ensureManagedEntryWritable(
           options.managedIndex,
           this.id,
@@ -149,7 +169,7 @@ export class OpenCodeAdapter implements ClientAdapter {
         }
       }
 
-      pruneStaleManagedEntries(options.managedIndex, this.id, mcp, managedNames);
+      pruneStaleManagedEntries(options.managedIndex, this.id, mcp, enabledManagedNames);
       for (const [name, entry] of Object.entries(serverEntries)) {
         mcp[name] = entry;
       }
@@ -166,7 +186,7 @@ export class OpenCodeAdapter implements ClientAdapter {
         configPath,
         Object.fromEntries(Object.entries(serverEntries).map(([name, entry]) => [name, JSON.stringify(entry)]))
       );
-      return okResult(this.id, configPath);
+      return { ...okResult(this.id, configPath), driftedEntries: driftedNames.length > 0 ? driftedNames : undefined };
     } catch (error) {
       return errorResult(this.id, configPath, (error as Error).message);
     }

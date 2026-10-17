@@ -3,10 +3,13 @@ import { homeDir } from "../core/paths.js";
 import path from "node:path";
 import fs from "node:fs";
 import { z } from "zod";
-import type { ClientAdapter, ManagedIndex, McpxConfig, SyncClientOptions, SyncResult } from "../types.js";
+import type { ClientAdapter, ManagedIndex, McpxConfig, Skill, SyncClientOptions, SyncResult, PluginSyncInput, PluginSyncResult } from "../types.js";
+import { syncPluginsToClient } from "../core/plugin-projections.js";
+import { projectSkillsToDir } from "../core/skill-projections.js";
 import { readJsonFile, writeJsonAtomic } from "../util/fs.js";
 import {
   buildImportSkip,
+  detectManagedEntryDrift,
   emptyImportScan,
   ensureManagedEntryWritable,
   errorResult,
@@ -21,7 +24,7 @@ interface ClineConfig {
   mcpServers?: Record<string, unknown>;
 }
 
-const HTTP_TRANSPORT_TYPES = new Set(["http", "sse", "streamableHttp"]);
+const HTTP_TRANSPORT_TYPES = new Set(["http", "streamableHttp"]);
 
 const stringMapSchema = z.record(z.string(), z.string());
 const clineEntrySchema = z.object({
@@ -78,6 +81,14 @@ export class ClineAdapter implements ClientAdapter {
 
   supportsHttp(): boolean {
     return true;
+  }
+
+  syncPlugins(plugins: PluginSyncInput[]): PluginSyncResult {
+    return syncPluginsToClient(this.id, plugins);
+  }
+
+  syncSkills(skills: Skill[]): void {
+    projectSkillsToDir(path.join(homeDir(), ".config", "cline", "skills"), skills, "dir");
   }
 
   scanForImports(_config: McpxConfig, managedIndex: ManagedIndex) {
@@ -163,21 +174,21 @@ export class ClineAdapter implements ClientAdapter {
       };
       removeSourceEntries(servers, options.sourceEntriesToRemove);
       const managedNames = options.managedEntries.map((entry) => entry.name);
+      const enabledEntries = options.managedEntries.filter((entry) => entry.enabled);
+      const enabledManagedNames = enabledEntries.map((entry) => entry.name);
       const serverEntries = Object.fromEntries(
-        options.managedEntries.map((entry) => [entry.name, {
-          // Use the standard `type: "streamableHttp"` field rather than the
-          // legacy `transportType: "http"`. Cline's VS Code extension schema
-          // lists the SSE branch before streamableHttp, so an entry with only
-          // `transportType` + `url` (no `type`) is classified as SSE. An
-          // explicit `type: "streamableHttp"` is unambiguous for both the
-          // extension and the Cline CLI config loader.
+        enabledEntries.map((entry) => [entry.name, {
           type: "streamableHttp",
           url: entry.url,
           headers: entry.headers,
-          disabled: !entry.enabled
         }])
       ) as Record<string, unknown>;
-      for (const name of managedNames) {
+      
+      const driftedNames = enabledManagedNames.filter((name) =>
+        detectManagedEntryDrift(options.managedIndex, this.id, name, servers[name])
+      );
+      
+      for (const name of enabledManagedNames) {
         const conflict = ensureManagedEntryWritable(
           options.managedIndex,
           this.id,
@@ -189,7 +200,7 @@ export class ClineAdapter implements ClientAdapter {
         }
       }
 
-      pruneStaleManagedEntries(options.managedIndex, this.id, servers, managedNames);
+      pruneStaleManagedEntries(options.managedIndex, this.id, servers, enabledManagedNames);
       for (const [name, entry] of Object.entries(serverEntries)) {
         servers[name] = entry;
       }
@@ -206,7 +217,7 @@ export class ClineAdapter implements ClientAdapter {
         configPath,
         Object.fromEntries(Object.entries(serverEntries).map(([name, entry]) => [name, JSON.stringify(entry)]))
       );
-      return okResult(this.id, configPath);
+      return { ...okResult(this.id, configPath), driftedEntries: driftedNames.length > 0 ? driftedNames : undefined };
     } catch (error) {
       return errorResult(this.id, configPath, (error as Error).message);
     }

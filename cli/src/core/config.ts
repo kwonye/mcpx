@@ -1,10 +1,24 @@
 import { z } from "zod";
 import path from "node:path";
 import fs from "node:fs";
-import { normalizeServerSpecEnabled, type ClientId, type McpxConfig, type StdioServerSpec, type UpstreamServerSpec } from "../types.js";
+import { normalizeServerSpecEnabled, type ClientId, type McpxConfig, type StdioServerSpec, type UpstreamServerSpec, type ManagedPlugin, type PluginComponent, type DiscoveredComponents } from "../types.js";
 import { getConfigPath, findProjectConfigPath } from "./paths.js";
 import { readJsonFile, writeJsonAtomic } from "../util/fs.js";
 import { repairConfig } from "./config-repair.js";
+import { ensureDefaultMarketplaces } from "./marketplace-defaults.js";
+
+export class ConfigLoadError extends Error {
+  readonly configPath: string;
+  readonly backupPath?: string;
+  readonly issues?: string[];
+
+  constructor(configPath: string, message: string, issues?: string[]) {
+    super(message);
+    this.name = "ConfigLoadError";
+    this.configPath = configPath;
+    this.issues = issues;
+  }
+}
 
 const clientStateSchema = z.object({
   status: z.enum(["SYNCED", "UNSUPPORTED_HTTP", "ERROR", "SKIPPED"]),
@@ -37,6 +51,90 @@ const projectEntrySchema = z.object({
   disabledServers: z.array(z.string()).default([])
 });
 
+const pluginComponentSchema = z.enum(["mcpServers", "skills", "hooks", "agents", "commands"]);
+
+const discoveredComponentSchema = z.object({
+  id: z.string(),
+  type: pluginComponentSchema,
+  path: z.string(),
+  description: z.string().optional(),
+});
+
+const discoveredMcpServerSchema = z.object({
+  id: z.string(),
+  transport: z.enum(["stdio", "http"]).optional(),
+  command: z.string(),
+  args: z.array(z.string()).optional(),
+  env: z.record(z.string(), z.string()).optional(),
+  cwd: z.string().optional(),
+  url: z.string().optional(),
+  oauthResource: z.string().optional(),
+});
+
+const discoveredComponentsSchema = z.object({
+  skills: z.array(discoveredComponentSchema).default([]),
+  commands: z.array(discoveredComponentSchema).default([]),
+  agents: z.array(discoveredComponentSchema).default([]),
+  hooks: z.array(discoveredComponentSchema).default([]),
+  mcpServers: z.array(discoveredMcpServerSchema).default([]),
+});
+
+const managedPluginSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  source: z.string(),
+  version: z.string(),
+  ref: z.string(),
+  resolvedSha: z.string(),
+  installedAt: z.string(),
+  root: z.string(),
+  dataDir: z.string(),
+  components: z.record(pluginComponentSchema, z.boolean()).default({} as Record<string, boolean>),
+  discovered: discoveredComponentsSchema.default({} as unknown as DiscoveredComponents),
+  enabled: z.boolean().default(true),
+  status: z.enum(["healthy", "unhealthy", "preparing", "updating", "error"]).default("healthy"),
+  error: z.string().optional(),
+  serverNames: z.array(z.string()).default([]),
+  projectedClients: z.array(z.string()).default([]),
+  approvals: z.object({
+    mcpServers: z.boolean().optional(),
+    skills: z.boolean().optional(),
+    hooks: z.boolean().optional(),
+    agents: z.boolean().optional(),
+    commands: z.boolean().optional(),
+  }).optional(),
+  marketplace: z.object({
+    name: z.string(),
+    pluginName: z.string(),
+    sourceFingerprint: z.string(),
+  }).optional(),
+  updateError: z.string().optional(),
+  pinned: z.boolean().default(false),
+  previous: z.object({ version: z.string(), resolvedSha: z.string(), root: z.string() }).optional(),
+  projectOverrides: z.record(z.string(), z.object({
+    enabled: z.boolean().optional(),
+    components: z.record(pluginComponentSchema, z.boolean()).optional(),
+    config: z.record(z.string(), z.unknown()).optional(),
+  })).optional(),
+});
+
+const managedMarketplaceSchema = z.object({
+  name: z.string(),
+  displayName: z.string(),
+  source: z.string(),
+  sourceType: z.enum(["github", "git", "local", "hosted-json"]).default("github"),
+  manifestPath: z.string().optional(),
+  format: z.enum(["claude", "codex"]).optional(),
+  builtIn: z.boolean().default(false),
+  autoUpdate: z.boolean().default(false),
+  addedAt: z.string(),
+  lastCheckedAt: z.string().optional(),
+  lastUpdatedAt: z.string().optional(),
+  resolvedRevision: z.string().optional(),
+  status: z.enum(["ready", "stale", "error", "unavailable"]).default("unavailable"),
+  error: z.string().optional(),
+});
+
 const configSchema = z.object({
   schemaVersion: z.literal(1).default(1),
   gateway: z.object({
@@ -50,7 +148,9 @@ const configSchema = z.object({
   }),
   servers: z.record(z.string(), serverSchema).default({}),
   clients: z.record(z.string(), clientStateSchema).default({}),
-  projects: z.record(z.string(), projectEntrySchema).default({})
+  projects: z.record(z.string(), projectEntrySchema).default({}),
+  plugins: z.record(z.string(), managedPluginSchema).default({}),
+  marketplaces: z.record(z.string(), managedMarketplaceSchema).default({})
 });
 
 export interface ProjectLocalConfig {
@@ -73,20 +173,53 @@ export function defaultConfig(): McpxConfig {
     },
     servers: {},
     clients: {},
-    projects: {}
+    projects: {},
+    plugins: {},
+    marketplaces: ensureDefaultMarketplaces(undefined)
   };
 }
 
 export function loadConfig(configPath = getConfigPath()): McpxConfig {
-  const raw = readJsonFile(configPath, defaultConfig());
+  // File missing → default (safe path: no data to lose)
+  if (!fs.existsSync(configPath)) {
+    return defaultConfig();
+  }
+
+  // Read with explicit fs.readFileSync + JSON.parse so ENOENT is distinguishable
+  // from corrupt JSON.
+  let raw: unknown;
+  try {
+    const content = fs.readFileSync(configPath, "utf8");
+    raw = JSON.parse(content);
+  } catch (err) {
+    // Corrupt JSON file — backup and throw
+    const backupPath = `${configPath}.invalid-${Date.now()}`;
+    try {
+      fs.copyFileSync(configPath, backupPath);
+    } catch {
+      // best-effort backup
+    }
+    const message = `Failed to parse config file at ${configPath}.`;
+    throw new ConfigLoadError(configPath, `${message} Backed up to ${backupPath}.`, [`JSON parse error: ${(err as Error).message}`]);
+  }
+
   const parsed = configSchema.safeParse(raw);
   if (!parsed.success) {
-    return defaultConfig();
+    // Schema-invalid — backup and throw
+    const backupPath = `${configPath}.invalid-${Date.now()}`;
+    try {
+      fs.copyFileSync(configPath, backupPath);
+    } catch {
+      // best-effort backup
+    }
+    const issues = parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`);
+    const message = `Config file at ${configPath} has validation errors.`;
+    throw new ConfigLoadError(configPath, `${message} Backed up to ${backupPath}.`, issues);
   }
 
   const clientEntries: Partial<Record<ClientId, McpxConfig["clients"][ClientId]>> = {};
   for (const [key, value] of Object.entries(parsed.data.clients)) {
-    if (["claude", "claude-desktop", "codex", "cursor", "cline", "opencode", "kiro", "vscode", "qwen"].includes(key)) {
+    if (["claude", "claude-desktop", "codex", "cursor", "cline", "opencode", "kiro", "vscode", "qwen", "openclaw", "hermes"].includes(key)) {
       clientEntries[key as ClientId] = value;
     }
   }
@@ -100,7 +233,9 @@ export function loadConfig(configPath = getConfigPath()): McpxConfig {
     gateway: parsed.data.gateway,
     servers,
     clients: clientEntries,
-    projects: parsed.data.projects
+    projects: parsed.data.projects,
+    plugins: parsed.data.plugins,
+    marketplaces: ensureDefaultMarketplaces(parsed.data.marketplaces)
   });
 }
 
@@ -112,7 +247,19 @@ export function saveConfig(config: McpxConfig, configPath = getConfigPath()): vo
   writeJsonAtomic(configPath, config);
 }
 
-export function loadProjectConfig(projectConfigPath: string): ProjectLocalConfig {
+export function loadProjectConfig(projectConfigPath: string, options?: { strict?: boolean }): ProjectLocalConfig {
+  if (options?.strict) {
+    const raw = readJsonFile(projectConfigPath, null);
+    if (raw === null) {
+      return { servers: {} };
+    }
+    const parsed = projectConfigSchema.safeParse(raw);
+    if (!parsed.success) {
+      throw new ConfigLoadError(projectConfigPath, `Project config at ${projectConfigPath} has validation errors.`, parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`));
+    }
+    return parsed.data;
+  }
+
   const raw = readJsonFile(projectConfigPath, { servers: {} });
   const parsed = projectConfigSchema.safeParse(raw);
   if (!parsed.success) {
@@ -169,21 +316,72 @@ export interface ActiveConfigContext {
   save: () => void;
 }
 
+export function migrateProjectServers(config: McpxConfig, projectPath: string): { migrated: string[]; conflicts: string[] } {
+  const localConfigPath = path.join(projectPath, ".mcpx.json");
+  if (!fs.existsSync(localConfigPath)) {
+    return { migrated: [], conflicts: [] };
+  }
+
+  const migrated: string[] = [];
+  const conflicts: string[] = [];
+  try {
+    const localConfig = loadProjectConfig(localConfigPath);
+    for (const [serverName, spec] of Object.entries(localConfig.servers)) {
+      if (config.servers[serverName]) {
+        conflicts.push(serverName);
+        continue;
+      }
+      const normalized = normalizeServerSpecEnabled(spec);
+      if (normalized.transport === "stdio" && !(normalized as StdioServerSpec).cwd) {
+        (normalized as StdioServerSpec & { enabled: boolean }).cwd = projectPath;
+      }
+      config.servers[serverName] = normalized;
+      migrated.push(serverName);
+    }
+  } catch {
+    // ignore errors loading project config
+  }
+  return { migrated, conflicts };
+}
+
 export function resolveActiveConfig(options: { global?: boolean; local?: boolean } = {}): ActiveConfigContext {
   const globalPath = getConfigPath();
-  const config = loadConfig(globalPath);
+  const globalConfig = loadConfig(globalPath);
 
-  // Detect project context (informational — all writes still go to the global catalog)
   if (!options.global) {
     const projectConfigPath = findProjectConfigPath();
-    if (options.local || projectConfigPath) {
+    if (options.local) {
       const projectPath = projectConfigPath ? path.dirname(projectConfigPath) : process.cwd();
+      const localPath = path.join(projectPath, ".mcpx.json");
+      const projectConfig = loadProjectConfig(localPath);
+      const mergedConfig: McpxConfig = {
+        ...globalConfig,
+        servers: { ...globalConfig.servers, ...projectConfig.servers }
+      };
+      return {
+        type: "project",
+        configPath: localPath,
+        projectPath,
+        config: mergedConfig,
+        save: () => {
+          const localServers: Record<string, any> = {};
+          for (const [name, spec] of Object.entries(mergedConfig.servers)) {
+            if (!(name in globalConfig.servers)) {
+              localServers[name] = spec;
+            }
+          }
+          saveProjectConfig({ ...projectConfig, servers: localServers }, localPath);
+        }
+      };
+    }
+    if (projectConfigPath) {
+      const projectPath = path.dirname(projectConfigPath);
       return {
         type: "project",
         configPath: globalPath,
         projectPath,
-        config,
-        save: () => saveConfig(config, globalPath)
+        config: globalConfig,
+        save: () => saveConfig(globalConfig, globalPath)
       };
     }
   }
@@ -191,7 +389,7 @@ export function resolveActiveConfig(options: { global?: boolean; local?: boolean
   return {
     type: "global",
     configPath: globalPath,
-    config,
-    save: () => saveConfig(config, globalPath)
+    config: globalConfig,
+    save: () => saveConfig(globalConfig, globalPath)
   };
 }

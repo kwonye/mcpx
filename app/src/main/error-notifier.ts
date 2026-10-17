@@ -1,6 +1,7 @@
 import { Notification } from "electron";
-import { loadConfig, getDaemonStatus, SecretsManager } from "@mcpx/core";
+import { loadConfig, getDaemonStatus, SecretsManager, ensureGatewayToken } from "@mcpx/core";
 import { describeTokenError } from "../shared/token-error";
+import { GATEWAY_FETCH_TIMEOUT_MS } from "../shared/timeouts";
 import { loadDesktopSettings } from "./settings-store";
 import { openDashboard } from "./dashboard";
 
@@ -10,6 +11,8 @@ export interface TokenCountEntry {
   total: number;
   error?: string;
   runtimeError?: string;
+  errorCode?: string;
+  runtimeErrorCode?: string;
 }
 
 export interface NotificationItem {
@@ -25,13 +28,27 @@ export interface ComputeResult {
 }
 
 const CHECK_INTERVAL_MS = 45_000;
-const FETCH_TIMEOUT_MS = 5000;
+
+const AUTH_ERROR_CODES = new Set(["auth_expired", "auth_required"]);
 
 function deriveKind(count: TokenCountEntry): ErrorKind | null {
-  if (count.runtimeError) {
+  // Structured codes are checked first, and only the code (never the raw
+  // message string) decides "reauth" at runtime -- a stdio server can fail a
+  // tool call for its own internal auth reasons (e.g. "Run `railway login`
+  // first") without that being an mcpx-managed OAuth/token problem, and
+  // sending the user to mcpx to "re-authenticate" would be a dead end. Only a
+  // runtimeErrorCode/errorCode that mcpx itself classified as auth_expired or
+  // auth_required means mcpx's own credential is the problem.
+  if (count.runtimeErrorCode && AUTH_ERROR_CODES.has(count.runtimeErrorCode)) {
+    return "reauth";
+  }
+  if (count.errorCode && AUTH_ERROR_CODES.has(count.errorCode)) {
+    return "reauth";
+  }
+  if (count.runtimeErrorCode || count.runtimeError) {
     return "call";
   }
-  if (count.error && describeTokenError(count.error).authLike) {
+  if (count.error && describeTokenError(count.error, count.errorCode).authLike) {
     return "reauth";
   }
   return null;
@@ -104,39 +121,37 @@ async function pollOnce(): Promise<void> {
     return;
   }
 
-  const config = loadConfig();
+  let config: ReturnType<typeof loadConfig>;
+  try {
+    config = loadConfig();
+  } catch {
+    return;
+  }
   if (!getDaemonStatus(config).running) {
     return;
   }
 
   const secrets = new SecretsManager();
-  const token = secrets.resolveMaybeSecret(config.gateway.tokenRef);
+  const token = ensureGatewayToken(config, secrets);
   if (!token) {
     return;
   }
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  const timeout = setTimeout(() => controller.abort(), GATEWAY_FETCH_TIMEOUT_MS);
   try {
-    const res = await fetch(`http://127.0.0.1:${config.gateway.port}/mcp`, {
+    const res = await fetch(`http://127.0.0.1:${config.gateway.port}/internal/token-counts`, {
       method: "POST",
       headers: {
-        "content-type": "application/json",
         Authorization: `Bearer ${token}`
       },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: "error-notifier",
-        method: "custom/tokenCounts",
-        params: {}
-      }),
       signal: controller.signal
     });
     if (!res.ok) {
       return;
     }
-    const data = (await res.json()) as { result?: Record<string, TokenCountEntry> };
-    const counts = data?.result ?? {};
+    const data = (await res.json()) as { counts?: Record<string, TokenCountEntry> };
+    const counts = data?.counts ?? {};
 
     const { toNotify, nextNotified: updated } = computeErrorNotifications(counts, lastNotified);
     lastNotified = updated;

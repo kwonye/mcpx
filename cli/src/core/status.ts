@@ -1,11 +1,11 @@
 import { getDaemonStatus, type DaemonStatus } from "./daemon.js";
-import { getGatewayUrl } from "./sync.js";
+import { getGatewayInternalUrl, getGatewayUrl } from "./sync.js";
 import { listAuthBindings, secretRefName } from "./server-auth.js";
 import { isServerEnabled, type ClientId, type ClientStatus, type ManagedIndex, type McpxConfig, type UpstreamServerSpec, type UpstreamTokenCount } from "../types.js";
 import { SecretsManager } from "./secrets.js";
 import { ensureGatewayToken } from "./registry.js";
 
-export const STATUS_CLIENTS: ClientId[] = ["claude", "claude-desktop", "codex", "cursor", "cline", "opencode", "kiro", "vscode", "qwen"];
+export const STATUS_CLIENTS: ClientId[] = ["claude", "claude-desktop", "codex", "cursor", "cline", "opencode", "kiro", "vscode", "qwen", "openclaw", "hermes"];
 
 export interface StatusAuthBinding {
   kind: "header" | "env";
@@ -31,6 +31,7 @@ export interface StatusServerEntry {
   authBindings: StatusAuthBinding[];
   clients: StatusClientMapping[];
   tokenCount?: UpstreamTokenCount;
+  health?: "ok" | "error" | "unknown";
 }
 
 export interface StatusReport {
@@ -89,29 +90,22 @@ function buildAuthBindings(spec: UpstreamServerSpec): StatusAuthBinding[] {
   }));
 }
 
-async function fetchTokenCounts(gatewayUrl: string, token: string): Promise<Record<string, UpstreamTokenCount>> {
+async function fetchTokenCounts(gatewayUrl: string, token: string): Promise<{ counts: Record<string, UpstreamTokenCount>; fetchError?: string }> {
   try {
     const res = await fetch(gatewayUrl, {
       method: "POST",
       headers: {
-        "content-type": "application/json",
         "authorization": `Bearer ${token}`
       },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: "status-tokens",
-        method: "custom/tokenCounts",
-        params: {}
-      }),
-      signal: AbortSignal.timeout(4000)
+      signal: AbortSignal.timeout(65_000)
     });
     if (!res.ok) {
-      return {};
+      return { counts: {}, fetchError: `HTTP ${res.status}` };
     }
-    const data = await res.json() as any;
-    return data?.result ?? {};
+    const data = await res.json() as { counts?: Record<string, UpstreamTokenCount> };
+    return { counts: data?.counts ?? {} };
   } catch (error) {
-    return {};
+    return { counts: {}, fetchError: error instanceof Error ? error.message : String(error) };
   }
 }
 
@@ -125,8 +119,11 @@ export async function buildStatusReport(
   const gatewayUrl = getGatewayUrl(config);
 
   let tokenCounts: Record<string, UpstreamTokenCount> = {};
+  let tokenCountFetchError: string | undefined;
   if (daemon.running) {
-    tokenCounts = await fetchTokenCounts(gatewayUrl, token);
+    const result = await fetchTokenCounts(getGatewayInternalUrl(config, "/internal/token-counts"), token);
+    tokenCounts = result.counts;
+    tokenCountFetchError = result.fetchError;
   }
 
   const projectEntries = Object.values(config.projects ?? {});
@@ -146,6 +143,10 @@ export async function buildStatusReport(
       tokenCount = { ...tokenCount, error: undefined };
     }
 
+    const health: "ok" | "error" | "unknown" = tokenCount
+      ? (tokenCount.error || tokenCount.runtimeError ? "error" : "ok")
+      : "unknown";
+
     const serverEntry = {
       name,
       enabled: isServerEnabled(spec),
@@ -153,7 +154,8 @@ export async function buildStatusReport(
       target: describeServerTarget(spec),
       authBindings: buildAuthBindings(spec),
       clients: buildClientMappings(config, managedIndex, name),
-      tokenCount
+      tokenCount,
+      health
     };
 
     if (serverEntry.enabled && tokenCount) {

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type { DesktopSettings } from "../../shared/desktop-settings";
+import type { TelemetryStatus } from "@mcpx/core";
 import { Toggle } from "./ui";
 import { DESKTOP_PRODUCT_NAME } from "../../shared/build-constants";
 
@@ -18,11 +19,15 @@ export function SettingsPanel() {
   const [error, setError] = useState<string | null>(null);
   const [updateMessage, setUpdateMessage] = useState<string | null>(null);
   const [checkingForUpdates, setCheckingForUpdates] = useState(false);
+  const [telemetry, setTelemetry] = useState<TelemetryStatus | null>(null);
+  const [savingTelemetry, setSavingTelemetry] = useState(false);
+  const [telemetryMessage, setTelemetryMessage] = useState<string | null>(null);
 
   useEffect(() => {
-    window.mcpx.getDesktopSettings()
-      .then((loaded) => {
+    Promise.all([window.mcpx.getDesktopSettings(), window.mcpx.getTelemetryStatus?.()])
+      .then(([loaded, status]) => {
         setSettings(loaded);
+        if (status) setTelemetry(status);
       })
       .catch((loadError) => {
         setError(formatError(loadError));
@@ -51,6 +56,41 @@ export function SettingsPanel() {
       setError(formatError(saveError));
     } finally {
       setSavingKey(null);
+    }
+  };
+
+  const onTelemetryToggle = async (key: "usageAnalyticsEnabled" | "errorReportingEnabled", nextValue: boolean) => {
+    if (!telemetry) return;
+    const previous = telemetry;
+    setSavingTelemetry(true);
+    setTelemetryMessage(null);
+    setTelemetry({ ...telemetry, [key]: nextValue });
+    try {
+      const updated = await window.mcpx.updateTelemetryPreferences?.({ [key]: nextValue });
+      if (updated) {
+        const refreshed = await window.mcpx.getTelemetryStatus?.();
+        setTelemetry(refreshed ?? { ...previous, [key]: nextValue });
+      }
+    } catch (saveError) {
+      setTelemetry(previous);
+      setTelemetryMessage(formatError(saveError));
+    } finally {
+      setSavingTelemetry(false);
+    }
+  };
+
+  const handleResetTelemetryId = async () => {
+    setSavingTelemetry(true);
+    setTelemetryMessage(null);
+    try {
+      await window.mcpx.resetTelemetryId?.();
+      const refreshed = await window.mcpx.getTelemetryStatus?.();
+      if (refreshed) setTelemetry(refreshed);
+      setTelemetryMessage("Anonymous installation ID reset.");
+    } catch (resetError) {
+      setTelemetryMessage(formatError(resetError));
+    } finally {
+      setSavingTelemetry(false);
     }
   };
 
@@ -115,6 +155,48 @@ export function SettingsPanel() {
       </div>
 
       <div className="setting-card setting-card--grouped">
+        <h3 className="setting-card__group-title">Privacy &amp; diagnostics</h3>
+        {telemetry && (
+          <>
+            <div className="setting-card__item">
+              <div>
+                <span className="setting-card__label">Anonymous usage analytics</span>
+                <p className="setting-card__description">Feature usage and bucketed reliability counts. No names, prompts, results, paths, URLs, or secrets.</p>
+              </div>
+              <Toggle
+                id="toggle-usageAnalytics"
+                checked={telemetry.usageAnalyticsEnabled}
+                onChange={(checked) => void onTelemetryToggle("usageAnalyticsEnabled", checked)}
+                disabled={savingTelemetry}
+                label="Anonymous usage analytics"
+              />
+            </div>
+            <div className="setting-card__item">
+              <div>
+                <span className="setting-card__label">Anonymous crash diagnostics</span>
+                <p className="setting-card__description">Sanitized JavaScript stacks and automatic native crash minidumps. Minidumps may contain memory fragments and cannot be guaranteed anonymous.</p>
+              </div>
+              <Toggle
+                id="toggle-errorReporting"
+                checked={telemetry.errorReportingEnabled}
+                onChange={(checked) => void onTelemetryToggle("errorReportingEnabled", checked)}
+                disabled={savingTelemetry}
+                label="Anonymous crash diagnostics"
+              />
+            </div>
+            <div className="setting-card__item setting-card__item--stacked">
+              <div>
+                <span className="setting-card__label">Reset anonymous identity</span>
+                <p className="setting-card__description">Create a new random installation ID and restart analytics milestones.</p>
+              </div>
+              <button type="button" className="btn btn-secondary" onClick={() => void handleResetTelemetryId()} disabled={savingTelemetry}>Reset ID</button>
+            </div>
+            <p className="setting-card__description">Read the full <a href="https://github.com/kwonye/mcpx/blob/main/PRIVACY.md" target="_blank" rel="noreferrer">mcpx privacy policy</a>.</p>
+          </>
+        )}
+      </div>
+
+      <div className="setting-card setting-card--grouped">
         <h3 className="setting-card__group-title">Updates</h3>
         <div className="setting-card__item">
           <div>
@@ -146,6 +228,7 @@ export function SettingsPanel() {
       </div>
 
       {error && <div className="feedback-message error">{error}</div>}
+      {telemetryMessage && <div className="feedback-message success">{telemetryMessage}</div>}
       {updateMessage && <div className="feedback-message success">{updateMessage}</div>}
     </section>
   );

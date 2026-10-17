@@ -27,6 +27,9 @@ The mcpx desktop app is the easiest way to manage your MCP servers. It runs in y
 - **Projects** — Organize servers into project-specific groups
 - **Skills** — Create and manage shared MCP skill definitions
 - **Settings** — Configure auto-start, launch-at-login, and auto-updates
+- **Privacy & diagnostics** — Independently control anonymous usage analytics
+  and crash diagnostics, reset the random installation ID, and review the
+  complete [privacy policy](PRIVACY.md)
 
 ### Download
 
@@ -34,7 +37,7 @@ Download the latest release from [GitHub Releases](https://github.com/kwonye/mcp
 
 ### Install from source
 
-Prerequisites: [Bun](https://bun.sh) >= 1.2
+Prerequisites: [Bun](https://bun.sh) >= 1.4.0
 
 **macOS:**
 ```bash
@@ -107,6 +110,12 @@ This produces an NSIS installer and portable `.exe` in `app/dist/`.
 
 ![Skills](docs/images/mcpx-skills.png)
 
+Skills are stored as complete Agent Skill directories (`SKILL.md`, optional
+`scripts/`, `references/`, and `assets/`). Directory-based clients receive a
+link to the managed source when supported; flat clients receive a Markdown
+projection. Installed skills are immutable until copied with `mcpx skill
+customize`.
+
 **Settings tab** — App configuration:
 
 ![Settings](docs/images/mcpx-settings.png)
@@ -116,6 +125,23 @@ This produces an NSIS installer and portable `.exe` in `app/dist/`.
 ## CLI
 
 The `mcpx` CLI is also available as a standalone npm package for terminal workflows and CI.
+
+### Privacy and diagnostics
+
+mcpx keeps analytics dormant until its first-run disclosure is acknowledged.
+Usage analytics and crash diagnostics are independently controllable, and both
+are anonymous by design. Review or change them with:
+
+```bash
+mcpx telemetry status
+mcpx telemetry enable usage|errors|all
+mcpx telemetry disable usage|errors|all
+mcpx telemetry reset-id
+```
+
+See [PRIVACY.md](PRIVACY.md) for the exact event catalog, prohibited data, and
+native minidump warning. Maintainers can follow the [observability runbook](docs/observability.md)
+to configure provider projects, alerts, and release source maps.
 
 ### Install
 
@@ -181,7 +207,7 @@ After manual edits, run `mcpx sync` to propagate changes.
 ## What it does
 
 - Stores upstream servers in a central config (`~/.config/mcpx/config.json`)
-- Stores upstream auth in one consolidated secure store (macOS Keychain) so each MCP auth flow is done once and reused across all synced clients
+- Stores upstream auth in one consolidated secure store (AES-256-GCM encrypted file) so each MCP auth flow is done once and reused across all synced clients
 - Runs a local MCP gateway daemon (`http://127.0.0.1:<port>/mcp`)
 - Syncs managed gateway entries into supported clients:
   - Claude / Claude Code
@@ -192,11 +218,21 @@ After manual edits, run `mcpx sync` to propagate changes.
   - Kiro
   - VS Code / VS Code Insiders
   - Qwen CLI
+  - OpenClaw
+  - Hermes
 - Gives each upstream a top-level client entry (`/vercel`, `/next-devtools`, etc.) while routing through one local daemon
 - Uses local gateway-token auth for client → gateway (`x-mcpx-local-token`)
-- Supports keychain-backed secret references for upstream headers
+- Supports encrypted-file backed secret references for upstream headers (AES-256-GCM, no Keychain)
 - Passes upstream OAuth challenges through to compatible clients
 - Proxies OAuth well-known metadata endpoints in single-upstream mode
+
+### MCP protocol support
+
+mcpx supports MCP v2 only, pinned to protocol revision `2026-07-28`. The local
+`/mcp` endpoint accepts modern MCP v2 envelopes and rejects legacy initialize,
+session, batch, and SSE-transport traffic. Client configuration adapters remain available
+for projecting the v2 gateway into supported client config formats; they do not
+add legacy protocol support.
 
 ---
 
@@ -214,6 +250,11 @@ mcpx auth set next-devtools --env NEXT_DEVTOOLS_TOKEN --value "<token>"
 mcpx auth show
 mcpx auth rm vercel --header Authorization --delete-secret
 mcpx auth rotate-local-token
+
+# OAuth
+mcpx auth login vercel     # browser sign-in for an HTTP upstream that supports OAuth
+mcpx auth status           # sign-in state, token expiry, and secret-binding status (offline)
+mcpx auth logout vercel    # clear stored OAuth credentials and the Authorization binding
 ```
 
 ### Daemon lifecycle
@@ -231,6 +272,30 @@ mcpx daemon stop
 mcpx sync
 mcpx sync claude
 mcpx sync --client claude --client codex
+```
+
+### Agent Plugins
+
+`mcpx plugin` installs Claude, Codex, and [Agent Plugins v1](https://agent-plugins.org/) packages from a local directory, Git URL, or GitHub shorthand. Agent Plugins v1 packages use a root `plugin.json`, optional `skills/`, and optional `mcp.json`; `stdio` and streamable HTTP MCP entries are managed through the normal gateway and client projection flow.
+
+```bash
+mcpx plugin inspect ./my-plugin
+mcpx plugin install owner/my-plugin
+mcpx plugin marketplace list
+mcpx plugin pin my-plugin
+mcpx plugin rollback my-plugin
+
+### Portable environments
+
+Export a Git-friendly folder containing a manifest, lockfile, and package
+content. Credentials are represented as recipient inputs or secret references;
+they are never copied into the export by default.
+
+```bash
+mcpx share export ./shared-environment
+mcpx share import ./shared-environment --dry-run --locked
+mcpx share import ./shared-environment --locked --input server.docs.header.X-Team=team-a
+```
 ```
 
 ### Config/data/state path overrides

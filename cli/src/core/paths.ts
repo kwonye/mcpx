@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import fs from "node:fs";
@@ -31,8 +32,20 @@ export function getConfigPath(): string {
   return path.join(getConfigRoot(), "mcpx", "config.json");
 }
 
+export function getTelemetryPath(): string {
+  return path.join(getConfigRoot(), "mcpx", "telemetry.json");
+}
+
 export function getSkillsDir(): string {
   return path.join(getConfigRoot(), "mcpx", "skills");
+}
+
+export function getSkillPackagesRoot(): string {
+  return path.join(getDataRoot(), "mcpx", "skills", "packages");
+}
+
+export function getSkillStatePath(): string {
+  return path.join(getDataRoot(), "mcpx", "skills", "state.json");
 }
 
 export function getManagedIndexPath(): string {
@@ -77,6 +90,40 @@ export function getStagedVersionPath(): string {
 
 export function getUpdateLockPath(): string {
   return path.join(getUpdatesDir(), ".update.lock");
+}
+
+export function getOAuthLockPath(serverName: string): string {
+  const safeName = serverName.toLowerCase().replace(/[^a-z0-9._-]/g, "_").slice(0, 32);
+  const hash = crypto.createHash("sha256").update(serverName).digest("hex").slice(0, 12);
+  return path.join(getRuntimeDir(), `oauth-${safeName}-${hash}.lock`);
+}
+
+export function getPluginCacheRoot(): string {
+  return path.join(getDataRoot(), "mcpx", "plugins", "cache");
+}
+
+export function getPluginDataRoot(): string {
+  return path.join(getDataRoot(), "mcpx", "plugins", "data");
+}
+
+export function getPluginProjectionsRoot(): string {
+  return path.join(getDataRoot(), "mcpx", "plugins", "projections");
+}
+
+export function getPluginLogsRoot(): string {
+  return path.join(getStateRoot(), "mcpx", "plugins", "logs");
+}
+
+export function getMarketplaceCacheRoot(): string {
+  return path.join(getDataRoot(), "mcpx", "marketplaces", "cache");
+}
+
+export function getMarketplaceUpdateStatePath(): string {
+  return path.join(getStateRoot(), "mcpx", "marketplaces", "update-state.json");
+}
+
+export function getMarketplaceUpdateLockPath(): string {
+  return path.join(getStateRoot(), "mcpx", "marketplaces", ".update.lock");
 }
 
 export function ensureDir(dirPath: string): void {

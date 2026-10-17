@@ -7,7 +7,7 @@ import {
   type DesktopSettingsPatch
 } from "../shared/desktop-settings";
 
-const VALID_TABS = ["servers", "projects", "skills", "settings"] as const;
+const VALID_TABS = ["servers", "projects", "plugins", "settings"] as const;
 
 function settingsPath(): string {
   return path.join(app.getPath("userData"), "settings.json");
@@ -18,9 +18,10 @@ function normalizeSettings(value: unknown): DesktopSettings {
     ? (value as Partial<DesktopSettings>)
     : {};
 
-  const activeTab = typeof partial.activeTab === "string" &&
-    VALID_TABS.includes(partial.activeTab as typeof VALID_TABS[number])
-    ? partial.activeTab
+  const legacyTab = (partial as { activeTab?: string }).activeTab === "skills" ? "plugins" : (partial as { activeTab?: string }).activeTab;
+  const activeTab = typeof legacyTab === "string" &&
+    VALID_TABS.includes(legacyTab as typeof VALID_TABS[number])
+    ? legacyTab
     : "servers";
 
   return {
@@ -33,7 +34,7 @@ function normalizeSettings(value: unknown): DesktopSettings {
     errorNotificationsEnabled: typeof partial.errorNotificationsEnabled === "boolean"
       ? partial.errorNotificationsEnabled
       : DEFAULT_DESKTOP_SETTINGS.errorNotificationsEnabled,
-    activeTab
+    activeTab: activeTab as DesktopSettings["activeTab"]
   };
 }
 

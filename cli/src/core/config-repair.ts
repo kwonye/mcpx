@@ -62,6 +62,16 @@ export function repairConfig(config: McpxConfig): McpxConfig {
     }
   }
 
+  // Prune disabledServers entries referencing nonexistent servers
+  const existingNames = new Set(Object.keys(servers));
+  if (config.projects) {
+    for (const project of Object.values(config.projects)) {
+      if (project.disabledServers) {
+        project.disabledServers = project.disabledServers.filter((s) => existingNames.has(s));
+      }
+    }
+  }
+
   return {
     ...config,
     servers

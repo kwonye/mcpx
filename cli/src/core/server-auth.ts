@@ -138,14 +138,24 @@ export function listAuthBindings(spec: UpstreamServerSpec): AuthBinding[] {
   }));
 }
 
+/** RFC 6750 token68 pattern: 1*( ALPHA / DIGIT / "-" / "." / "_" / "~" / "+" / "/" ) *"=" */
+const TOKEN68 = /^[A-Za-z0-9\-._~+/]+=*$/;
+
 export function maybePrefixBearer(target: AuthTarget, value: string, raw = false): string {
   if (raw || target.kind !== "header" || target.key.toLowerCase() !== "authorization") {
     return value;
   }
 
+  // Already has a scheme (e.g., "Bearer xyz", "Basic abc")
   if (/^\S+\s+\S+/.test(value)) {
     return value;
   }
 
-  return `Bearer ${value}`;
+  // Only auto-prefix if the value is a bare token68 (no colons, commas, semicolons, or mid-string =)
+  if (TOKEN68.test(value)) {
+    return `Bearer ${value}`;
+  }
+
+  // API keys, custom schemes, etc. that contain `:`, `,`, `;` — pass through
+  return value;
 }

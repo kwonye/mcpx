@@ -3,10 +3,13 @@ import fs from "node:fs";
 import { homeDir } from "../core/paths.js";
 import path from "node:path";
 import { z } from "zod";
-import type { ClientAdapter, ManagedIndex, McpxConfig, Skill, SyncClientOptions, SyncResult } from "../types.js";
+import type { ClientAdapter, ManagedIndex, McpxConfig, Skill, SyncClientOptions, SyncResult, PluginSyncInput, PluginSyncResult } from "../types.js";
+import { syncPluginsToClient } from "../core/plugin-projections.js";
+import { projectSkillsToDir } from "../core/skill-projections.js";
 import { readJsonFile, writeJsonAtomic } from "../util/fs.js";
 import {
   buildImportSkip,
+  detectManagedEntryDrift,
   emptyImportScan,
   ensureManagedEntryWritable,
   errorResult,
@@ -15,7 +18,7 @@ import {
   pruneStaleManagedEntries,
   removeSourceEntries,
   setManagedEntries,
-  syncMcpExcludedArray
+  purgeManagedFromExcludedArray
 } from "./utils/index.js";
 
 type JsonObject = Record<string, unknown>;
@@ -32,8 +35,8 @@ const qwenEntrySchema = z.object({
 }).passthrough();
 
 // Qwen/Tongyi MCP config at ~/.qwen/settings.json. Qwen does NOT use a `type` field;
-// transport is inferred from field presence: `httpUrl` → HTTP, `url` → SSE,
-// `command` → stdio. If multiple are specified, precedence is httpUrl > url > command.
+// transport is inferred from field presence: `httpUrl` → streamable HTTP,
+// `command` → stdio. Legacy `url` (SSE) entries are skipped for strict MCP v2.
 // Disabled servers are tracked via `mcp.excluded` array, not a per-entry `disabled` property.
 export class QwenAdapter implements ClientAdapter {
   readonly id = "qwen" as const;
@@ -44,6 +47,10 @@ export class QwenAdapter implements ClientAdapter {
 
   supportsHttp(): boolean {
     return true;
+  }
+
+  syncPlugins(plugins: PluginSyncInput[]): PluginSyncResult {
+    return syncPluginsToClient(this.id, plugins);
   }
 
   scanForImports(_config: McpxConfig, managedIndex: ManagedIndex) {
@@ -87,18 +94,7 @@ export class QwenAdapter implements ClientAdapter {
       }
 
       if (entry.url && !entry.httpUrl && !entry.command) {
-        result.candidates.push({
-          clientId: this.id,
-          configPath,
-          sourceEntryName: name,
-          serverName: name,
-          spec: {
-            transport: "http",
-            url: entry.url,
-            headers: entry.headers,
-            enabled: !(entry.disabled === true || excludedSet.has(name))
-          }
-        });
+        result.skipped.push(buildImportSkip(this.id, name, "Legacy SSE transport is not supported; use Qwen's httpUrl field for MCP v2 streamable HTTP.", configPath));
         continue;
       }
 
@@ -135,8 +131,10 @@ export class QwenAdapter implements ClientAdapter {
     try {
       const raw = readJsonFile<JsonObject>(configPath, {});
       const managedNames = options.managedEntries.map((entry) => entry.name);
+      const enabledEntries = options.managedEntries.filter((entry) => entry.enabled);
+      const enabledManagedNames = enabledEntries.map((entry) => entry.name);
       const serverEntries = Object.fromEntries(
-        options.managedEntries.map((entry) => [entry.name, {
+        enabledEntries.map((entry) => [entry.name, {
           httpUrl: entry.url,
           headers: entry.headers
         }])
@@ -144,7 +142,12 @@ export class QwenAdapter implements ClientAdapter {
 
       const topLevelServers = ((raw.mcpServers as JsonObject | undefined) ?? {}) as JsonObject;
       removeSourceEntries(topLevelServers, options.sourceEntriesToRemove);
-      for (const name of managedNames) {
+      
+      const driftedNames = enabledManagedNames.filter((name) =>
+        detectManagedEntryDrift(options.managedIndex, this.id, name, topLevelServers[name])
+      );
+      
+      for (const name of enabledManagedNames) {
         const topLevelConflict = ensureManagedEntryWritable(
           options.managedIndex,
           this.id,
@@ -156,12 +159,12 @@ export class QwenAdapter implements ClientAdapter {
         }
       }
 
-      pruneStaleManagedEntries(options.managedIndex, this.id, topLevelServers, managedNames);
+      pruneStaleManagedEntries(options.managedIndex, this.id, topLevelServers, enabledManagedNames);
       for (const [name, entry] of Object.entries(serverEntries)) {
         topLevelServers[name] = entry;
       }
       raw.mcpServers = topLevelServers;
-      syncMcpExcludedArray(raw, managedNames, options.managedEntries);
+      purgeManagedFromExcludedArray(raw, managedNames);
 
       writeJsonAtomic(configPath, raw);
       setManagedEntries(
@@ -175,33 +178,13 @@ export class QwenAdapter implements ClientAdapter {
           ])
         )
       );
-      return okResult(this.id, configPath);
+      return { ...okResult(this.id, configPath), driftedEntries: driftedNames.length > 0 ? driftedNames : undefined };
     } catch (error) {
       return errorResult(this.id, configPath, (error as Error).message);
     }
   }
 
   syncSkills(skills: Skill[]): void {
-    const skillsDir = path.join(homeDir(), ".qwen", "skills");
-    if (!fs.existsSync(skillsDir)) {
-      fs.mkdirSync(skillsDir, { recursive: true });
-    }
-
-    const existingFiles = fs.readdirSync(skillsDir);
-    const managedIds = new Set(skills.map(s => s.id));
-    
-    for (const file of existingFiles) {
-      if (file.endsWith(".md")) {
-        const id = path.basename(file, ".md");
-        if (!managedIds.has(id)) {
-          fs.unlinkSync(path.join(skillsDir, file));
-        }
-      }
-    }
-
-    for (const skill of skills) {
-      const targetPath = path.join(skillsDir, `${skill.id}.md`);
-      fs.writeFileSync(targetPath, skill.content, "utf-8");
-    }
+    projectSkillsToDir(path.join(homeDir(), ".qwen", "skills"), skills, "flat");
   }
 }

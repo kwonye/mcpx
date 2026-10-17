@@ -5,19 +5,20 @@
 import { Command } from "commander";
 import fs from "node:fs";
 import path from "node:path";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { emitKeypressEvents } from "node:readline";
 import { createInterface, type Interface as ReadlineInterface } from "node:readline/promises";
-import { loadConfig, saveConfig, loadMergedConfig, resolveActiveConfig, loadProjectConfig, saveProjectConfig } from "./core/config.js";
+import { loadConfig, loadMergedConfig, resolveActiveConfig, loadProjectConfig, ConfigLoadError } from "./core/config.js";
+import { mutateActiveConfig, mutateConfig, mutateProjectConfig } from "./core/config-store.js";
 import { addServer, removeServer, setServerEnabled, registerProject, unregisterProject, rotateGatewayToken } from "./core/registry.js";
-import { listSkills, getSkill, saveSkill, deleteSkill } from "./core/skills.js";
+import { listSkills, getSkill, saveSkill, deleteSkill, customizeSkill, installSkillFromSource, pinSkill, unpinSkill, updateSkill, rollbackSkill } from "./core/skills.js";
 import { SecretsManager, readSecretValueFromStdin } from "./core/secrets.js";
 import { probeHttpAuthRequirement } from "./core/auth-probe.js";
 import { fetchRegistryServerDetail, selectBestPackage, extractRequiredInputs, mapRegistryToSpec } from "./core/registry-client.js";
 import type { RequiredInput } from "./core/registry-client.js";
-import { syncAllClients } from "./core/sync.js";
-import { isServerEnabled, type ClientId, type ClientStatus, type HttpServerSpec, type McpxConfig, type StdioServerSpec, type UpstreamServerSpec } from "./types.js";
+import { syncAllClients, persistSyncState } from "./core/sync.js";
+import { isServerEnabled, type ClientId, type ClientStatus, type HttpServerSpec, type McpxConfig, type StdioServerSpec, type UpstreamServerSpec, type PluginComponent } from "./types.js";
 import { parseCompatibilityArgs } from "./compat/index.js";
 import {
   applyAuthReference,
@@ -39,13 +40,40 @@ import {
   stopDaemon
 } from "./core/daemon.js";
 import { getConfigPath, getManagedIndexPath, getSecretsStorePath, findProjectConfigPath } from "./core/paths.js";
+import { exportEnvironment, importEnvironment } from "./core/share.js";
 import { loadManagedIndex } from "./core/managed-index.js";
 import { STATUS_CLIENTS, buildStatusReport, type StatusAuthBinding, type StatusReport, type StatusServerEntry } from "./core/status.js";
 import { APP_VERSION } from "./version.js";
 import { getStagedCliPath, getStagedUpdate, clearStagedUpdate, checkForUpdates, shouldUseStagedCli } from "./core/update.js";
 import { performUpdate, performRollback, runBackgroundUpdate } from "./core/update-manager.js";
 import { runStdioProxy } from "./core/proxy.js";
-import { runOAuthLogin } from "./core/oauth.js";
+import {
+  acknowledgeTelemetryNotice,
+  architecture,
+  captureTelemetryEvent,
+  durationBucket,
+  getTelemetryStatus,
+  initializeTelemetry,
+  loadTelemetryPreferences,
+  markTelemetryMilestone,
+  platformFamily,
+  resetTelemetryInstallationId,
+  shutdownTelemetry,
+  updateTelemetryPreferences,
+  flushTelemetry,
+  reportTelemetryError,
+  type TelemetryRuntime,
+  type TelemetryEvent
+} from "./core/telemetry.js";
+import { flushNodeErrorReporting, initializeNodeErrorReporting, shutdownNodeErrorReporting } from "./core/error-reporting.js";
+import {
+  runOAuthLogin,
+  isOAuthReference,
+  oauthReferenceServerName,
+  clearOAuthCredentials,
+  getOAuthCredentialStatus,
+  type OAuthCredentialStatus
+} from "./core/oauth.js";
 
 const VALID_CLIENTS: ClientId[] = STATUS_CLIENTS;
 
@@ -114,7 +142,13 @@ function parseAddServerSpec(values: string[], options: AddCommandOptions): { nam
   }
 
   const name = values[0] ?? "";
+  if (!name.trim()) {
+    throw new Error("Server name must be non-empty.");
+  }
   const target = values[1] ?? "";
+  if (!target.trim()) {
+    throw new Error("Server target (URL or command) must be non-empty.");
+  }
   const trailing = values.slice(2);
   const requestedTransport = normalizeTransport(options.transport);
   const transport = requestedTransport === "auto"
@@ -157,6 +191,9 @@ function parseAddServerSpec(values: string[], options: AddCommandOptions): { nam
     env[key] = value;
   }
 
+  if (options.cwd !== undefined && options.cwd !== null && !options.cwd.trim()) {
+    throw new Error("--cwd must be non-empty when provided.");
+  }
   const spec: StdioServerSpec = {
     transport: "stdio",
     command: target,
@@ -179,6 +216,9 @@ function getServerSpecOrThrow(config: McpxConfig, serverName: string): UpstreamS
 
 function redactAuthValue(value: string): string {
   if (value.startsWith("secret://")) {
+    return value;
+  }
+  if (isOAuthReference(value)) {
     return value;
   }
 
@@ -253,6 +293,9 @@ function printSyncSummary(summary: ReturnType<typeof syncAllClients>, asJson = f
       process.stdout.write(` - ${result.message}`);
     }
     process.stdout.write("\n");
+    if (result.driftedEntries && result.driftedEntries.length > 0) {
+      process.stdout.write(`  (note: ${result.driftedEntries.length} manually-edited entr${result.driftedEntries.length === 1 ? "y was" : "ies were"} reset to mcpx-managed values: ${result.driftedEntries.join(", ")})\n`);
+    }
   }
 }
 
@@ -269,11 +312,18 @@ async function ensureDaemonIfEnabled(cliPath: string, secrets: SecretsManager): 
   await startDaemon(config, cliPath, secrets);
 }
 
-async function autoSyncManagedEntries(config: McpxConfig, cliPath: string): Promise<void> {
+async function autoSyncManagedEntries(cliPath: string): Promise<void> {
   const secrets = new SecretsManager();
   await ensureDaemonIfEnabled(cliPath, secrets);
-  const mergedConfig = loadMergedConfig();
-  const summary = syncAllClients(mergedConfig, secrets);
+  // Reload fresh right before syncing (rather than trusting a snapshot the
+  // caller may have loaded before an earlier config mutation completed), and
+  // persist the resulting client-sync state through the config lock so this
+  // never clobbers a concurrent mutation's changes with a stale save.
+  const config = loadMergedConfig();
+  const summary = syncAllClients(config, secrets);
+  await mutateConfig((freshConfig) => {
+    persistSyncState(summary, freshConfig);
+  });
   printSyncSummary(summary, false);
   ensureExitCodeForSyncFailures(summary.hasErrors);
 }
@@ -283,26 +333,34 @@ function isNegativeChoice(value: string): boolean {
   return normalized === "n" || normalized === "no";
 }
 
+/**
+ * Configures auth for a server that's about to be added. The server spec
+ * hasn't been persisted to config yet at this point (so `mcpx auth login`'s
+ * runOAuthLogin, which requires the server to already exist so it can bind
+ * `oauth://<name>` into it, can't run here) -- when the user picks browser
+ * sign-in, this only records that choice; the caller runs the actual login
+ * after the server has been saved.
+ */
 async function maybeAutoConfigureAuthForAddedServer(
   serverName: string,
   spec: UpstreamServerSpec,
   secrets: SecretsManager
-): Promise<void> {
+): Promise<{ deferredOAuthLogin: boolean }> {
   if (spec.transport === "http") {
-    await maybeConfigureHttpAuth(serverName, spec as HttpServerSpec, secrets);
-  } else {
-    await maybeConfigureStdioAuth(serverName, spec, secrets);
+    return maybeConfigureHttpAuth(serverName, spec as HttpServerSpec, secrets);
   }
+  await maybeConfigureStdioAuth(serverName, spec, secrets);
+  return { deferredOAuthLogin: false };
 }
 
 async function maybeConfigureHttpAuth(
   serverName: string,
   spec: HttpServerSpec,
   secrets: SecretsManager
-): Promise<void> {
+): Promise<{ deferredOAuthLogin: boolean }> {
   const probe = await probeHttpAuthRequirement(spec, secrets);
   if (!probe.authRequired) {
-    return;
+    return { deferredOAuthLogin: false };
   }
 
   process.stdout.write(`Upstream "${serverName}" responded with ${probe.status ?? 401} and appears to require auth.\n`);
@@ -312,7 +370,10 @@ async function maybeConfigureHttpAuth(
 
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
     process.stdout.write(`Run \`mcpx auth set ${serverName} --header Authorization --value \"<token>\"\` to configure auth.\n`);
-    return;
+    if (probe.oauthSupport === "supported") {
+      process.stdout.write(`This server supports OAuth -- run \`mcpx auth login ${serverName}\` to sign in with your browser instead.\n`);
+    }
+    return { deferredOAuthLogin: false };
   }
 
   const rl = createInterface({
@@ -321,10 +382,19 @@ async function maybeConfigureHttpAuth(
   });
 
   try {
-    const shouldConfigure = await promptLine(rl, "Configure auth now? (Y/n): ");
-    if (isNegativeChoice(shouldConfigure)) {
-      process.stdout.write("Skipping auth setup.\n");
-      return;
+    if (probe.oauthSupport === "supported") {
+      process.stdout.write(`This server supports OAuth.\n`);
+      const useOAuth = await promptLine(rl, "Sign in with browser? (Y/n): ");
+      if (!isNegativeChoice(useOAuth)) {
+        process.stdout.write(`Will sign in with your browser once "${serverName}" is added.\n`);
+        return { deferredOAuthLogin: true };
+      }
+    } else {
+      const shouldConfigure = await promptLine(rl, "Configure auth now? (Y/n): ");
+      if (isNegativeChoice(shouldConfigure)) {
+        process.stdout.write("Skipping auth setup.\n");
+        return { deferredOAuthLogin: false };
+      }
     }
 
     const currentHeaderBinding = listAuthBindings(spec)
@@ -332,13 +402,13 @@ async function maybeConfigureHttpAuth(
     const headerName = await promptLineWithDefault(rl, "Header name", currentHeaderBinding?.key ?? "Authorization");
     if (!headerName) {
       process.stdout.write("Skipping auth setup (empty header name).\n");
-      return;
+      return { deferredOAuthLogin: false };
     }
 
     const authValueInput = await promptLine(rl, "Auth value/token (blank to skip): ");
     if (!authValueInput) {
       process.stdout.write("Skipping auth setup.\n");
-      return;
+      return { deferredOAuthLogin: false };
     }
 
     const target = resolveAuthTarget(spec, headerName, undefined);
@@ -350,7 +420,7 @@ async function maybeConfigureHttpAuth(
 
     if (!secretName) {
       process.stdout.write("Skipping auth setup (empty secret name).\n");
-      return;
+      return { deferredOAuthLogin: false };
     }
 
     secrets.setSecret(secretName, authValue);
@@ -358,7 +428,7 @@ async function maybeConfigureHttpAuth(
     process.stdout.write(`Configured auth via ${target.kind}:${target.key} using secret://${secretName}.\n`);
   } catch (error) {
     process.stdout.write(`Auto auth setup skipped: ${(error as Error).message}\n`);
-    return;
+    return { deferredOAuthLogin: false };
   } finally {
     rl.close();
   }
@@ -370,6 +440,63 @@ async function maybeConfigureHttpAuth(
     process.stdout.write(`Auth check after setup could not be completed: ${verify.error}\n`);
   } else {
     process.stdout.write("Auth check passed.\n");
+  }
+  return { deferredOAuthLogin: false };
+}
+
+/**
+ * Clears an OAuth-signed-in server's stored credentials and, if the server's
+ * Authorization header is still bound to that OAuth reference, removes the
+ * binding and re-syncs clients. Shared by `mcpx auth logout` and the
+ * interactive status menu's "Sign out" action.
+ */
+async function performOAuthLogout(
+  serverName: string,
+  spec: UpstreamServerSpec,
+  secrets: SecretsManager
+): Promise<{ removedSecrets: string[]; removedBinding: string | null; sync?: ReturnType<typeof syncAllClients> }> {
+  // Clear credentials first: even if the binding removal below fails for
+  // some reason, a server left pointing at a dangling oauth:// reference
+  // with the old tokens gone is safer than one still holding live tokens.
+  const removedSecrets = clearOAuthCredentials(serverName, secrets);
+
+  let removedBinding: string | null = null;
+  if (spec.transport === "http" && spec.headers?.Authorization && isOAuthReference(spec.headers.Authorization) && oauthReferenceServerName(spec.headers.Authorization) === serverName) {
+    await mutateConfig((freshConfig) => {
+      const freshSpec = getServerSpecOrThrow(freshConfig, serverName);
+      removeAuthReference(freshSpec, { kind: "header", key: "Authorization" });
+    });
+    removedBinding = "Authorization";
+  }
+
+  let sync: ReturnType<typeof syncAllClients> | undefined;
+  if (removedBinding) {
+    const syncSourceConfig = loadConfig();
+    sync = syncAllClients(syncSourceConfig, secrets);
+    await mutateConfig((freshConfig) => {
+      persistSyncState(sync!, freshConfig);
+    });
+  }
+
+  return { removedSecrets, removedBinding, sync };
+}
+
+/** Runs the OAuth login the user opted into during add, now that the server exists in config. */
+async function runDeferredOAuthLogin(
+  serverName: string,
+  spec: HttpServerSpec,
+  secrets: SecretsManager,
+  configPath: string
+): Promise<void> {
+  try {
+    await runOAuthLogin(serverName, spec, secrets, (url) => {
+      process.stdout.write(`Opening browser to sign in to "${serverName}"...\n`);
+      openInBrowser(url);
+    }, configPath);
+    process.stdout.write(`OAuth login complete for "${serverName}".\n`);
+  } catch (error) {
+    process.stdout.write(`OAuth sign-in failed: ${error instanceof Error ? error.message : String(error)}\n`);
+    process.stdout.write(`Run \`mcpx auth login ${serverName}\` to try again.\n`);
   }
 }
 
@@ -398,9 +525,9 @@ async function maybeConfigureStdioAuth(
   });
 
   try {
-    const shouldMigrate = await promptLine(rl, "Store them in the system keychain instead? (Y/n): ");
+    const shouldMigrate = await promptLine(rl, "Store them in the encrypted secret store instead? (Y/n): ");
     if (isNegativeChoice(shouldMigrate)) {
-      process.stdout.write("Skipping keychain migration.\n");
+      process.stdout.write("Skipping secret migration.\n");
       return;
     }
 
@@ -412,7 +539,7 @@ async function maybeConfigureStdioAuth(
       process.stdout.write(`Stored ${binding.key} as secret://${secretName}\n`);
     }
   } catch (error) {
-    process.stdout.write(`Keychain migration skipped: ${(error as Error).message}\n`);
+    process.stdout.write(`Secret migration skipped: ${(error as Error).message}\n`);
   } finally {
     rl.close();
   }
@@ -813,8 +940,10 @@ async function configureServerAuthInteractively(
 
   const secrets = new SecretsManager();
   secrets.setSecret(secretName, authValue);
-  applyAuthReference(spec, target, toSecretRef(secretName));
-  saveConfig(config);
+  await mutateConfig((freshConfig) => {
+    const freshSpec = getServerSpecOrThrow(freshConfig, serverName);
+    applyAuthReference(freshSpec, target, toSecretRef(secretName));
+  });
 
   process.stdout.write(`Configured auth for "${serverName}" at ${target.kind}:${target.key} using secret://${secretName}.\n`);
 }
@@ -835,9 +964,15 @@ async function clearServerAuthInteractively(rl: ReadlineInterface, serverName: s
     return;
   }
 
-  const removed = removeAuthReference(spec, {
-    kind: selected.kind,
-    key: selected.key
+  let shouldDeleteSecret = false;
+  if (selected.secretName) {
+    const shouldDelete = (await promptLine(rl, `Delete stored secret "${selected.secretName}" too? (y/N): `)).toLowerCase();
+    shouldDeleteSecret = shouldDelete === "y" || shouldDelete === "yes";
+  }
+
+  const removed = await mutateConfig((freshConfig) => {
+    const freshSpec = getServerSpecOrThrow(freshConfig, serverName);
+    return removeAuthReference(freshSpec, { kind: selected.kind, key: selected.key });
   });
 
   if (!removed) {
@@ -847,8 +982,7 @@ async function clearServerAuthInteractively(rl: ReadlineInterface, serverName: s
 
   const secretName = secretRefName(removed);
   if (secretName) {
-    const shouldDelete = (await promptLine(rl, `Delete keychain secret "${secretName}" too? (y/N): `)).toLowerCase();
-    if (shouldDelete === "y" || shouldDelete === "yes") {
+    if (shouldDeleteSecret) {
       new SecretsManager().removeSecret(secretName);
       process.stdout.write(`Removed binding and deleted ${secretName}.\n`);
     } else {
@@ -857,8 +991,38 @@ async function clearServerAuthInteractively(rl: ReadlineInterface, serverName: s
   } else {
     process.stdout.write("Removed inline binding.\n");
   }
+}
 
-  saveConfig(config);
+async function signInWithBrowserInteractively(serverName: string): Promise<void> {
+  const config = loadConfig();
+  const spec = getServerSpecOrThrow(config, serverName);
+  if (spec.transport !== "http") {
+    process.stdout.write("OAuth login only supports HTTP servers.\n");
+    return;
+  }
+
+  const secrets = new SecretsManager();
+  await runOAuthLogin(serverName, spec, secrets, (url) => {
+    process.stdout.write(`Opening browser to sign in to "${serverName}"...\n`);
+    openInBrowser(url);
+  });
+  process.stdout.write(`OAuth login complete for "${serverName}".\n`);
+}
+
+async function signOutInteractively(rl: ReadlineInterface, serverName: string): Promise<void> {
+  const confirmation = await promptLine(rl, `Sign out of "${serverName}"? (y/N): `);
+  if (!["y", "yes"].includes(confirmation.trim().toLowerCase())) {
+    process.stdout.write("Cancelled.\n");
+    return;
+  }
+
+  const config = loadConfig();
+  const spec = getServerSpecOrThrow(config, serverName);
+  const secrets = new SecretsManager();
+  const { removedSecrets, removedBinding } = await performOAuthLogout(serverName, spec, secrets);
+
+  const bindingNote = removedBinding ? ` and the ${removedBinding} binding` : "";
+  process.stdout.write(`Signed out of "${serverName}". Removed ${removedSecrets.length} stored credential${removedSecrets.length === 1 ? "" : "s"}${bindingNote}.\n`);
 }
 
 async function reconnectGatewayAndSync(cliPath: string): Promise<void> {
@@ -867,6 +1031,9 @@ async function reconnectGatewayAndSync(cliPath: string): Promise<void> {
   const restart = await restartDaemon(config, cliPath, secrets);
   process.stdout.write(`${restart.message} pid=${restart.pid} port=${restart.port}\n`);
   const summary = syncAllClients(config, secrets);
+  await mutateConfig((freshConfig) => {
+    persistSyncState(summary, freshConfig);
+  });
   printSyncSummary(summary, false);
 }
 
@@ -894,13 +1061,18 @@ async function setServerEnabledInteractively(
       if (projectEntry) {
         const localPath = path.join(projectEntry.path, ".mcpx.json");
         if (fs.existsSync(localPath)) {
-          const projectConfig = loadProjectConfig(localPath);
-          if (projectConfig.servers[baseServerName]) {
+          const handled = await mutateProjectConfig(localPath, (projectConfig) => {
+            if (!projectConfig.servers[baseServerName]) {
+              return false;
+            }
             setServerEnabled(projectConfig as any, baseServerName, enabled);
-            saveProjectConfig(projectConfig, localPath);
+            return true;
+          });
+
+          if (handled) {
             process.stdout.write(`${enabled ? "Enabled" : "Disabled"} server: ${serverName}\n`);
             process.stdout.write("Auto-syncing managed gateway entries across all supported clients...\n");
-            await autoSyncManagedEntries(loadMergedConfig(), cliPath);
+            await autoSyncManagedEntries(cliPath);
             return true;
           }
         }
@@ -908,12 +1080,12 @@ async function setServerEnabledInteractively(
     }
   }
 
-  const config = loadConfig();
-  setServerEnabled(config, serverName, enabled);
-  saveConfig(config);
+  await mutateConfig((freshConfig) => {
+    setServerEnabled(freshConfig, serverName, enabled);
+  });
   process.stdout.write(`${enabled ? "Enabled" : "Disabled"} server: ${serverName}\n`);
   process.stdout.write("Auto-syncing managed gateway entries across all supported clients...\n");
-  await autoSyncManagedEntries(loadMergedConfig(), cliPath);
+  await autoSyncManagedEntries(cliPath);
   return true;
 }
 
@@ -958,6 +1130,13 @@ function buildServerMenuDetail(server: StatusServerEntry): string {
   return `${authSummary}${syncSummary}${errorSummary}`;
 }
 
+interface ServerMenuAction {
+  label: string;
+  detail: string;
+  /** Return true to close the menu (e.g. after a disable/enable that already re-synced). */
+  run: () => Promise<boolean | void>;
+}
+
 async function runServerActionsMenu(rl: ReadlineInterface, serverName: string, cliPath: string): Promise<void> {
   while (true) {
     const report = await loadStatusReport();
@@ -967,38 +1146,78 @@ async function runServerActionsMenu(rl: ReadlineInterface, serverName: string, c
       return;
     }
 
-    const action = await promptMenuSelection(
+    const isOAuthBound = server.authBindings.some(
+      (binding) => binding.kind === "header" && binding.key === "Authorization" && isOAuthReference(binding.value)
+    );
+
+    // Built as an array of {label, detail, run} rather than matched against a
+    // positional index, since the entries below are conditional -- a fixed
+    // "action === N" chain silently breaks the moment an entry is added or
+    // removed above another one.
+    const actions: ServerMenuAction[] = [
+      {
+        label: "🔐 Configure auth",
+        detail: "Set or update auth binding for this MCP.",
+        run: () => configureServerAuthInteractively(rl, serverName, false)
+      }
+    ];
+
+    if (server.transport === "http" && !isOAuthBound) {
+      actions.push({
+        label: "🌐 Sign in with browser",
+        detail: "Run OAuth login for this MCP.",
+        run: () => signInWithBrowserInteractively(serverName)
+      });
+    }
+
+    actions.push({
+      label: "♻️ Re-authenticate",
+      detail: "Replace token for an existing auth binding.",
+      run: () => configureServerAuthInteractively(rl, serverName, true)
+    });
+
+    if (isOAuthBound) {
+      actions.push({
+        label: "🚪 Sign out",
+        detail: "Clear stored OAuth credentials for this MCP.",
+        run: () => signOutInteractively(rl, serverName)
+      });
+    }
+
+    actions.push(
+      {
+        label: "🧹 Clear authentication",
+        detail: "Remove a specific auth binding.",
+        run: () => clearServerAuthInteractively(rl, serverName)
+      },
+      {
+        label: server.enabled ? "⏸️ Disable" : "▶️ Enable",
+        detail: "Toggle this MCP across mcpx and all synced clients.",
+        run: () => setServerEnabledInteractively(rl, serverName, !server.enabled, cliPath)
+      },
+      {
+        label: "🔄 Reconnect",
+        detail: "Restart daemon and sync all managed client entries.",
+        run: () => reconnectGatewayAndSync(cliPath)
+      }
+    );
+
+    const backIndex = actions.length;
+    const selection = await promptMenuSelection(
       rl,
       buildServerActionTitle(server),
-      [
-        { label: "🔐 Configure auth", detail: "Set or update auth binding for this MCP." },
-        { label: "♻️ Re-authenticate", detail: "Replace token for an existing auth binding." },
-        { label: "🧹 Clear authentication", detail: "Remove a specific auth binding." },
-        { label: server.enabled ? "⏸️ Disable" : "▶️ Enable", detail: "Toggle this MCP across mcpx and all synced clients." },
-        { label: "🔄 Reconnect", detail: "Restart daemon and sync all managed client entries." },
-        { label: "← Back", detail: "Return to MCP list." }
-      ],
+      [...actions.map(({ label, detail }) => ({ label, detail })), { label: "← Back", detail: "Return to MCP list." }],
       "q"
     );
 
-    if (action === null || action === 5) {
+    if (selection === null || selection === backIndex) {
       return;
     }
 
     try {
-      if (action === 0) {
-        await configureServerAuthInteractively(rl, serverName, false);
-      } else if (action === 1) {
-        await configureServerAuthInteractively(rl, serverName, true);
-      } else if (action === 2) {
-        await clearServerAuthInteractively(rl, serverName);
-      } else if (action === 3) {
-        const updated = await setServerEnabledInteractively(rl, serverName, !server.enabled, cliPath);
-        if (updated) {
-          return;
-        }
-      } else if (action === 4) {
-        await reconnectGatewayAndSync(cliPath);
+      const shouldClose = await actions[selection].run();
+      if (shouldClose === true) {
+        return;
       }
     } catch (error) {
       process.stdout.write(`${(error as Error).message}\n`);
@@ -1065,20 +1284,24 @@ function registerEnabledCommand(parent: Command, enabled: boolean, cliPath: stri
     .option("-l, --local", "Force target (or initialize) a local `.mcpx.json` configuration")
     .description(`${enabled ? "Enable" : "Disable"} an upstream MCP server`)
     .action(async (name: string, options: { global?: boolean; local?: boolean }) => {
-      const context = resolveActiveConfig({ global: options.global, local: options.local });
-      setServerEnabled(context.config, name, enabled);
-      context.save();
+      const startedAt = Date.now();
+      const { type, projectPath } = await mutateActiveConfig({ global: options.global, local: options.local }, (config) => {
+        setServerEnabled(config, name, enabled);
+      });
 
-      if (context.type === "project" && context.projectPath) {
-        const globalConfig = loadConfig();
-        registerProject(globalConfig, context.projectPath);
-        saveConfig(globalConfig);
+      if (type === "project" && projectPath) {
+        await mutateConfig((globalConfig) => {
+          registerProject(globalConfig, projectPath, globalConfig.projects?.[path.resolve(projectPath)]?.name);
+        });
       }
 
-      process.stdout.write(`${enabled ? "Enabled" : "Disabled"} server: ${name} (${context.type} config)\n`);
+      process.stdout.write(`${enabled ? "Enabled" : "Disabled"} server: ${name} (${type} config)\n`);
       process.stdout.write("Auto-syncing managed gateway entries across all supported clients...\n");
-      const mergedConfig = loadMergedConfig();
-      await autoSyncManagedEntries(mergedConfig, cliPath);
+      await autoSyncManagedEntries(cliPath);
+      captureTelemetryEvent({
+        name: "operation_completed",
+        properties: { operation: "server_toggle", outcome: "success", durationBucket: durationBucket(Date.now() - startedAt) }
+      });
     });
 }
 
@@ -1095,7 +1318,7 @@ function registerAddCommand(parent: Command, cliPath: string): void {
     .option("-l, --local", "Force saving to local project configuration")
     .description("Add an upstream MCP server")
     .action(async (values: string[], options: AddCommandOptions) => {
-      const context = resolveActiveConfig({ global: options.global, local: options.local });
+      const startedAt = Date.now();
       const safeValues = values ?? [];
       const secrets = new SecretsManager();
 
@@ -1138,7 +1361,7 @@ function registerAddCommand(parent: Command, cliPath: string): void {
 
         let spec = mapRegistryToSpec(shortName, option, resolvedValues) as UpstreamServerSpec;
 
-        // Store secret inputs in keychain
+        // Store secret inputs in the encrypted secret store
         for (const input of requiredInputs) {
           if (!input.isSecret) continue;
           const rawValue = resolvedValues[input.name];
@@ -1158,35 +1381,48 @@ function registerAddCommand(parent: Command, cliPath: string): void {
           }
         }
 
-        if (context.type === "project") {
-          const globalConfig = loadConfig();
-          registerProject(globalConfig, context.projectPath!);
-          saveConfig(globalConfig);
+        const authSetup = await maybeAutoConfigureAuthForAddedServer(shortName, spec, secrets);
+
+        const { type, projectPath, configPath } = await mutateActiveConfig({ global: options.global, local: options.local }, (config) => {
+          addServer(config, shortName, spec, options.force ?? false);
+        });
+        if (type === "project" && projectPath) {
+          await mutateConfig((globalConfig) => {
+            registerProject(globalConfig, projectPath, globalConfig.projects?.[path.resolve(projectPath)]?.name);
+          });
         }
 
-        addServer(context.config, shortName, spec, options.force ?? false);
-        await maybeAutoConfigureAuthForAddedServer(shortName, spec, secrets);
-        context.save();
-        process.stdout.write(`Added server: ${shortName} (${spec.transport}) from registry "${registryName}"${context.type === "project" ? ` (project: ${context.projectPath})` : ""}\n`);
+        process.stdout.write(`Added server: ${shortName} (${spec.transport}) from registry "${registryName}"${type === "project" ? ` (project: ${projectPath})` : ""}\n`);
+        if (authSetup.deferredOAuthLogin && spec.transport === "http") {
+          await runDeferredOAuthLogin(shortName, spec, secrets, configPath);
+        }
       } else {
         const parsed = parseAddServerSpec(safeValues, options);
 
-        if (context.type === "project") {
-          const globalConfig = loadConfig();
-          registerProject(globalConfig, context.projectPath!);
-          saveConfig(globalConfig);
+        const authSetup = await maybeAutoConfigureAuthForAddedServer(parsed.name, parsed.spec, secrets);
+
+        const { type, projectPath, configPath } = await mutateActiveConfig({ global: options.global, local: options.local }, (config) => {
+          addServer(config, parsed.name, parsed.spec, options.force ?? false);
+        });
+        if (type === "project" && projectPath) {
+          await mutateConfig((globalConfig) => {
+            registerProject(globalConfig, projectPath, globalConfig.projects?.[path.resolve(projectPath)]?.name);
+          });
         }
 
-        addServer(context.config, parsed.name, parsed.spec, options.force ?? false);
-        await maybeAutoConfigureAuthForAddedServer(parsed.name, parsed.spec, secrets);
-        context.save();
-
-        process.stdout.write(`Added server: ${parsed.name} (${parsed.spec.transport})${context.type === "project" ? ` (project: ${context.projectPath})` : ""}\n`);
+        process.stdout.write(`Added server: ${parsed.name} (${parsed.spec.transport})${type === "project" ? ` (project: ${projectPath})` : ""}\n`);
+        if (authSetup.deferredOAuthLogin && parsed.spec.transport === "http") {
+          await runDeferredOAuthLogin(parsed.name, parsed.spec, secrets, configPath);
+        }
       }
 
       process.stdout.write("Auto-syncing managed gateway entries across all supported clients...\n");
-      const mergedConfig = loadMergedConfig();
-      await autoSyncManagedEntries(mergedConfig, cliPath);
+      await autoSyncManagedEntries(cliPath);
+      markTelemetryMilestone("first_server_added");
+      captureTelemetryEvent({
+        name: "operation_completed",
+        properties: { operation: "server_add", outcome: "success", durationBucket: durationBucket(Date.now() - startedAt) }
+      });
     });
 }
 
@@ -1198,14 +1434,26 @@ function registerRemoveCommand(parent: Command, cliPath: string): void {
     .option("-l, --local", "Force target local project configuration")
     .description("Remove an upstream MCP server")
     .action(async (name: string, options: { force?: boolean; global?: boolean; local?: boolean }) => {
-      const context = resolveActiveConfig({ global: options.global, local: options.local });
-      removeServer(context.config, name, options.force ?? false);
-      context.save();
+      const startedAt = Date.now();
+      const { type, projectPath } = await mutateActiveConfig({ global: options.global, local: options.local }, (config) => {
+        removeServer(config, name, options.force ?? false);
+      });
 
-      process.stdout.write(`Removed server: ${name} ${context.type === "project" ? `from project: ${context.projectPath}` : "globally"}\n`);
+      // Only clear OAuth credentials on a true global removal -- a project-local
+      // removal (-l) leaves the server's global definition (and any shared
+      // credentials) untouched, since other projects or the global config may
+      // still reference the same server name.
+      if (type === "global") {
+        clearOAuthCredentials(name, new SecretsManager());
+      }
+
+      process.stdout.write(`Removed server: ${name} ${type === "project" ? `from project: ${projectPath}` : "globally"}\n`);
       process.stdout.write("Auto-syncing managed gateway entries across all supported clients...\n");
-      const mergedConfig = loadMergedConfig();
-      await autoSyncManagedEntries(mergedConfig, cliPath);
+      await autoSyncManagedEntries(cliPath);
+      captureTelemetryEvent({
+        name: "operation_completed",
+        properties: { operation: "server_remove", outcome: "success", durationBucket: durationBucket(Date.now() - startedAt) }
+      });
     });
 }
 
@@ -1292,16 +1540,31 @@ function registerSyncCommand(program: Command, cliPath: string): void {
   program
     .command("sync [clients...]")
     .option("--client <id>", "Limit sync to specific client(s), comma-separated or repeated", (value, prev: string[] = []) => [...prev, value], [])
+    .option("--import", "Also scan clients for unmanaged servers and adopt them into the mcpx catalog", false)
     .option("--json", "Output JSON")
     .description("Sync gateway configuration to supported clients (e.g. `mcpx sync claude`)")
-    .action(async (clients: string[], options: { client: string[]; json?: boolean }) => {
-      const config = loadMergedConfig();
+    .action(async (clients: string[], options: { client: string[]; json?: boolean; import?: boolean }) => {
+      const startedAt = Date.now();
+      const config = loadConfig();
       const targetClients = parseClientList([...(clients ?? []), ...(options.client ?? [])]);
       const secrets = new SecretsManager();
       await ensureDaemonIfEnabled(cliPath, secrets);
-      const summary = syncAllClients(config, secrets, targetClients);
+      const summary = syncAllClients(config, secrets, { targetClients, importScan: options.import ?? false });
+      await mutateConfig((freshConfig) => {
+        persistSyncState(summary, freshConfig);
+      });
       printSyncSummary(summary, options.json ?? false);
       ensureExitCodeForSyncFailures(summary.hasErrors);
+      if (!summary.hasErrors) markTelemetryMilestone("first_sync_succeeded");
+      captureTelemetryEvent({
+        name: "operation_completed",
+        properties: {
+          operation: "client_sync",
+          outcome: summary.hasErrors ? "failure" : "success",
+          errorCode: summary.hasErrors ? "sync_error" : undefined,
+          durationBucket: durationBucket(Date.now() - startedAt)
+        }
+      });
     });
 }
 
@@ -1466,12 +1729,12 @@ function registerDaemonCommands(program: Command): void {
 }
 
 function registerSecretsCommands(program: Command): void {
-  const secret = program.command("secret").description("Manage keychain-backed secrets");
+  const secret = program.command("secret").description("Manage encrypted secrets");
 
   secret
     .command("set <name>")
     .option("--value <value>", "Secret value")
-    .description("Set secret in OS keychain")
+    .description("Set an encrypted secret")
     .action((name: string, options: { value?: string }) => {
       const value = options.value ?? readSecretValueFromStdin();
       new SecretsManager().setSecret(name, value);
@@ -1480,7 +1743,7 @@ function registerSecretsCommands(program: Command): void {
 
   secret
     .command("rm <name>")
-    .description("Remove secret from OS keychain")
+    .description("Remove an encrypted secret")
     .action((name: string) => {
       new SecretsManager().removeSecret(name);
       process.stdout.write(`Secret removed: ${name}\n`);
@@ -1502,6 +1765,39 @@ function registerSecretsCommands(program: Command): void {
     });
 }
 
+/**
+ * Opens a URL in the user's default browser without blocking the event loop.
+ * execFileSync used to be used here, but on Linux `xdg-open` can block until
+ * the browser process itself exits, which stalls the CLI process and prevents
+ * the loopback OAuth callback server from ever accepting the redirect. Falls
+ * back to printing the URL if the platform opener can't be spawned (e.g. a
+ * headless box with no `xdg-open`), so the flow can still be completed by hand.
+ */
+function openInBrowser(url: string): void {
+  const [command, args] =
+    process.platform === "darwin"
+      ? ["open", [url]]
+      : process.platform === "win32"
+        ? ["cmd", ["/c", "start", "", url]]
+        : ["xdg-open", [url]];
+
+  const printFallback = () => {
+    process.stdout.write(`Could not open a browser automatically. Open this URL to continue:\n${url}\n`);
+  };
+
+  try {
+    const child = spawn(command, args, { detached: true, stdio: "ignore" });
+    // spawn failures (e.g. no `xdg-open` on this system) surface asynchronously via
+    // the "error" event rather than a synchronous throw; an unhandled one would
+    // crash the process, so it must be handled even though we don't otherwise care
+    // about this child process's lifecycle.
+    child.on("error", printFallback);
+    child.unref();
+  } catch {
+    printFallback();
+  }
+}
+
 function registerAuthCommands(program: Command): void {
   const auth = program.command("auth").description("Auth utilities");
 
@@ -1509,6 +1805,7 @@ function registerAuthCommands(program: Command): void {
     .command("login <server>")
     .description("Run browser OAuth login for an HTTP upstream server")
     .action(async (server: string) => {
+      const startedAt = Date.now();
       const config = loadConfig();
       const spec = getServerSpecOrThrow(config, server);
       if (spec.transport !== "http") {
@@ -1517,17 +1814,63 @@ function registerAuthCommands(program: Command): void {
 
       const secrets = new SecretsManager();
       await runOAuthLogin(server, spec, secrets, (url) => {
-        if (process.platform === "darwin") {
-          execFileSync("open", [url], { stdio: "ignore" });
-          return;
-        }
-        if (process.platform === "win32") {
-          execFileSync("cmd", ["/c", "start", "", url], { stdio: "ignore" });
-          return;
-        }
-        execFileSync("xdg-open", [url], { stdio: "ignore" });
+        process.stdout.write(`Opening browser to sign in to "${server}"...\n`);
+        openInBrowser(url);
       });
       process.stdout.write(`OAuth login complete for "${server}".\n`);
+      captureTelemetryEvent({
+        name: "operation_completed",
+        properties: { operation: "auth_login", outcome: "success", durationBucket: durationBucket(Date.now() - startedAt) }
+      });
+    });
+
+  auth
+    .command("logout <server>")
+    .option("-y, --yes", "Skip confirmation prompt")
+    .option("--json", "Output JSON")
+    .description("Sign out of OAuth for a server and clear stored credentials")
+    .action(async (server: string, options: { yes?: boolean; json?: boolean }) => {
+      const startedAt = Date.now();
+      const config = loadConfig();
+      const spec = getServerSpecOrThrow(config, server);
+
+      if (!options.yes) {
+        if (!process.stdin.isTTY || !process.stdout.isTTY) {
+          throw new Error("Sign-out requires --yes in non-interactive mode.");
+        }
+        const rl = createInterface({ input: process.stdin, output: process.stdout });
+        try {
+          const answer = await promptLine(rl, `Sign out of "${server}"? (y/N): `);
+          if (!["y", "yes"].includes(answer.trim().toLowerCase())) {
+            return;
+          }
+        } finally {
+          rl.close();
+        }
+      }
+
+      const secrets = new SecretsManager();
+      const { removedSecrets, removedBinding, sync } = await performOAuthLogout(server, spec, secrets);
+
+      if (options.json) {
+        process.stdout.write(`${JSON.stringify({ server, removedSecrets, removedBinding, sync }, null, 2)}\n`);
+        return;
+      }
+
+      if (removedSecrets.length === 0 && !removedBinding) {
+        process.stdout.write(`"${server}" was not signed in with OAuth. Nothing to do.\n`);
+        return;
+      }
+
+      const bindingNote = removedBinding ? ` and the ${removedBinding} binding` : "";
+      process.stdout.write(
+        `Signed out of "${server}". Removed ${removedSecrets.length} stored credential${removedSecrets.length === 1 ? "" : "s"}${bindingNote}.\n`
+      );
+      process.stdout.write(`Re-run \`mcpx auth login ${server}\` to sign back in.\n`);
+      captureTelemetryEvent({
+        name: "operation_completed",
+        properties: { operation: "auth_logout", outcome: "success", durationBucket: durationBucket(Date.now() - startedAt) }
+      });
     });
 
   auth
@@ -1535,10 +1878,10 @@ function registerAuthCommands(program: Command): void {
     .option("--header <name>", "HTTP header name (default for HTTP servers: Authorization)")
     .option("--env <name>", "Env var name (required for stdio servers)")
     .option("--value <value>", "Auth value/token (if omitted, read from stdin)")
-    .option("--secret-name <name>", "Override keychain secret name")
+    .option("--secret-name <name>", "Override stored secret name")
     .option("--raw", "Do not auto-prefix Authorization values with Bearer")
-    .description("Store auth in keychain and bind it to an upstream server")
-    .action((server: string, options: AuthSetOptions) => {
+    .description("Store auth as an encrypted secret and bind it to an upstream server")
+    .action(async (server: string, options: AuthSetOptions) => {
       const config = loadConfig();
       const spec = getServerSpecOrThrow(config, server);
       const target = resolveAuthTarget(spec, options.header, options.env);
@@ -1548,8 +1891,10 @@ function registerAuthCommands(program: Command): void {
 
       const secrets = new SecretsManager();
       secrets.setSecret(secretName, authValue);
-      applyAuthReference(spec, target, toSecretRef(secretName));
-      saveConfig(config);
+      await mutateConfig((freshConfig) => {
+        const freshSpec = getServerSpecOrThrow(freshConfig, server);
+        applyAuthReference(freshSpec, target, toSecretRef(secretName));
+      });
 
       process.stdout.write(`Configured auth for server "${server}" via ${target.kind} "${target.key}".\n`);
       process.stdout.write(`Stored secret: ${secretName}\n`);
@@ -1559,13 +1904,17 @@ function registerAuthCommands(program: Command): void {
     .command("rm <server>")
     .option("--header <name>", "HTTP header name (default for HTTP servers: Authorization)")
     .option("--env <name>", "Env var name (required for stdio servers)")
-    .option("--delete-secret", "Delete referenced keychain secret when removing binding")
+    .option("--delete-secret", "Delete the referenced stored secret when removing binding")
     .description("Remove auth binding from an upstream server")
-    .action((server: string, options: AuthRemoveOptions) => {
+    .action(async (server: string, options: AuthRemoveOptions) => {
       const config = loadConfig();
       const spec = getServerSpecOrThrow(config, server);
       const target = resolveAuthTarget(spec, options.header, options.env);
-      const removedValue = removeAuthReference(spec, target);
+
+      const removedValue = await mutateConfig((freshConfig) => {
+        const freshSpec = getServerSpecOrThrow(freshConfig, server);
+        return removeAuthReference(freshSpec, target);
+      });
 
       if (!removedValue) {
         process.stdout.write(`No auth binding found for server "${server}" at ${target.kind} "${target.key}".\n`);
@@ -1577,14 +1926,16 @@ function registerAuthCommands(program: Command): void {
         if (secretName) {
           new SecretsManager().removeSecret(secretName);
           process.stdout.write(`Removed binding and deleted secret: ${secretName}\n`);
+        } else if (isOAuthReference(removedValue)) {
+          const removed = clearOAuthCredentials(oauthReferenceServerName(removedValue), new SecretsManager());
+          process.stdout.write(`Removed binding and deleted ${removed.length} OAuth credential${removed.length === 1 ? "" : "s"}.\n`);
+          process.stdout.write(`(Equivalent to \`mcpx auth logout ${server}\`.)\n`);
         } else {
-          process.stdout.write("Removed binding. Value was inline (no keychain secret deleted).\n");
+          process.stdout.write("Removed binding. Value was inline (no stored secret deleted).\n");
         }
       } else {
         process.stdout.write("Removed binding.\n");
       }
-
-      saveConfig(config);
     });
 
   auth
@@ -1633,6 +1984,82 @@ function registerAuthCommands(program: Command): void {
     });
 
   auth
+    .command("status [server]")
+    .option("--json", "Output JSON")
+    .description("Show OAuth sign-in and token/secret auth status (offline, no network calls)")
+    .action((server: string | undefined, options: { json?: boolean }) => {
+      const config = loadConfig();
+      const names = server ? [server] : Object.keys(config.servers);
+      const secrets = new SecretsManager();
+
+      const entries = names.map((name) => {
+        const spec = getServerSpecOrThrow(config, name);
+        const oauth = getOAuthCredentialStatus(name, spec, secrets);
+        const bindings = listAuthBindings(spec).map((binding) => {
+          if (isOAuthReference(binding.value)) {
+            return { kind: binding.kind, key: binding.key, source: "oauth" as const, secretName: null as string | null, secretPresent: null as boolean | null };
+          }
+          const secretName = secretRefName(binding.value);
+          if (secretName) {
+            return { kind: binding.kind, key: binding.key, source: "secret" as const, secretName, secretPresent: secrets.getSecret(secretName) !== null };
+          }
+          return { kind: binding.kind, key: binding.key, source: "inline" as const, secretName: null as string | null, secretPresent: null as boolean | null };
+        });
+
+        return { server: name, transport: spec.transport, oauth, bindings };
+      });
+
+      if (options.json) {
+        process.stdout.write(`${JSON.stringify({ servers: entries }, null, 2)}\n`);
+        return;
+      }
+
+      if (entries.length === 0) {
+        process.stdout.write("No upstream servers configured.\n");
+        return;
+      }
+
+      const oauthEntries = entries.filter((e) => e.oauth.bound || e.oauth.signedIn);
+      const secretRows = entries.flatMap((e) => e.bindings.filter((b) => b.source !== "oauth").map((b) => ({ entry: e, binding: b })));
+
+      if (oauthEntries.length > 0) {
+        process.stdout.write("OAuth sign-ins\n");
+        for (const entry of oauthEntries) {
+          process.stdout.write(`- ${entry.server} (${entry.transport})\n`);
+          if (!entry.oauth.signedIn) {
+            process.stdout.write(`    status     bound but not signed in — run \`mcpx auth login ${entry.server}\`\n`);
+            continue;
+          }
+          process.stdout.write(`    status     ${entry.oauth.expired ? "expired" : "signed in"}\n`);
+          if (entry.oauth.expiresAt) {
+            process.stdout.write(`    expires    ${new Date(entry.oauth.expiresAt).toLocaleString()}\n`);
+          }
+          process.stdout.write(
+            `    refresh    ${entry.oauth.hasRefreshToken ? "available" : `none — run \`mcpx auth login ${entry.server}\` to re-authenticate`}\n`
+          );
+          process.stdout.write(`    client     ${entry.oauth.clientRegistered ? "registered" : "not registered"}\n`);
+        }
+        process.stdout.write("\n");
+      }
+
+      if (secretRows.length > 0) {
+        process.stdout.write("Token / secret auth\n");
+        for (const { entry, binding } of secretRows) {
+          const label =
+            binding.source === "secret"
+              ? `secret://${binding.secretName}${binding.secretPresent ? "" : "  MISSING"}`
+              : "<inline>";
+          process.stdout.write(`- ${entry.server} (${entry.transport})  ${binding.kind}:${binding.key}  ${label}\n`);
+        }
+        process.stdout.write("\n");
+      }
+
+      if (oauthEntries.length === 0 && secretRows.length === 0) {
+        process.stdout.write("No auth configured for any server.\n");
+      }
+    });
+
+  auth
     .command("rotate-local-token")
     .description("Rotate bearer token used for local client->mcpx auth")
     .action(async () => {
@@ -1667,21 +2094,113 @@ function registerSkillsCommands(program: Command): void {
     .command("add <id>")
     .description("Add a new skill")
     .action(async (id: string) => {
+      const startedAt = Date.now();
       const existing = getSkill(id);
       if (existing) {
         process.stderr.write(`Skill "${id}" already exists.\n`);
-        process.exit(1);
+        recordTelemetryOperationFailure("skill_add", { code: "validation_error" }, startedAt);
+        process.exitCode = 1;
+        return;
       }
-      saveSkill(id, `# ${id}\n\nAdd your instructions here.`);
+      saveSkill(id, `---\nname: ${id}\ndescription: Instructions for using ${id}.\n---\n\nAdd your instructions here.`);
+      const summary = syncAllClients(loadConfig(), new SecretsManager());
+      await mutateConfig((config) => persistSyncState(summary, config));
       process.stdout.write(`Skill "${id}" created.\n`);
+      captureTelemetryEvent({
+        name: "operation_completed",
+        properties: { operation: "skill_add", outcome: "success", durationBucket: durationBucket(Date.now() - startedAt) }
+      });
     });
 
   skill
     .command("rm <id>")
     .description("Remove a skill")
-    .action((id: string) => {
+    .action(async (id: string) => {
+      const startedAt = Date.now();
+      if (!getSkill(id)) {
+        process.stderr.write(`Skill "${id}" not found.\n`);
+        recordTelemetryOperationFailure("skill_remove", { code: "validation_error" }, startedAt);
+        process.exitCode = 1;
+        return;
+      }
       deleteSkill(id);
+      const summary = syncAllClients(loadConfig(), new SecretsManager());
+      await mutateConfig((config) => persistSyncState(summary, config));
       process.stdout.write(`Skill "${id}" removed.\n`);
+      captureTelemetryEvent({
+        name: "operation_completed",
+        properties: { operation: "skill_remove", outcome: "success", durationBucket: durationBucket(Date.now() - startedAt) }
+      });
+    });
+
+  skill
+    .command("customize <id>")
+    .option("--name <name>", "Name for the authored copy")
+    .description("Create an editable authored copy of an installed skill")
+    .action((id: string, options: { name?: string }) => {
+      const customized = customizeSkill(id, options.name ?? id);
+      process.stdout.write(`Skill "${customized.id}" is now editable.\n`);
+    });
+
+  skill
+    .command("install <source>")
+    .option("--skill <name>", "Skill directory name when a source contains multiple skills")
+    .description("Install an Agent Skill package from a local, Git, GitHub, or npm source")
+    .action(async (source: string, options: { skill?: string }) => {
+      try {
+        const installed = await installSkillFromSource(source, options.skill);
+        const summary = syncAllClients(loadConfig(), new SecretsManager());
+        await mutateConfig((freshConfig) => persistSyncState(summary, freshConfig));
+        process.stdout.write(`Skill installed: ${installed.id}\n`);
+      } catch (error) {
+        process.stderr.write(`Error: ${error instanceof Error ? error.message : String(error)}\n`);
+        process.exitCode = 1;
+      }
+    });
+
+  skill.command("pin <id>").description("Pin an installed skill at its current revision").action((id: string) => { pinSkill(id); process.stdout.write(`Skill pinned: ${id}\n`); });
+  skill.command("unpin <id>").description("Allow an installed skill to update").action((id: string) => { unpinSkill(id); process.stdout.write(`Skill unpinned: ${id}\n`); });
+  skill.command("update <id>").description("Update an installed skill from its source").action(async (id: string) => { const skill = await updateSkill(id); const summary = syncAllClients(loadConfig(), new SecretsManager()); await mutateConfig((freshConfig) => persistSyncState(summary, freshConfig)); process.stdout.write(`Skill updated: ${skill.id}\n`); });
+  skill.command("rollback <id>").description("Restore the previous installed skill revision").action(async (id: string) => { const skill = rollbackSkill(id); const summary = syncAllClients(loadConfig(), new SecretsManager()); await mutateConfig((freshConfig) => persistSyncState(summary, freshConfig)); process.stdout.write(`Skill rolled back: ${skill.id}\n`); });
+}
+
+function registerShareCommands(program: Command): void {
+  const share = program.command("share").description("Export and import portable mcpx environments");
+  share.command("export <directory>")
+    .option("--skill <id>", "Only include this skill (repeatable)", (value: string, previous: string[] = []) => [...previous, value])
+    .option("--plugin <id>", "Only include this plugin (repeatable)", (value: string, previous: string[] = []) => [...previous, value])
+    .description("Export a Git-friendly environment folder")
+    .action((directory: string, options: { skill?: string[]; plugin?: string[] }) => {
+      try {
+        const result = exportEnvironment(directory, { skills: options.skill, plugins: options.plugin });
+        process.stdout.write(`Environment exported to ${path.resolve(directory)}\n`);
+        process.stdout.write(`${result.environment.skills.length} skill(s), ${result.environment.plugins.length} plugin(s), ${Object.keys(result.environment.servers).length} server(s)\n`);
+      } catch (error) {
+        process.stderr.write(`Error: ${error instanceof Error ? error.message : String(error)}\n`);
+        process.exitCode = 1;
+      }
+    });
+  share.command("import <directory>")
+    .option("--dry-run", "Validate and preview without changing local state")
+    .option("--locked", "Require manifest and package hashes to match the lockfile")
+    .option("--input <name=value>", "Provide a recipient input", (value: string, previous: Record<string, string> = {}) => {
+      const separator = value.indexOf("=");
+      if (separator <= 0) throw new Error("Inputs must use name=value");
+      return { ...previous, [value.slice(0, separator)]: value.slice(separator + 1) };
+    }, {})
+    .description("Import a portable environment folder")
+    .action(async (directory: string, options: { dryRun?: boolean; locked?: boolean; input: Record<string, string> }) => {
+      try {
+        const result = await importEnvironment(directory, { dryRun: options.dryRun, locked: options.locked, inputs: options.input });
+        process.stdout.write(JSON.stringify(result, null, 2) + "\n");
+        if (!options.dryRun) {
+          const summary = syncAllClients(loadConfig(), new SecretsManager());
+          await mutateConfig((freshConfig) => persistSyncState(summary, freshConfig));
+        }
+      } catch (error) {
+        process.stderr.write(`Error: ${error instanceof Error ? error.message : String(error)}\n`);
+        process.exitCode = 1;
+      }
     });
 }
 
@@ -1718,7 +2237,21 @@ function registerUpdateCommand(program: Command): void {
     .option("--json", "Output JSON")
     .description("Check for available updates")
     .action(async (options: { json?: boolean }) => {
+      const startedAt = Date.now();
       const status = await checkForUpdates();
+      captureTelemetryEvent({
+        name: "operation_completed",
+        properties: {
+          operation: "update_check",
+          outcome: status.error ? "failure" : "success",
+          errorCode: status.error ? "update_check_failed" : undefined,
+          durationBucket: durationBucket(Date.now() - startedAt)
+        }
+      });
+      captureTelemetryEvent({
+        name: "update_completed",
+        properties: { action: "check", outcome: status.error ? "failure" : "success", fromVersion: status.currentVersion, toVersion: status.latestVersion ?? undefined }
+      });
 
       if (options.json) {
         process.stdout.write(`${JSON.stringify(status, null, 2)}\n`);
@@ -1742,9 +2275,18 @@ function registerUpdateCommand(program: Command): void {
     .command("install")
     .description("Download and stage the latest update")
     .action(async () => {
+      const startedAt = Date.now();
       process.stdout.write("Checking for updates...\n");
       const result = await performUpdate();
       process.stdout.write(`${result.message}\n`);
+      captureTelemetryEvent({
+        name: "operation_completed",
+        properties: { operation: "update_install", outcome: result.success ? "success" : "failure", errorCode: result.success ? undefined : "update_failed", durationBucket: durationBucket(Date.now() - startedAt) }
+      });
+      captureTelemetryEvent({
+        name: "update_completed",
+        properties: { action: "install", outcome: result.success ? "success" : "failure" }
+      });
       if (!result.success) {
         process.exitCode = 1;
       }
@@ -1754,8 +2296,17 @@ function registerUpdateCommand(program: Command): void {
     .command("rollback")
     .description("Roll back to the previously installed version")
     .action(() => {
+      const startedAt = Date.now();
       const result = performRollback();
       process.stdout.write(`${result.message}\n`);
+      captureTelemetryEvent({
+        name: "operation_completed",
+        properties: { operation: "update_rollback", outcome: result.success ? "success" : "failure", errorCode: result.success ? undefined : "rollback_failed", durationBucket: durationBucket(Date.now() - startedAt) }
+      });
+      captureTelemetryEvent({
+        name: "update_completed",
+        properties: { action: "rollback", outcome: result.success ? "success" : "failure" }
+      });
       if (!result.success) {
         process.exitCode = 1;
       }
@@ -1785,10 +2336,13 @@ function registerProjectCommands(program: Command, cliPath: string): void {
     .command("init [name]")
     .description("Initialize a local .mcpx.json configuration in the current directory")
     .action(async (name?: string) => {
+      const startedAt = Date.now();
       const targetPath = path.join(process.cwd(), ".mcpx.json");
       if (fs.existsSync(targetPath)) {
         process.stderr.write(`Local project configuration already exists at: ${targetPath}\n`);
-        process.exit(1);
+        recordTelemetryOperationFailure("project_init", { code: "validation_error" }, startedAt);
+        process.exitCode = 1;
+        return;
       }
 
       const projectName = name?.trim() || path.basename(process.cwd());
@@ -1802,10 +2356,14 @@ function registerProjectCommands(program: Command, cliPath: string): void {
       process.stdout.write(`Initialized project configuration at: ${targetPath}\n`);
 
       const { registerProject } = await import("./core/registry.js");
-      const globalConfig = loadConfig();
-      registerProject(globalConfig, process.cwd(), projectName);
-      saveConfig(globalConfig);
+      await mutateConfig((globalConfig) => {
+        registerProject(globalConfig, process.cwd(), projectName);
+      });
       process.stdout.write(`Registered project "${projectName}" globally.\n`);
+      captureTelemetryEvent({
+        name: "operation_completed",
+        properties: { operation: "project_init", outcome: "success", durationBucket: durationBucket(Date.now() - startedAt) }
+      });
     });
 
   projectCmd
@@ -1830,25 +2388,402 @@ function registerProjectCommands(program: Command, cliPath: string): void {
     .command("remove <path>")
     .description("Unregister a project path from the global configuration")
     .action(async (projectPath: string) => {
+      const startedAt = Date.now();
       const resolvedPath = path.resolve(projectPath);
       const globalConfig = loadConfig();
       if (!globalConfig.projects || !globalConfig.projects[resolvedPath]) {
         process.stderr.write(`No registered project found at path: ${resolvedPath}\n`);
-        process.exit(1);
+        recordTelemetryOperationFailure("project_remove", { code: "validation_error" }, startedAt);
+        process.exitCode = 1;
+        return;
       }
 
       const entry = globalConfig.projects[resolvedPath];
       const { unregisterProject } = await import("./core/registry.js");
-      unregisterProject(globalConfig, resolvedPath);
-      saveConfig(globalConfig);
+      await mutateConfig((freshConfig) => {
+        unregisterProject(freshConfig, resolvedPath);
+      });
       process.stdout.write(`Unregistered project "${entry.name}" (${resolvedPath}) from the global configuration.\n`);
       
       process.stdout.write("Auto-syncing managed gateway entries across all supported clients...\n");
-      const mergedConfig = loadMergedConfig();
-      await autoSyncManagedEntries(mergedConfig, cliPath);
+      await autoSyncManagedEntries(cliPath);
+      captureTelemetryEvent({
+        name: "operation_completed",
+        properties: { operation: "project_remove", outcome: "success", durationBucket: durationBucket(Date.now() - startedAt) }
+      });
     });
 }
 
+const PLUGIN_COMPONENTS = ["mcpServers", "skills", "hooks", "agents", "commands"] as const;
+
+function registerPluginCommands(program: Command, _cliPath: string): void {
+  const plugin = program.command("plugin").description("Manage plugins");
+
+  plugin
+    .command("inspect <source>")
+    .description("Inspect plugin manifest and components")
+    .action(async (source: string) => {
+      const { inspectPlugin } = await import("./core/plugin-manager.js");
+      try {
+        const info = await inspectPlugin(source);
+        process.stdout.write(JSON.stringify(info, null, 2) + "\n");
+      } catch (e: any) {
+        process.stderr.write(`Error: ${e.message}\n`);
+        process.exit(1);
+      }
+    });
+
+  plugin
+    .command("install <source>")
+    .option("--name <name>", "Plugin name")
+    .option("--no-enable", "Don't enable plugin after install")
+    .option("-y, --yes", "Confirm marketplace plugin installation")
+    .description("Install plugin")
+    .action(async (source: string, options: { name?: string; enable?: boolean; yes?: boolean }) => {
+      const startedAt = Date.now();
+      try {
+        const config = loadConfig();
+        const marketplaceName = source.includes("@") ? source.slice(source.lastIndexOf("@") + 1) : "";
+        let p;
+        if (config.marketplaces?.[marketplaceName]) {
+          const { inspectMarketplacePlugin, installMarketplacePlugin } = await import("./core/marketplace.js");
+          const detail = await inspectMarketplacePlugin(source);
+          process.stdout.write(`${detail.displayName} (${source})\n`);
+          process.stdout.write(`Will install: ${detail.supportedCapabilities.join(", ") || "nothing compatible"}\n`);
+          if (detail.unsupportedCapabilities.length) process.stdout.write(`Unsupported: ${detail.unsupportedCapabilities.join(", ")}\n`);
+          if (!detail.compatible) throw new Error(`Plugin ${source} has no mcpx-compatible capabilities`);
+          if (!options.yes) {
+            if (!process.stdin.isTTY || !process.stdout.isTTY) throw new Error("Marketplace installation requires --yes in non-interactive mode");
+            const rl = createInterface({ input: process.stdin, output: process.stdout });
+            try {
+              const answer = await promptLine(rl, "Install this plugin? (y/N): ");
+              if (answer.trim().toLowerCase() !== "y" && answer.trim().toLowerCase() !== "yes") {
+                process.stdout.write("Installation cancelled.\n");
+                return;
+              }
+            } finally {
+              rl.close();
+            }
+          }
+          p = await installMarketplacePlugin(source);
+        } else {
+          const { installPlugin } = await import("./core/plugin-manager.js");
+          p = await installPlugin(source, { name: options.name, enabled: options.enable !== false });
+        }
+        process.stdout.write(`Plugin installed: ${p.id}\n`);
+        captureTelemetryEvent({
+          name: "operation_completed",
+          properties: { operation: "plugin_install", outcome: "success", durationBucket: durationBucket(Date.now() - startedAt) }
+        });
+      } catch (e: any) {
+        process.stderr.write(`Error: ${e.message}\n`);
+        recordTelemetryOperationFailure("plugin_install", e, startedAt);
+        process.exitCode = 1;
+      }
+    });
+
+  const marketplace = plugin.command("marketplace").description("Manage plugin marketplaces");
+
+  marketplace
+    .command("list")
+    .description("List configured plugin marketplaces")
+    .action(async () => {
+      const { listMarketplaces } = await import("./core/marketplace.js");
+      process.stdout.write(JSON.stringify(await listMarketplaces(), null, 2) + "\n");
+    });
+
+  marketplace
+    .command("add <source>")
+    .option("--manifest <path>", "Marketplace manifest path inside the source")
+    .description("Add a Claude or Codex plugin marketplace")
+    .action(async (source: string, options: { manifest?: string }) => {
+      const startedAt = Date.now();
+      try {
+        const { addMarketplace } = await import("./core/marketplace.js");
+        const added = await addMarketplace(source, options.manifest);
+        process.stdout.write(`Marketplace added: ${added.name}\n`);
+        captureTelemetryEvent({
+          name: "operation_completed",
+          properties: { operation: "marketplace_add", outcome: "success", durationBucket: durationBucket(Date.now() - startedAt) }
+        });
+      } catch (error) {
+        process.stderr.write(`Error: ${error instanceof Error ? error.message : String(error)}\n`);
+        recordTelemetryOperationFailure("marketplace_add", error, startedAt);
+        process.exitCode = 1;
+      }
+    });
+
+  marketplace
+    .command("update [name]")
+    .description("Refresh one marketplace, or every configured marketplace")
+    .action(async (name?: string) => {
+      const startedAt = Date.now();
+      try {
+        const { listMarketplaces, refreshMarketplaceWithPlugins } = await import("./core/marketplace.js");
+        const names = name ? [name] : (await listMarketplaces()).map((entry) => entry.name);
+        for (const marketplaceName of names) {
+          const result = await refreshMarketplaceWithPlugins(marketplaceName);
+          process.stdout.write(`Marketplace updated: ${marketplaceName} (${result.updated.length} plugin update(s))\n`);
+          for (const error of result.errors) process.stderr.write(`Warning: ${error}\n`);
+        }
+        captureTelemetryEvent({
+          name: "operation_completed",
+          properties: { operation: "marketplace_refresh", outcome: "success", durationBucket: durationBucket(Date.now() - startedAt) }
+        });
+      } catch (error) {
+        process.stderr.write(`Error: ${error instanceof Error ? error.message : String(error)}\n`);
+        recordTelemetryOperationFailure("marketplace_refresh", error, startedAt);
+        process.exitCode = 1;
+      }
+    });
+
+  marketplace
+    .command("remove <name>")
+    .option("-y, --yes", "Confirm removal and uninstall marketplace plugins")
+    .description("Remove a custom marketplace and its installed plugins")
+    .action(async (name: string, options: { yes?: boolean }) => {
+      const startedAt = Date.now();
+      try {
+        if (!options.yes) {
+          if (!process.stdin.isTTY || !process.stdout.isTTY) throw new Error("Marketplace removal requires --yes in non-interactive mode");
+          const rl = createInterface({ input: process.stdin, output: process.stdout });
+          try {
+            const answer = await promptLine(rl, `Remove ${name} and uninstall its plugins? (y/N): `);
+            if (!["y", "yes"].includes(answer.trim().toLowerCase())) return;
+          } finally {
+            rl.close();
+          }
+        }
+        const { removeMarketplace } = await import("./core/marketplace.js");
+        await removeMarketplace(name);
+        process.stdout.write(`Marketplace removed: ${name}\n`);
+        captureTelemetryEvent({
+          name: "operation_completed",
+          properties: { operation: "marketplace_remove", outcome: "success", durationBucket: durationBucket(Date.now() - startedAt) }
+        });
+      } catch (error) {
+        process.stderr.write(`Error: ${error instanceof Error ? error.message : String(error)}\n`);
+        recordTelemetryOperationFailure("marketplace_remove", error, startedAt);
+        process.exitCode = 1;
+      }
+    });
+
+  plugin
+    .command("discover [query]")
+    .option("--marketplace <name>", "Filter by marketplace")
+    .option("--category <category>", "Filter by category")
+    .description("Browse available marketplace plugins")
+    .action(async (query: string | undefined, options: { marketplace?: string; category?: string }) => {
+      const { listMarketplacePlugins } = await import("./core/marketplace.js");
+      let listings = await listMarketplacePlugins(query);
+      if (options.marketplace) listings = listings.filter((entry) => entry.marketplace === options.marketplace);
+      if (options.category) listings = listings.filter((entry) => entry.category?.toLowerCase() === options.category!.toLowerCase());
+      process.stdout.write(JSON.stringify(listings, null, 2) + "\n");
+    });
+
+  plugin
+    .command("details <plugin>")
+    .description("Inspect a plugin@marketplace listing")
+    .action(async (qualified: string) => {
+      try {
+        const { inspectMarketplacePlugin } = await import("./core/marketplace.js");
+        process.stdout.write(JSON.stringify(await inspectMarketplacePlugin(qualified), null, 2) + "\n");
+      } catch (error) {
+        process.stderr.write(`Error: ${error instanceof Error ? error.message : String(error)}\n`);
+        process.exitCode = 1;
+      }
+    });
+
+  plugin
+    .command("approve <name> <component>")
+    .description("Approve a plugin component (hooks, mcpServers)")
+    .action(async (name: string, component: string) => {
+      const { approvePluginComponent } = await import("./core/plugin-manager.js");
+      try {
+        await approvePluginComponent(name, component);
+        process.stdout.write(`Approved ${component} for plugin ${name}\n`);
+      } catch (e: any) {
+        process.stderr.write(`Error: ${e.message}\n`);
+        process.exit(1);
+      }
+    });
+
+  plugin
+    .command("pin <name>")
+    .description("Pin a plugin at its current revision")
+    .action(async (name: string) => {
+      const { pinPlugin } = await import("./core/plugin-manager.js");
+      await pinPlugin(name);
+      process.stdout.write(`Plugin pinned: ${name}\n`);
+    });
+
+  plugin
+    .command("unpin <name>")
+    .description("Allow a pinned plugin to update")
+    .action(async (name: string) => {
+      const { unpinPlugin } = await import("./core/plugin-manager.js");
+      await unpinPlugin(name);
+      process.stdout.write(`Plugin unpinned: ${name}\n`);
+    });
+
+  plugin
+    .command("rollback <name>")
+    .description("Restore the previous installed plugin revision")
+    .action(async (name: string) => {
+      try {
+        const { rollbackPlugin } = await import("./core/plugin-manager.js");
+        const plugin = await rollbackPlugin(name);
+        process.stdout.write(`Plugin rolled back: ${plugin.name}\n`);
+      } catch (error) {
+        process.stderr.write(`Error: ${error instanceof Error ? error.message : String(error)}\n`);
+        process.exitCode = 1;
+      }
+    });
+
+  plugin
+    .command("prepare <name>")
+    .description("Install plugin dependencies")
+    .action(async (name: string) => {
+      const { preparePlugin } = await import("./core/plugin-manager.js");
+      try {
+        await preparePlugin(name);
+        process.stdout.write(`Plugin ${name} prepared\n`);
+      } catch (e: any) {
+        process.stderr.write(`Error: ${e.message}\n`);
+        process.exit(1);
+      }
+    });
+
+  plugin
+    .command("update <name>")
+    .description("Update plugin to latest version")
+    .action(async (name: string) => {
+      const startedAt = Date.now();
+      const { updatePlugin } = await import("./core/plugin-manager.js");
+      try {
+        const p = await updatePlugin(name);
+        process.stdout.write(`Plugin ${name} updated to ${p.version}\n`);
+        captureTelemetryEvent({
+          name: "operation_completed",
+          properties: { operation: "plugin_update", outcome: "success", durationBucket: durationBucket(Date.now() - startedAt) }
+        });
+      } catch (e: any) {
+        process.stderr.write(`Error: ${e.message}\n`);
+        recordTelemetryOperationFailure("plugin_update", e, startedAt);
+        process.exitCode = 1;
+      }
+    });
+
+  plugin
+    .command("uninstall <name>")
+    .option("--keep-data", "Keep plugin data after uninstall")
+    .description("Uninstall plugin")
+    .action(async (name: string, options: { keepData?: boolean }) => {
+      const startedAt = Date.now();
+      const { uninstallPlugin } = await import("./core/plugin-manager.js");
+      try {
+        await uninstallPlugin(name, options.keepData || false);
+        process.stdout.write(`Plugin ${name} uninstalled\n`);
+        captureTelemetryEvent({
+          name: "operation_completed",
+          properties: { operation: "plugin_uninstall", outcome: "success", durationBucket: durationBucket(Date.now() - startedAt) }
+        });
+      } catch (e: any) {
+        process.stderr.write(`Error: ${e.message}\n`);
+        recordTelemetryOperationFailure("plugin_uninstall", e, startedAt);
+        process.exitCode = 1;
+      }
+    });
+
+  plugin
+    .command("enable <name>")
+    .option("--project <path>", "Scope this enable to a single registered project instead of globally")
+    .description("Enable plugin (globally, or for one project with --project)")
+    .action(async (name: string, options: { project?: string }) => {
+      const startedAt = Date.now();
+      try {
+        if (options.project) {
+          const { setPluginProjectOverride } = await import("./core/plugin-manager.js");
+          const resolvedPath = path.resolve(options.project);
+          await setPluginProjectOverride(name, resolvedPath, { enabled: true });
+          process.stdout.write(`Plugin ${name} enabled for project: ${resolvedPath}\n`);
+        } else {
+          const { enablePlugin } = await import("./core/plugin-manager.js");
+          await enablePlugin(name);
+          process.stdout.write(`Plugin ${name} enabled\n`);
+        }
+        captureTelemetryEvent({
+          name: "operation_completed",
+          properties: { operation: "plugin_toggle", outcome: "success", durationBucket: durationBucket(Date.now() - startedAt) }
+        });
+      } catch (e: any) {
+        process.stderr.write(`Error: ${e.message}\n`);
+        recordTelemetryOperationFailure("plugin_toggle", e, startedAt);
+        process.exitCode = 1;
+      }
+    });
+
+  plugin
+    .command("disable <name>")
+    .option("--project <path>", "Scope this disable to a single registered project instead of globally")
+    .description("Disable plugin (globally, or for one project with --project)")
+    .action(async (name: string, options: { project?: string }) => {
+      const startedAt = Date.now();
+      try {
+        if (options.project) {
+          const { setPluginProjectOverride } = await import("./core/plugin-manager.js");
+          const resolvedPath = path.resolve(options.project);
+          await setPluginProjectOverride(name, resolvedPath, { enabled: false });
+          process.stdout.write(`Plugin ${name} disabled for project: ${resolvedPath}\n`);
+        } else {
+          const { disablePlugin } = await import("./core/plugin-manager.js");
+          await disablePlugin(name);
+          process.stdout.write(`Plugin ${name} disabled\n`);
+        }
+        captureTelemetryEvent({
+          name: "operation_completed",
+          properties: { operation: "plugin_toggle", outcome: "success", durationBucket: durationBucket(Date.now() - startedAt) }
+        });
+      } catch (e: any) {
+        process.stderr.write(`Error: ${e.message}\n`);
+        recordTelemetryOperationFailure("plugin_toggle", e, startedAt);
+        process.exitCode = 1;
+      }
+    });
+
+  plugin
+    .command("status [name]")
+    .description("Show plugin status")
+    .action(async (name?: string) => {
+      const { getPluginStatus, listPlugins } = await import("./core/plugin-manager.js");
+      try {
+        if (name) {
+          const p = await getPluginStatus(name);
+          if (!p) {
+            process.stderr.write(`Error: Plugin ${name} not found\n`);
+            process.exit(1);
+          }
+          process.stdout.write(JSON.stringify(p, null, 2) + "\n");
+        } else {
+          const plugins = await listPlugins();
+          process.stdout.write(JSON.stringify(plugins, null, 2) + "\n");
+        }
+      } catch (e: any) {
+        process.stderr.write(`Error: ${e.message}\n`);
+        process.exit(1);
+      }
+    });
+}
+
+function registerPluginHostCommand(program: Command): void {
+  program
+    .command("plugin-host <plugin> <server>")
+    .description("Run a plugin MCP server under mcpx policy enforcement")
+    .action(async (plugin: string, server: string) => {
+      const { runPluginHost } = await import("./core/plugin-host.js");
+      runPluginHost(plugin, server);
+    });
+}
 
 function registerProxyCommand(program: Command): void {
   program
@@ -1868,6 +2803,167 @@ function registerMcpCompat(program: Command, cliPath: string): void {
   registerListCommand(mcp);
 }
 
+function registerTelemetryCommands(program: Command): void {
+  const telemetry = program.command("telemetry").description("Manage anonymous analytics and error reporting");
+
+  telemetry
+    .command("status")
+    .description("Show telemetry preferences and effective status")
+    .option("--json", "Print machine-readable JSON")
+    .action((options: { json?: boolean }) => {
+      const status = getTelemetryStatus();
+      if (options.json) {
+        process.stdout.write(`${JSON.stringify(status, null, 2)}\n`);
+        return;
+      }
+      process.stdout.write(`Usage analytics: ${status.usageAnalyticsEnabled ? "enabled" : "disabled"} (${status.usageActive ? "active" : "inactive"})\n`);
+      process.stdout.write(`Error reporting: ${status.errorReportingEnabled ? "enabled" : "disabled"} (${status.errorsActive ? "active" : "inactive"})\n`);
+      process.stdout.write(`Privacy notice: ${status.noticeAcknowledgedVersion >= 1 ? "acknowledged" : "needs review"}\n`);
+      process.stdout.write(`Anonymous installation ID: ${status.installationId ? "set" : "not set"}\n`);
+      if (status.blockedReason) process.stdout.write(`Inactive reason: ${status.blockedReason}\n`);
+    });
+
+  telemetry
+    .command("enable [target]")
+    .description("Enable usage analytics, error reporting, or all telemetry")
+    .action((target?: string) => {
+      const normalized = target ?? "all";
+      if (!["usage", "errors", "all"].includes(normalized)) {
+        throw new Error("Target must be usage, errors, or all.");
+      }
+      const current = loadTelemetryPreferences();
+      const noticeWasAcknowledged = current.noticeAcknowledgedVersion >= 1;
+      acknowledgeTelemetryNotice();
+      updateTelemetryPreferences({
+        usageAnalyticsEnabled: normalized === "usage" || normalized === "all"
+          ? true
+          : noticeWasAcknowledged
+            ? current.usageAnalyticsEnabled
+            : false,
+        errorReportingEnabled: normalized === "errors" || normalized === "all"
+          ? true
+          : noticeWasAcknowledged
+            ? current.errorReportingEnabled
+            : false
+      });
+      process.stdout.write(`Telemetry enabled: ${normalized}.\n`);
+    });
+
+  telemetry
+    .command("disable [target]")
+    .description("Disable usage analytics, error reporting, or all telemetry")
+    .action(async (target?: string) => {
+      const normalized = target ?? "all";
+      if (!["usage", "errors", "all"].includes(normalized)) {
+        throw new Error("Target must be usage, errors, or all.");
+      }
+      const current = loadTelemetryPreferences();
+      updateTelemetryPreferences({
+        usageAnalyticsEnabled: normalized === "usage" || normalized === "all" ? false : current.usageAnalyticsEnabled,
+        errorReportingEnabled: normalized === "errors" || normalized === "all" ? false : current.errorReportingEnabled
+      });
+      if (normalized === "errors" || normalized === "all") {
+        await shutdownNodeErrorReporting(150);
+      }
+      process.stdout.write(`Telemetry disabled: ${normalized}.\n`);
+    });
+
+  telemetry
+    .command("reset-id")
+    .description("Reset the anonymous installation ID")
+    .action(async () => {
+      resetTelemetryInstallationId();
+      await shutdownTelemetry();
+      process.stdout.write("Anonymous installation ID reset.\n");
+    });
+}
+
+type TelemetryLaunchMode = Extract<TelemetryEvent, { name: "runtime_started" }>["properties"]["launchMode"];
+type TelemetryOperation = Extract<TelemetryEvent, { name: "operation_completed" }>["properties"]["operation"];
+
+function telemetryLaunchMode(rawArgs: string[]): TelemetryLaunchMode {
+  const known = new Set<TelemetryLaunchMode>([
+    "add", "remove", "enable", "disable", "list", "sync", "status", "doctor", "daemon", "secret",
+    "auth", "clients", "skill", "plugin-host", "proxy", "mcp", "update", "project", "plugin", "telemetry"
+  ]);
+  const candidate = rawArgs[0] as TelemetryLaunchMode | undefined;
+  return candidate && known.has(candidate) ? candidate : "other";
+}
+
+function telemetryOperation(rawArgs: string[]): Extract<TelemetryEvent, { name: "operation_completed" }>['properties']['operation'] | null {
+  const [group, action] = rawArgs;
+  if (group === "add" || (group === "mcp" && action === "add")) return "server_add";
+  if (group === "remove" || (group === "mcp" && action === "remove")) return "server_remove";
+  if (group === "enable" || group === "disable" || (group === "mcp" && (action === "enable" || action === "disable"))) return "server_toggle";
+  if (group === "sync" || (group === "mcp" && action === "sync")) return "client_sync";
+  if (group === "auth" && action === "login") return "auth_login";
+  if (group === "auth" && action === "logout") return "auth_logout";
+  if (group === "daemon" && (action === "start" || action === "stop" || action === "restart")) return `daemon_${action}` as "daemon_start" | "daemon_stop" | "daemon_restart";
+  if (group === "update" && (action === "check" || action === "install" || action === "rollback")) return `update_${action}` as "update_check" | "update_install" | "update_rollback";
+  if (group === "project" && (action === "init" || action === "remove")) return `project_${action}` as "project_init" | "project_remove";
+  if (group === "skill" && (action === "add" || action === "rm")) return action === "add" ? "skill_add" : "skill_remove";
+  if (group === "plugin" && (action === "install" || action === "update" || action === "uninstall")) return `plugin_${action}` as "plugin_install" | "plugin_update" | "plugin_uninstall";
+  if (group === "plugin" && (action === "enable" || action === "disable")) return "plugin_toggle";
+  if (group === "plugin" && action === "marketplace" && (rawArgs[2] === "add" || rawArgs[2] === "update" || rawArgs[2] === "remove")) {
+    return rawArgs[2] === "update" ? "marketplace_refresh" : `marketplace_${rawArgs[2]}` as "marketplace_add" | "marketplace_remove";
+  }
+  return null;
+}
+
+function telemetryErrorCode(error: unknown): string {
+  const candidate = error && typeof error === "object" && "code" in error
+    ? (error as { code?: unknown }).code
+    : undefined;
+  if (typeof candidate === "string" && [
+    "auth_required", "auth_expired", "auth_cancelled", "daemon_restart_failed", "invalid_pid",
+    "pid_not_found", "rollback_failed", "secret_missing", "sync_error", "timeout", "unreachable",
+    "upstream_error", "unexpected_error", "update_check_failed", "update_check_timeout", "update_failed",
+    "validation_error"
+  ].includes(candidate)) {
+    return candidate;
+  }
+  if (error instanceof Error && error.name === "OAuthCancelledError") return "auth_cancelled";
+  if (error instanceof Error && (error.name === "ZodError" || error.name === "ValidationError")) return "validation_error";
+  if (error instanceof Error && error.name === "SecretNotFoundError") return "secret_missing";
+  return "unexpected_error";
+}
+
+function recordTelemetryOperationFailure(operation: TelemetryOperation, error: unknown, startedAt: number): void {
+  captureTelemetryEvent({
+    name: "operation_completed",
+    properties: {
+      operation,
+      outcome: "failure",
+      errorCode: telemetryErrorCode(error),
+      durationBucket: durationBucket(Date.now() - startedAt)
+    }
+  });
+}
+
+function shouldShowTelemetryNotice(rawArgs: string[]): boolean {
+  const explicitlyEnablingTelemetry = rawArgs[0] === "telemetry" && rawArgs[1] === "enable";
+  return !rawArgs.includes("--json")
+    && (rawArgs[0] !== "telemetry" || explicitlyEnablingTelemetry)
+    && Boolean(process.stdin.isTTY && process.stderr.isTTY);
+}
+
+function showCliTelemetryNotice(rawArgs: string[]): void {
+  const status = getTelemetryStatus();
+  if (status.noticeAcknowledgedVersion >= 1 || status.blockedReason === "environment" || !shouldShowTelemetryNotice(rawArgs)) {
+    return;
+  }
+  process.stderr.write("mcpx collects anonymous usage analytics and crash diagnostics to improve reliability.\n");
+  process.stderr.write("It does not collect server names, prompts, results, URLs, paths, secrets, or raw error messages. Native crash dumps may contain process-memory fragments.\n");
+  process.stderr.write("Change this any time with `mcpx telemetry status`, `mcpx telemetry disable`, or `mcpx telemetry reset-id`.\n\n");
+  if (!(rawArgs[0] === "telemetry" && rawArgs[1] === "enable")) {
+    try {
+      acknowledgeTelemetryNotice();
+    } catch {
+      // A read-only config directory must not change the command's outcome.
+    }
+  }
+}
+
 export async function runCli(argv = process.argv): Promise<void> {
   if (process.env.MCPX_UPDATE_CHILD === "1") {
     await runBackgroundUpdate();
@@ -1875,21 +2971,51 @@ export async function runCli(argv = process.argv): Promise<void> {
   }
 
   const rawArgs = argv.slice(2);
+  const startedAt = Date.now();
   const isUpdateCommand = rawArgs[0] === "update";
+
+  const runtime: TelemetryRuntime = rawArgs[0] === "daemon" && rawArgs[1] === "run" ? "daemon" : "cli";
+  showCliTelemetryNotice(rawArgs);
+  const release = process.env.MCPX_SENTRY_RELEASE || APP_VERSION;
+  const telemetryVersion = release.startsWith("mcpx@") ? release.slice("mcpx@".length) : APP_VERSION;
+  initializeTelemetry(runtime, {
+    release,
+    platform: process.platform,
+    architecture: process.arch
+  });
+  initializeNodeErrorReporting(runtime, release);
+  captureTelemetryEvent({
+    name: "runtime_started",
+    properties: {
+      runtime,
+      version: telemetryVersion,
+      osFamily: platformFamily(),
+      architecture: architecture(),
+      launchMode: telemetryLaunchMode(rawArgs)
+    }
+  });
 
   if (!isUpdateCommand) {
     const stagedCliPath = getStagedCliPath();
     const stagedInfo = getStagedUpdate();
 
     if (stagedCliPath && stagedInfo && stagedCliPath !== argv[1] && shouldUseStagedCli(stagedInfo.version, APP_VERSION)) {
-      execFileSync(process.execPath, [stagedCliPath, ...rawArgs], {
-        stdio: "inherit",
-        env: {
-          ...process.env,
-          MCPX_USING_STAGED: "1"
-        }
-      });
-      return;
+      try {
+        execFileSync(process.execPath, [stagedCliPath, ...rawArgs], {
+          stdio: "inherit",
+          env: {
+            ...process.env,
+            MCPX_USING_STAGED: "1"
+          }
+        });
+        return;
+      } catch (error) {
+        process.stderr.write(
+          `Warning: staged update v${stagedInfo.version} failed to run (${(error as Error).message}). ` +
+          `Falling back to the currently installed version (v${APP_VERSION}). ` +
+          `Run "mcpx update rollback" to clear the broken staged update.\n`
+        );
+      }
     }
   }
 
@@ -1900,7 +3026,9 @@ export async function runCli(argv = process.argv): Promise<void> {
     // If unsupported client detected, show error and exit
     if (compat.error && compat.client !== null) {
       process.stderr.write(`Error: ${compat.error}\n`);
-      process.exit(1);
+      recordTelemetryOperationFailure("server_add", { code: "validation_error" }, startedAt);
+      process.exitCode = 1;
+      return;
     }
 
     // If valid compatibility command, normalize and inject into add flow
@@ -1929,17 +3057,53 @@ export async function runCli(argv = process.argv): Promise<void> {
   registerAuthCommands(program);
   registerClientsCommands(program);
   registerSkillsCommands(program);
+  registerShareCommands(program);
+  registerPluginHostCommand(program);
   registerProxyCommand(program);
   registerMcpCompat(program, cliPath);
   registerUpdateCommand(program);
   registerProjectCommands(program, cliPath);
+  registerPluginCommands(program, cliPath);
+  registerTelemetryCommands(program);
 
-  await program.parseAsync(argv);
+  try {
+    await program.parseAsync(argv);
+  } catch (error) {
+    const operation = telemetryOperation(rawArgs);
+    if (operation) {
+      captureTelemetryEvent({
+        name: "operation_completed",
+        properties: { operation, outcome: "failure", errorCode: telemetryErrorCode(error), durationBucket: durationBucket(Date.now() - startedAt) }
+      });
+    }
+    reportTelemetryError(error, {
+      runtime,
+      operation: operation ?? undefined,
+      code: telemetryErrorCode(error)
+    });
+    throw error;
+  } finally {
+    await flushTelemetry(150);
+    await flushNodeErrorReporting(150);
+  }
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(fs.realpathSync(process.argv[1])).href) {
   void runCli().catch((error) => {
-    process.stderr.write(`${(error as Error).message}\n`);
+    if (error instanceof ConfigLoadError) {
+      process.stderr.write(`Config error: ${error.message}\n`);
+      if (error.backupPath) {
+        process.stderr.write(`Backup saved to: ${error.backupPath}\n`);
+      }
+      if (error.issues && error.issues.length > 0) {
+        for (const issue of error.issues.slice(0, 5)) {
+          process.stderr.write(`  - ${issue}\n`);
+        }
+      }
+      process.stderr.write("Fix the config file or restore from backup.\n");
+    } else {
+      process.stderr.write(`${(error as Error).message}\n`);
+    }
     process.exit(1);
   });
 }

@@ -69,21 +69,14 @@ export function StatusPopover() {
   const [pendingAuth, setPendingAuth] = useState<Array<{ serverName: string; oauthLikely?: boolean }>>([]);
 
   useEffect(() => {
-    void window.mcpx.getPendingAuth?.().then((result: { serverName: string; oauthLikely?: boolean } | Array<{ serverName: string; oauthLikely?: boolean }> | null) => {
-      if (!result) {
-        setPendingAuth([]);
-        return;
-      }
-      setPendingAuth(Array.isArray(result) ? result : [result]);
+    void window.mcpx.getPendingAuth?.().then((result: Array<{ serverName: string; oauthLikely?: boolean }> | null) => {
+      setPendingAuth(result ?? []);
     }).catch(() => {
       setPendingAuth([]);
     });
 
-    return window.mcpx.onAuthRequired?.((entry) => {
-      setPendingAuth((current) => [
-        entry,
-        ...current.filter((existing) => existing.serverName !== entry.serverName)
-      ]);
+    return window.mcpx.onAuthStateChanged?.((entries) => {
+      setPendingAuth(entries);
     });
   }, []);
 
@@ -91,19 +84,7 @@ export function StatusPopover() {
     return <div className="popover">Loading...</div>;
   }
 
-  const report = status as {
-    daemon: { running: boolean; pid?: number; port: number };
-    upstreamCount: number;
-    servers: Array<{
-      name: string;
-      enabled: boolean;
-      transport: string;
-      authBindings: Array<{ kind: string; key: string; value: string }>;
-      clients: Array<{ clientId: string; status: string; managed: boolean }>;
-      tokenCount?: { tools: number; resources: number; prompts: number; total: number; error?: string };
-    }>;
-    totalGlobalTokens?: number;
-  };
+  const report = status;
 
   const errorCount = report.servers.reduce((count, server) => {
     return count + server.clients.filter((c) => c.managed && c.status === "ERROR").length;
@@ -127,19 +108,16 @@ export function StatusPopover() {
     }
   }
 
-  function handleOauth(serverName: string): void {
-    void window.mcpx.startOauth(serverName).then(() => {
-      setPendingAuth((current) => current.filter((entry) => entry.serverName !== serverName));
-      refresh();
-    }).catch((err) => {
-      console.error("OAuth failed:", err);
-    });
+  // The popover is 380x520 -- too small to host the full auth flow (OAuth
+  // waiting panel, manual token form). It hands off to the one auth UI in the
+  // dashboard instead of running its own; this also fixes auth state going
+  // stale here, since the dashboard broadcast now reaches every window.
+  function handleAuthClick(serverName: string): void {
+    void window.mcpx.requestAuth?.(serverName);
   }
 
   function handleDismissAuth(serverName: string): void {
-    void window.mcpx.dismissAuth(serverName).then(() => {
-      setPendingAuth((current) => current.filter((entry) => entry.serverName !== serverName));
-    });
+    void window.mcpx.dismissAuth(serverName);
   }
 
   return (
@@ -193,11 +171,9 @@ export function StatusPopover() {
                   </span>
                   <span className="popover-server-row__state">Auth required</span>
                 </div>
-                {entry.oauthLikely && (
-                  <button type="button" className="popover-add-btn" title="Sign in with browser" onClick={() => handleOauth(entry.serverName)}>
-                    <span className="material-symbols-outlined">login</span>
-                  </button>
-                )}
+                <button type="button" className="popover-add-btn" title="Open mcpx to sign in" onClick={() => handleAuthClick(entry.serverName)}>
+                  <span className="material-symbols-outlined">login</span>
+                </button>
                 <button type="button" className="popover-add-btn" title="Dismiss" onClick={() => handleDismissAuth(entry.serverName)}>
                   <span className="material-symbols-outlined">close</span>
                 </button>
@@ -229,7 +205,7 @@ export function StatusPopover() {
                   key={server.name}
                   server={server}
                   onRefresh={refresh}
-                  onAuthClick={() => handleOauth(server.name)}
+                  onAuthClick={() => handleAuthClick(server.name)}
                 />
               ))}
             </div>

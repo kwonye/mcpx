@@ -42,7 +42,8 @@ export function ensureManagedEntryWritable(
   managedIndex: ManagedIndex,
   clientId: ClientId,
   entryName: string,
-  existingValue: unknown
+  existingValue: unknown,
+  expectedEntry?: { url?: string; headers?: Record<string, string>; command?: string; args?: string[] }
 ): string | null {
   if (existingValue === undefined || existingValue === null) {
     return null;
@@ -52,7 +53,26 @@ export function ensureManagedEntryWritable(
     return null;
   }
 
+  if (expectedEntry && isManagedGatewayProjection(entryName) && matchesExpectedShape(existingValue, expectedEntry)) {
+    if (!managedIndex.managed[clientId]) {
+      managedIndex.managed[clientId] = { configPath: "", entries: {} };
+    }
+    managedIndex.managed[clientId].entries[entryName] = {
+      fingerprint: sha256(JSON.stringify(existingValue)),
+      lastSyncedAt: new Date().toISOString()
+    };
+    return null;
+  }
+
   return `Cannot sync managed entry \"${entryName}\" because an unmanaged entry already exists.`;
+}
+
+function matchesExpectedShape(value: unknown, expected: { url?: string; headers?: Record<string, string>; command?: string; args?: string[] }): boolean {
+  if (!value || typeof value !== "object") return false;
+  const v = value as Record<string, unknown>;
+  if (expected.url && v.url !== expected.url) return false;
+  if (expected.command && v.command !== expected.command) return false;
+  return true;
 }
 
 export function setManagedEntries(
@@ -187,30 +207,46 @@ export function removeSourceEntries(entries: Record<string, unknown>, names: str
   }
 }
 
-export function syncDisabledMcpServersArray(
+/**
+ * Purge managed entry names from the native disabledMcpServers array.
+ * Disabled managed servers are simply absent from the client config (no entry written).
+ */
+export function purgeManagedFromDisabledArray(
   raw: Record<string, unknown>,
-  managedNames: string[],
-  managedEntries: ManagedGatewayEntry[]
+  managedNames: string[]
 ): void {
-  const existingDisabled = ((raw.disabledMcpServers as string[] | undefined) ?? [])
-    .filter((name) => !managedNames.includes(name));
-  const disabledManaged = managedEntries
-    .filter((entry) => !entry.enabled)
-    .map((entry) => entry.name);
-  raw.disabledMcpServers = [...existingDisabled, ...disabledManaged];
+  const existingDisabled = (raw.disabledMcpServers as string[] | undefined) ?? [];
+  raw.disabledMcpServers = existingDisabled.filter((name) => !managedNames.includes(name));
+  if (Array.isArray(raw.disabledMcpServers) && raw.disabledMcpServers.length === 0) {
+    delete raw.disabledMcpServers;
+  }
 }
 
-export function syncMcpExcludedArray(
+/**
+ * Purge managed entry names from the mcp.excluded array.
+ * Disabled managed servers are simply absent from the client config (no entry written).
+ */
+export function purgeManagedFromExcludedArray(
   raw: Record<string, unknown>,
-  managedNames: string[],
-  managedEntries: ManagedGatewayEntry[]
+  managedNames: string[]
 ): void {
   const mcp = ((raw.mcp as Record<string, unknown> | undefined) ?? {}) as Record<string, unknown>;
-  const existingExcluded = ((mcp.excluded as string[] | undefined) ?? [])
-    .filter((name) => !managedNames.includes(name));
-  const disabledManaged = managedEntries
-    .filter((entry) => !entry.enabled)
-    .map((entry) => entry.name);
-  mcp.excluded = [...existingExcluded, ...disabledManaged];
-  raw.mcp = mcp;
+  const existingExcluded = (mcp.excluded as string[] | undefined) ?? [];
+  mcp.excluded = existingExcluded.filter((name) => !managedNames.includes(name));
+  if (Array.isArray(mcp.excluded) && mcp.excluded.length === 0) {
+    delete mcp.excluded;
+  }
+  raw.mcp = Object.keys(mcp).length > 0 ? mcp : undefined;
+}
+
+export function detectManagedEntryDrift(
+  managedIndex: ManagedIndex,
+  clientId: ClientId,
+  entryName: string,
+  existingValue: unknown
+): boolean {
+  const recorded = managedIndex.managed[clientId]?.entries?.[entryName];
+  if (!recorded || existingValue === undefined) return false;
+  const liveFingerprint = sha256(JSON.stringify(existingValue));
+  return liveFingerprint !== recorded.fingerprint;
 }

@@ -1,7 +1,9 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Toggle } from "./ui/Toggle";
 import { formatTokenApprox } from "../utils/tokenHelper";
 import { ContextBudgetCard } from "./ContextBudgetCard";
+import { ConfirmDialog } from "./ConfirmDialog";
+import type { ManagedPlugin } from "@mcpx/core";
 
 interface ServerEntry {
   name: string;
@@ -40,9 +42,25 @@ export function ProjectsTab({ status, onRefresh, selectedProjectPath, onSelected
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState<{ path: string; name: string } | null>(null);
+  const [plugins, setPlugins] = useState<ManagedPlugin[]>([]);
 
   const projects = Object.values(status.projects ?? {});
   const selectedProject = projects.find((p) => p.path === selectedProjectPath) ?? null;
+
+  async function loadPlugins() {
+    try {
+      const list = await window.mcpx.plugins.list();
+      setPlugins(list as ManagedPlugin[]);
+    } catch (err) {
+      setPlugins([]);
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  useEffect(() => {
+    loadPlugins();
+  }, []);
 
   // Handle opening directory selector
   const handleSelectDirectory = async () => {
@@ -92,18 +110,21 @@ export function ProjectsTab({ status, onRefresh, selectedProjectPath, onSelected
 
   // Handle removing/unregistering a project
   const handleRemoveProject = async (projectPath: string, name: string) => {
-    if (!confirm(`Are you sure you want to unregister project "${name}"?\nThis won't delete any files, but it will remove it from mcpx.`)) {
-      return;
-    }
+    setConfirmDelete({ path: projectPath, name });
+  };
 
+  const handleConfirmRemove = async () => {
+    if (!confirmDelete) return;
+    const { path, name } = confirmDelete;
+    setConfirmDelete(null);
     setLoading(true);
     setError(null);
     setSuccess(null);
 
     try {
-      await window.mcpx.projectRemove(projectPath);
+      await window.mcpx.projectRemove(path);
       setSuccess(`Project "${name}" unregistered successfully.`);
-      if (selectedProjectPath === projectPath) {
+      if (selectedProjectPath === path) {
         onSelectedProjectPathChange(null);
       }
       onRefresh();
@@ -128,8 +149,28 @@ export function ProjectsTab({ status, onRefresh, selectedProjectPath, onSelected
     }
   };
 
+  const handleTogglePlugin = async (plugin: ManagedPlugin, effectiveEnabled: boolean) => {
+    if (!selectedProject) return;
+    try {
+      await window.mcpx.plugins.setProjectOverride(plugin.id, selectedProject.path, { enabled: !effectiveEnabled });
+      await loadPlugins();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to toggle plugin state");
+    }
+  };
+
+  const handleResetPlugin = async (plugin: ManagedPlugin) => {
+    if (!selectedProject) return;
+    try {
+      await window.mcpx.plugins.resetProjectOverride(plugin.id, selectedProject.path);
+      await loadPlugins();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to reset plugin state");
+    }
+  };
+
   return (
-    <div className="projects-tab-container">
+    <><div className="projects-tab-container">
       {error && <div className="feedback-message error mb-4">{error}</div>}
       {success && <div className="feedback-message success mb-4">{success}</div>}
 
@@ -231,6 +272,72 @@ export function ProjectsTab({ status, onRefresh, selectedProjectPath, onSelected
                   </div>
                 )}
               </div>
+
+              <div className="project-mcp-section">
+                <h3>Plugins</h3>
+                <p className="section-description">
+                  These are your installed plugins. Toggle each one on or off for this project specifically.
+                  Changing it here only affects this project — the plugin stays as configured globally for other directories.
+                </p>
+
+                {plugins.length === 0 ? (
+                  <div className="empty-mcp-placeholder">
+                    <span className="material-symbols-outlined">info</span>
+                    <p>No plugins installed.</p>
+                    <p className="hint">
+                      Install plugins from the Plugins tab.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="project-mcp-list">
+                    {plugins.map((plugin) => {
+                      const projectOverride = plugin.projectOverrides?.[selectedProject.path];
+                      const effectiveEnabled = plugin.enabled && (projectOverride?.enabled ?? true);
+                      const globallyDisabled = !plugin.enabled;
+                      return (
+                        <div key={plugin.id} className="project-mcp-row">
+                          <div className="project-mcp-info">
+                            <div className="project-mcp-name-row">
+                              <span className="mcp-name">{plugin.name}</span>
+                              <span className="mcp-transport-badge">v{plugin.version}</span>
+                              {globallyDisabled && (
+                                <span className="mcp-transport-badge" title="Disabled globally — project overrides cannot enable this plugin">
+                                  globally off
+                                </span>
+                              )}
+                            </div>
+                            <span className="mcp-target-command mono-text" title={plugin.source}>
+                              {plugin.source}
+                            </span>
+                          </div>
+
+                          <div className="project-mcp-controls">
+                            <div className="toggle-container">
+                              {projectOverride && (
+                                <button
+                                  type="button"
+                                  className="btn btn-ghost btn-sm"
+                                  onClick={() => handleResetPlugin(plugin)}
+                                >
+                                  Use global
+                                </button>
+                              )}
+                              <span className="toggle-status-label">
+                                {effectiveEnabled ? "Enabled" : "Disabled"}
+                              </span>
+                              <Toggle
+                                  id={`toggle-plugin-${plugin.id}`}
+                                  checked={effectiveEnabled}
+                                  onChange={() => handleTogglePlugin(plugin, effectiveEnabled)}
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
             </div>
           ) : (
             <div className="project-detail-empty">
@@ -273,5 +380,14 @@ export function ProjectsTab({ status, onRefresh, selectedProjectPath, onSelected
         </div>
       </div>
     </div>
+    <ConfirmDialog
+      open={confirmDelete !== null}
+      title="Unregister project?"
+      message={confirmDelete ? `Are you sure you want to unregister project "${confirmDelete.name}"? This won't delete any files, but it will remove it from mcpx.` : ""}
+      confirmLabel="Unregister"
+      destructive
+      onConfirm={handleConfirmRemove}
+      onCancel={() => setConfirmDelete(null)}
+    /></>
   );
 }

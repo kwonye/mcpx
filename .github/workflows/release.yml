@@ -51,7 +51,7 @@ jobs:
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: 1.4.0
 
       - name: Refresh tags
         run: git fetch --tags --force
@@ -100,6 +100,13 @@ jobs:
     needs: orchestrate
     if: needs.orchestrate.outputs.include_cli == 'true'
     runs-on: ubuntu-latest
+    env:
+      MCPX_POSTHOG_PROJECT_TOKEN: ${{ vars.MCPX_POSTHOG_PROJECT_TOKEN }}
+      MCPX_POSTHOG_HOST: ${{ vars.MCPX_POSTHOG_HOST }}
+      MCPX_SENTRY_DSN: ${{ vars.SENTRY_DSN }}
+      MCPX_SENTRY_RELEASE: mcpx@${{ needs.orchestrate.outputs.version }}
+      SENTRY_ORG: ${{ vars.SENTRY_ORG }}
+      SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
@@ -109,7 +116,7 @@ jobs:
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: 1.4.0
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -123,6 +130,16 @@ jobs:
         run: bun run test
         working-directory: cli
 
+      - name: Upload private CLI source maps
+        uses: actions/upload-artifact@v6
+        with:
+          name: cli-sourcemaps
+          path: cli/dist/**/*.js.map
+          if-no-files-found: ignore
+
+      - name: Remove source maps before packaging
+        run: bun .github/scripts/remove-sourcemaps.mjs cli/dist
+
       - name: Configure git
         run: |
           git config user.name "github-actions[bot]"
@@ -134,32 +151,8 @@ jobs:
           bun run sync-version
         working-directory: cli
 
-      - name: Sync desktop version
-        run: bun -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync('package.json','utf8'));p.version='${{ needs.orchestrate.outputs.version }}';fs.writeFileSync('package.json',JSON.stringify(p,null,2)+'\n')"
-        working-directory: app
-
-      - name: Commit and tag release
-        env:
-          RELEASE_VERSION: ${{ needs.orchestrate.outputs.version }}
-          RELEASE_TAG: ${{ needs.orchestrate.outputs.tag }}
-          SOURCE_SHA: ${{ github.sha }}
-          INCLUDE_CLI: ${{ needs.orchestrate.outputs.include_cli }}
-          INCLUDE_DESKTOP: ${{ needs.orchestrate.outputs.include_desktop }}
-        run: |
-          git add cli/package.json cli/bun.lock cli/src/version.ts
-          git add app/package.json app/bun.lock
-          git commit -m "chore(release): v${RELEASE_VERSION} [skip ci]"
-          TAG_BODY=$(bun .github/scripts/release-coordinator.mjs tag-body --source-sha "$SOURCE_SHA" --include-cli "$INCLUDE_CLI" --include-desktop "$INCLUDE_DESKTOP" --version "$RELEASE_VERSION")
-          git tag -a "$RELEASE_TAG" -m "$TAG_BODY"
-          git push origin "$RELEASE_TAG"
-
-      - name: Set up Node.js for publish
-        uses: actions/setup-node@v6
-        with:
-          node-version: '24'
-
-      - name: Publish to npm
-        run: npm publish --provenance --access public
+      - name: Pack CLI tarball
+        run: npm pack
         working-directory: cli
 
       - name: Upload CLI artifacts
@@ -168,10 +161,23 @@ jobs:
           name: cli-dist
           path: cli/dist/
 
+      - name: Upload CLI tarball
+        uses: actions/upload-artifact@v6
+        with:
+          name: cli-tarball
+          path: cli/*.tgz
+
   build-desktop-macos:
     needs: orchestrate
     if: needs.orchestrate.outputs.include_desktop == 'true'
     runs-on: macos-15
+    env:
+      MCPX_POSTHOG_PROJECT_TOKEN: ${{ vars.MCPX_POSTHOG_PROJECT_TOKEN }}
+      MCPX_POSTHOG_HOST: ${{ vars.MCPX_POSTHOG_HOST }}
+      MCPX_SENTRY_DSN: ${{ vars.SENTRY_DSN }}
+      MCPX_SENTRY_RELEASE: mcpx@${{ needs.orchestrate.outputs.version }}
+      SENTRY_ORG: ${{ vars.SENTRY_ORG }}
+      SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
@@ -181,11 +187,25 @@ jobs:
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: 1.4.0
 
       - name: Install CLI dependencies
         run: bun install --frozen-lockfile
         working-directory: cli
+
+      - name: Build CLI for desktop daemon
+        run: bun run build
+        working-directory: cli
+
+      - name: Upload private bundled CLI source maps (macOS)
+        uses: actions/upload-artifact@v6
+        with:
+          name: desktop-cli-sourcemaps-macos
+          path: cli/dist/**/*.js.map
+          if-no-files-found: ignore
+
+      - name: Remove bundled CLI source maps before packaging (macOS)
+        run: bun .github/scripts/remove-sourcemaps.mjs cli/dist
 
       - name: Install desktop dependencies
         run: bun install --frozen-lockfile
@@ -197,6 +217,20 @@ jobs:
 
       - name: Build desktop bundle
         run: bun run build
+        working-directory: app
+
+      - name: Upload private macOS source maps
+        uses: actions/upload-artifact@v6
+        with:
+          name: desktop-sourcemaps-macos
+          path: app/out/**/*.map
+          if-no-files-found: ignore
+
+      - name: Remove source maps before packaging
+        run: bun .github/scripts/remove-sourcemaps.mjs app/out
+
+      - name: Test desktop end-to-end
+        run: bun run e2e
         working-directory: app
 
       - name: Determine signing mode
@@ -254,6 +288,13 @@ jobs:
     needs: orchestrate
     if: needs.orchestrate.outputs.include_desktop == 'true'
     runs-on: ubuntu-latest
+    env:
+      MCPX_POSTHOG_PROJECT_TOKEN: ${{ vars.MCPX_POSTHOG_PROJECT_TOKEN }}
+      MCPX_POSTHOG_HOST: ${{ vars.MCPX_POSTHOG_HOST }}
+      MCPX_SENTRY_DSN: ${{ vars.SENTRY_DSN }}
+      MCPX_SENTRY_RELEASE: mcpx@${{ needs.orchestrate.outputs.version }}
+      SENTRY_ORG: ${{ vars.SENTRY_ORG }}
+      SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
@@ -263,11 +304,25 @@ jobs:
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: 1.4.0
 
       - name: Install CLI dependencies
         run: bun install --frozen-lockfile
         working-directory: cli
+
+      - name: Build CLI for desktop daemon
+        run: bun run build
+        working-directory: cli
+
+      - name: Upload private bundled CLI source maps (Linux)
+        uses: actions/upload-artifact@v6
+        with:
+          name: desktop-cli-sourcemaps-linux
+          path: cli/dist/**/*.js.map
+          if-no-files-found: ignore
+
+      - name: Remove bundled CLI source maps before packaging (Linux)
+        run: bun .github/scripts/remove-sourcemaps.mjs cli/dist
 
       - name: Install desktop dependencies
         run: bun install --frozen-lockfile
@@ -280,6 +335,16 @@ jobs:
       - name: Build desktop bundle
         run: bun run build
         working-directory: app
+
+      - name: Upload private Linux source maps
+        uses: actions/upload-artifact@v6
+        with:
+          name: desktop-sourcemaps-linux
+          path: app/out/**/*.map
+          if-no-files-found: ignore
+
+      - name: Remove source maps before packaging
+        run: bun .github/scripts/remove-sourcemaps.mjs app/out
 
       - name: Package Linux app
         run: bunx electron-builder build --linux --publish never
@@ -299,6 +364,13 @@ jobs:
     needs: orchestrate
     if: needs.orchestrate.outputs.include_desktop == 'true'
     runs-on: windows-latest
+    env:
+      MCPX_POSTHOG_PROJECT_TOKEN: ${{ vars.MCPX_POSTHOG_PROJECT_TOKEN }}
+      MCPX_POSTHOG_HOST: ${{ vars.MCPX_POSTHOG_HOST }}
+      MCPX_SENTRY_DSN: ${{ vars.SENTRY_DSN }}
+      MCPX_SENTRY_RELEASE: mcpx@${{ needs.orchestrate.outputs.version }}
+      SENTRY_ORG: ${{ vars.SENTRY_ORG }}
+      SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
@@ -308,11 +380,25 @@ jobs:
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: 1.4.0
 
       - name: Install CLI dependencies
         run: bun install --frozen-lockfile
         working-directory: cli
+
+      - name: Build CLI for desktop daemon
+        run: bun run build
+        working-directory: cli
+
+      - name: Upload private bundled CLI source maps (Windows)
+        uses: actions/upload-artifact@v6
+        with:
+          name: desktop-cli-sourcemaps-windows
+          path: cli/dist/**/*.js.map
+          if-no-files-found: ignore
+
+      - name: Remove bundled CLI source maps before packaging (Windows)
+        run: bun .github/scripts/remove-sourcemaps.mjs cli/dist
 
       - name: Install desktop dependencies
         run: bun install --frozen-lockfile
@@ -325,6 +411,16 @@ jobs:
       - name: Build desktop bundle
         run: bun run build
         working-directory: app
+
+      - name: Upload private Windows source maps
+        uses: actions/upload-artifact@v6
+        with:
+          name: desktop-sourcemaps-windows
+          path: app/out/**/*.map
+          if-no-files-found: ignore
+
+      - name: Remove source maps before packaging
+        run: bun .github/scripts/remove-sourcemaps.mjs app/out
 
       - name: Package Windows app
         run: bunx electron-builder build --win --publish never
@@ -345,13 +441,154 @@ jobs:
     needs: [orchestrate, build-cli, build-desktop-macos, build-desktop-linux, build-desktop-windows]
     if: always() && needs.orchestrate.result == 'success' && (needs.build-cli.result == 'success' || needs.build-cli.result == 'skipped') && (needs.build-desktop-macos.result == 'success' || needs.build-desktop-macos.result == 'skipped') && (needs.build-desktop-linux.result == 'success' || needs.build-desktop-linux.result == 'skipped') && (needs.build-desktop-windows.result == 'success' || needs.build-desktop-windows.result == 'skipped')
     runs-on: ubuntu-latest
+    env:
+      SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+      SENTRY_ORG: ${{ vars.SENTRY_ORG }}
+      SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT }}
     steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+
+      - name: Install CLI dependencies
+        run: bun install --frozen-lockfile
+        working-directory: cli
+
+      - name: Set release versions
+        if: needs.orchestrate.outputs.include_cli == 'true'
+        run: |
+          bun -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync('package.json','utf8'));p.version='${{ needs.orchestrate.outputs.version }}';fs.writeFileSync('package.json',JSON.stringify(p,null,2)+'\n')"
+          bun run sync-version
+        working-directory: cli
+
+      - name: Sync desktop version
+        if: needs.orchestrate.outputs.include_desktop == 'true'
+        run: bun -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync('package.json','utf8'));p.version='${{ needs.orchestrate.outputs.version }}';fs.writeFileSync('package.json',JSON.stringify(p,null,2)+'\n')"
+        working-directory: app
+
+      - name: Configure git
+        if: needs.orchestrate.outputs.include_cli == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Commit and tag release
+        if: needs.orchestrate.outputs.include_cli == 'true'
+        env:
+          RELEASE_VERSION: ${{ needs.orchestrate.outputs.version }}
+          RELEASE_TAG: ${{ needs.orchestrate.outputs.tag }}
+          SOURCE_SHA: ${{ github.sha }}
+          INCLUDE_CLI: ${{ needs.orchestrate.outputs.include_cli }}
+          INCLUDE_DESKTOP: ${{ needs.orchestrate.outputs.include_desktop }}
+        run: |
+          git add cli/package.json cli/bun.lock cli/src/version.ts
+          if [ "$INCLUDE_DESKTOP" = "true" ]; then git add app/package.json app/bun.lock; fi
+          git commit -m "chore(release): v${RELEASE_VERSION} [skip ci]"
+          TAG_BODY=$(bun .github/scripts/release-coordinator.mjs tag-body --source-sha "$SOURCE_SHA" --include-cli "$INCLUDE_CLI" --include-desktop "$INCLUDE_DESKTOP" --version "$RELEASE_VERSION")
+          git tag -a "$RELEASE_TAG" -m "$TAG_BODY"
+          git push origin "$RELEASE_TAG"
+
+      - name: Set up Node.js for publish
+        if: needs.orchestrate.outputs.include_cli == 'true'
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
+      - name: Download CLI tarball
+        if: needs.orchestrate.outputs.include_cli == 'true'
+        uses: actions/download-artifact@v6
+        with:
+          name: cli-tarball
+          path: cli-tarball/
+
       - name: Download CLI artifacts
         if: needs.orchestrate.outputs.include_cli == 'true'
         uses: actions/download-artifact@v6
         with:
           name: cli-dist
           path: cli-dist/
+
+      - name: Download CLI source maps
+        if: needs.orchestrate.outputs.include_cli == 'true'
+        uses: actions/download-artifact@v6
+        with:
+          name: cli-sourcemaps
+          path: sentry-sourcemaps/cli/
+
+      - name: Download bundled CLI source maps from macOS
+        if: needs.orchestrate.outputs.include_desktop == 'true'
+        uses: actions/download-artifact@v6
+        with:
+          name: desktop-cli-sourcemaps-macos
+          path: sentry-sourcemaps/desktop-cli-macos/
+
+      - name: Download bundled CLI source maps from Linux
+        if: needs.orchestrate.outputs.include_desktop == 'true'
+        uses: actions/download-artifact@v6
+        with:
+          name: desktop-cli-sourcemaps-linux
+          path: sentry-sourcemaps/desktop-cli-linux/
+
+      - name: Download bundled CLI source maps from Windows
+        if: needs.orchestrate.outputs.include_desktop == 'true'
+        uses: actions/download-artifact@v6
+        with:
+          name: desktop-cli-sourcemaps-windows
+          path: sentry-sourcemaps/desktop-cli-windows/
+
+      - name: Download macOS source maps
+        if: needs.orchestrate.outputs.include_desktop == 'true'
+        uses: actions/download-artifact@v6
+        with:
+          name: desktop-sourcemaps-macos
+          path: sentry-sourcemaps/desktop-macos/
+
+      - name: Download Linux source maps
+        if: needs.orchestrate.outputs.include_desktop == 'true'
+        uses: actions/download-artifact@v6
+        with:
+          name: desktop-sourcemaps-linux
+          path: sentry-sourcemaps/desktop-linux/
+
+      - name: Download Windows source maps
+        if: needs.orchestrate.outputs.include_desktop == 'true'
+        uses: actions/download-artifact@v6
+        with:
+          name: desktop-sourcemaps-windows
+          path: sentry-sourcemaps/desktop-windows/
+
+      - name: Upload private source maps to Sentry
+        if: env.SENTRY_AUTH_TOKEN != '' && env.SENTRY_ORG != '' && env.SENTRY_PROJECT != ''
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: ${{ vars.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT }}
+          SENTRY_RELEASE: mcpx@${{ needs.orchestrate.outputs.version }}
+        run: |
+          npx --yes @sentry/cli@2.47.0 releases new "$SENTRY_RELEASE"
+          for target in cli desktop-cli-macos desktop-cli-linux desktop-cli-windows desktop-macos desktop-linux desktop-windows; do
+            if [ -d "sentry-sourcemaps/$target" ]; then
+              if [ "$target" = "cli" ]; then
+                PREFIX="app:///cli/"
+              elif [[ "$target" == desktop-cli-* ]]; then
+                PREFIX="app:///$target/"
+              else
+                PREFIX="app:///out/"
+              fi
+              npx --yes @sentry/cli@2.47.0 sourcemaps upload "sentry-sourcemaps/$target" --release "$SENTRY_RELEASE" --rewrite --url-prefix "$PREFIX"
+            fi
+          done
+          npx --yes @sentry/cli@2.47.0 releases finalize "$SENTRY_RELEASE"
+
+      - name: Publish to npm
+        if: needs.orchestrate.outputs.include_cli == 'true'
+        run: npm publish ./cli-tarball/*.tgz --provenance --access public
 
       - name: Download macOS desktop artifacts
         if: needs.orchestrate.outputs.include_desktop == 'true'

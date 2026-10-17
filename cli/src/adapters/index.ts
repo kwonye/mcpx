@@ -8,6 +8,8 @@ import { KiroAdapter } from "./kiro.js";
 import { OpenCodeAdapter } from "./opencode.js";
 import { VsCodeAdapter } from "./vscode.js";
 import { QwenAdapter } from "./qwen.js";
+import { OpenClawAdapter } from "./openclaw.js";
+import { HermesAdapter } from "./hermes.js";
 
 export function getAdapters(): ClientAdapter[] {
   return [
@@ -19,6 +21,8 @@ export function getAdapters(): ClientAdapter[] {
     new OpenCodeAdapter(),
     new KiroAdapter(),
     new VsCodeAdapter(),
-    new QwenAdapter()
+    new QwenAdapter(),
+    new OpenClawAdapter(),
+    new HermesAdapter()
   ];
 }

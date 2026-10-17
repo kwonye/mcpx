@@ -74,11 +74,13 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 ```text
 cli/                    # CLI package
   src/cli.ts            # CLI entry point and command registration
-  src/core/             # Core business logic (config, daemon, sync, secrets, etc.)
+  src/core/             # Core business logic (config, daemon, sync, secrets, plugin-host, etc.)
+  src/core/skill-projections.ts # Ownership-managed skill projection (flat/dir layouts)
+  src/core/plugin-host.ts       # Policy-enforcing stdio wrapper for plugin MCP servers
   src/core/index.ts     # Barrel export for core modules (consumed by app)
   src/gateway/          # HTTP gateway server (JSON-RPC proxy)
-  src/adapters/         # Client-specific sync adapters (Claude, Cursor, VS Code, etc.)
-  src/compat/           # Client-native "add" compatibility layer (claude, codex, etc.)
+  src/adapters/         # Client-specific sync adapters (Claude, Cursor, VS Code, OpenClaw, Hermes, etc.)
+  src/compat/           # Client-native "add" compatibility layer (claude, codex, openclaw, hermes, etc.)
   src/types.ts          # Shared TypeScript types
   test/                 # CLI unit and integration tests
 
@@ -86,7 +88,8 @@ app/                    # Desktop app
   src/main/             # Electron main process (Tray, IPC, Window management)
   src/main/daemon-child.ts # Dedicated mode for running the daemon as a child process
   src/preload/          # Context bridge (exposes mcpx API to renderer)
-  src/renderer/         # React UI (Dashboard, Browse Tab, Settings)
+  src/renderer/         # React UI (Dashboard, Plugins Tab, Skills Tab, Settings)
+  src/renderer/components/PluginsTab.tsx  # Plugin management UI with embedded SkillsTab
   src/shared/           # Shared types and IPC channel constants
   test/                 # Unit/Component tests (Vitest + RTL)
   e2e/                  # E2E tests (Playwright)
@@ -105,7 +108,7 @@ The desktop app is tightly integrated with the CLI's core logic. It does not use
 ## Building and Running
 
 ### Prerequisites
-- Bun >= 1.2 (https://bun.sh)
+- Bun >= 1.4.0 (https://bun.sh)
 - macOS (required for desktop app features)
 
 Note: the tray/app icon generation scripts (`generate-status-icons.js`, `generate-app-icons.sh`) have been removed. The committed PNGs in `app/resources/` and `app/build/icons/` are the source of truth.
@@ -220,10 +223,26 @@ agent-browser --cdp 9222 click @e2            # Click by ref
 
 The app has 2 CDP tabs: the dashboard (main window) and the popover (menubar tray). Use `agent-browser --cdp 9222 tab` to list them, `agent-browser --cdp 9222 tab 0` to switch.
 
+## Git Hooks
+
+The repo ships a pre-push hook at `.githooks/pre-push` that runs CLI + desktop app build and tests before allowing pushes to `main`. Enable it:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+Checks performed:
+- `cd cli && bun run build` — TypeScript compilation + bundling
+- `cd cli && bun test` — CLI unit + integration tests
+- `cd app && bun run build` — Electron app bundling
+- `cd app && bun run test` — Desktop unit + component tests
+
+This prevents broken builds or failing tests from reaching CI.
+
 ## CI/CD & Versioning
 
-The project uses a **single monotonic version stream** across both components. Every release increments a shared patch version.
+The project uses a **single monotonic version stream** across both components. Versions are computed and synchronized **at release time by CI** (release-coordinator takes max of cli/app/tag/npm + bumps patch); repo versions may drift between releases.
 
-- **CLI Release:** Triggered by `cli/**` changes. Publishes via `bun publish` to the npm registry and creates a git tag.
-- **Desktop Release:** Triggered by `app/**` or `cli/**` changes. Builds signed/notarized macOS artifacts.
-- **Mixed Releases:** If both components change, the CLI workflow owns the tag creation, and the Desktop workflow attaches artifacts to that tag.
+- **CLI Release:** Triggered by `cli/**` changes. Builds, tests, packs a tarball.
+- **Desktop Release:** Triggered by `app/**` or `cli/**` changes. Builds signed/notarized macOS artifacts plus Linux/Windows builds.
+- **Publish Phase:** Runs only after ALL included builds succeed. Commits the version bump, creates+pushes the git tag, and publishes to npm via the pre-built tarball. This prevents orphaned tags if a desktop build fails after CLI publish.

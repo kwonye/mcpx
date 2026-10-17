@@ -6,7 +6,7 @@ describe("tray click behavior", () => {
   const hidePopoverMock = vi.fn();
   const quitAppMock = vi.fn();
   const trayInstances: MockTray[] = [];
-  const createFromPathMock = vi.fn(() => ({ path: "icon" }));
+  const createFromPathMock = vi.fn(() => ({ path: "icon", setTemplateImage: vi.fn() }));
 
   class MockTray {
     handlers: Record<string, () => void> = {};
@@ -66,7 +66,7 @@ describe("tray click behavior", () => {
     expect(tray.setContextMenu).not.toHaveBeenCalled();
 
     tray.handlers.click();
-    expect(togglePopoverMock).toHaveBeenCalledWith(tray);
+    expect(togglePopoverMock).toHaveBeenCalledWith(tray, undefined);
 
     tray.handlers["right-click"]();
     expect(hidePopoverMock).toHaveBeenCalledTimes(1);

@@ -1,7 +1,7 @@
 import net from "node:net";
 import { afterEach, describe, expect, it } from "bun:test";
 import { defaultConfig } from "../src/core/config.js";
-import { resolveGatewayPort } from "../src/core/daemon.js";
+import { buildDaemonChildEnv, resolveGatewayPort } from "../src/core/daemon.js";
 import { setupTempEnv } from "./helpers.js";
 
 async function startTcpServer(): Promise<{ server: net.Server; port: number }> {
@@ -38,6 +38,14 @@ describe("daemon utilities", () => {
     }
   });
 
+  it("runs detached CLI children as Node when the parent uses Electron", () => {
+    expect(buildDaemonChildEnv({ PATH: "/bin" }, true)).toMatchObject({
+      PATH: "/bin",
+      MCPX_DAEMON_CHILD: "1",
+      ELECTRON_RUN_AS_NODE: "1",
+    });
+  });
+
   it("chooses deterministic fallback port when configured port is busy", async () => {
     const env = setupTempEnv("mcpx-daemon-");
     cleanups.push(env.restore);
@@ -50,7 +58,8 @@ describe("daemon utilities", () => {
 
     const resolved = await resolveGatewayPort(config);
 
-    expect(resolved).toBeGreaterThan(occupied.port);
-    expect(config.gateway.port).toBe(resolved);
+    expect(resolved.port).toBeGreaterThan(occupied.port);
+    expect(config.gateway.port).toBe(resolved.port);
+    expect(resolved.fellBackFrom).toBe(occupied.port);
   });
 });

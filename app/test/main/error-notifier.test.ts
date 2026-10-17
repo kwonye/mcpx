@@ -20,6 +20,7 @@ vi.mock("../../src/main/dashboard", () => ({
 }));
 
 const { computeErrorNotifications } = await import("../../src/main/error-notifier");
+const { GATEWAY_FETCH_TIMEOUT_MS } = await import("../../src/shared/timeouts");
 
 describe("computeErrorNotifications", () => {
   it("fires once on a new runtimeError", () => {
@@ -102,6 +103,22 @@ describe("computeErrorNotifications", () => {
     expect(second.nextNotified.get("Railway")).toBe("reauth");
   });
 
+  it("classifies a call-time auth_expired runtimeErrorCode as reauth, not call", () => {
+    // Regression test: runtimeErrorCode used to be checked for mere presence
+    // before its value, so any structured runtime error (including an expired
+    // OAuth token) was reported as "tool calls are failing" instead of
+    // "needs re-authentication".
+    const counts = {
+      Notion: { total: 0, runtimeError: "OAuth refresh failed: invalid_grant", runtimeErrorCode: "auth_expired" }
+    };
+    const { toNotify, nextNotified } = computeErrorNotifications(counts, new Map());
+
+    expect(toNotify).toHaveLength(1);
+    expect(toNotify[0].kind).toBe("reauth");
+    expect(toNotify[0].title).toBe("Notion needs re-authentication");
+    expect(nextNotified.get("Notion")).toBe("reauth");
+  });
+
   it("clears servers no longer present in counts", () => {
     const withServer = { Railway: { total: 120, runtimeError: "boom" } };
     const empty = {};
@@ -112,5 +129,11 @@ describe("computeErrorNotifications", () => {
     const second = computeErrorNotifications(empty, first.nextNotified);
     expect(second.toNotify).toHaveLength(0);
     expect(second.nextNotified.has("Railway")).toBe(false);
+  });
+});
+
+describe("shared timeout constant", () => {
+  it("GATEWAY_FETCH_TIMEOUT_MS is 5000ms", () => {
+    expect(GATEWAY_FETCH_TIMEOUT_MS).toBe(5000);
   });
 });

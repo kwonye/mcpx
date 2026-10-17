@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import { getSecretsStorePath, getSecretsKeyPath, ensureParentDir } from "./paths.js";
 import { readJsonFile, writeJsonAtomic } from "../util/fs.js";
+import { SecretNotFoundError } from "./errors.js";
 
 const ALGORITHM = "aes-256-gcm";
 
@@ -109,6 +110,14 @@ export class SecretsManager {
   setSecret(name: string, value: string): void {
     let map = this.readStore();
     if (map === null) {
+      // readStore() returns null both when the store simply doesn't exist yet
+      // (normal on first run) and when it exists but failed to decrypt (a
+      // corrupt file, or the encryption key was lost/regenerated) -- only the
+      // latter is destructive enough to warn about: every stored secret
+      // (API keys, OAuth tokens) is about to become unrecoverable.
+      if (fs.existsSync(this.storePath)) {
+        console.error(`[mcpx] Warning: the secrets store at ${this.storePath} could not be read (corrupt, or its encryption key changed) and is being reset. All previously stored secrets will need to be re-entered.`);
+      }
       this.recoverCorruptStore();
       map = {};
     }
@@ -136,7 +145,7 @@ export class SecretsManager {
     if (!secretName) return value;
 
     const secret = this.getSecret(secretName);
-    if (!secret) throw new Error(`Secret not found: ${secretName}`);
+    if (!secret) throw new SecretNotFoundError(secretName);
     return secret;
   }
 

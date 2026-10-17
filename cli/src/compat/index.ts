@@ -9,6 +9,8 @@ import { parseClaudeArgs } from "./claude.js";
 import { parseCodexArgs } from "./codex.js";
 import { parseVSCodeArgs } from "./vscode.js";
 import { parseQwenArgs } from "./qwen.js";
+import { parseOpenClawArgs } from "./openclaw.js";
+import { parseHermesArgs } from "./hermes.js";
 import { detectUnsupportedClient } from "./unsupported.js";
 
 export interface CompatibilityResult {
@@ -105,11 +107,73 @@ export function parseCompatibilityArgs(argv: string[]): CompatibilityResult {
     };
   }
 
+  // Check for OpenClaw: mcpx openclaw mcp add ...
+  if (argv[0] === "openclaw" && argv[1] === "mcp" && argv[2] === "add") {
+    const openclawArgs = argv.slice(3);
+    const result = parseOpenClawArgs(openclawArgs);
+    if ("error" in result) {
+      return {
+        client: "openclaw",
+        normalizedArgs: null,
+        error: result.error
+      };
+    }
+    return {
+      client: "openclaw",
+      normalizedArgs: ["--name", result.name, ...buildSpecArgs(result.spec)]
+    };
+  }
+
+  // Check for Hermes: mcpx hermes mcp add ...
+  if (argv[0] === "hermes" && argv[1] === "mcp" && argv[2] === "add") {
+    const hermesArgs = argv.slice(3);
+    const result = parseHermesArgs(hermesArgs);
+    if ("error" in result) {
+      return {
+        client: "hermes",
+        normalizedArgs: null,
+        error: result.error
+      };
+    }
+    return {
+      client: "hermes",
+      normalizedArgs: ["--name", result.name, ...buildSpecArgs(result.spec)]
+    };
+  }
+
   // Not a client-native compatibility command
   return {
     client: null,
     normalizedArgs: null
   };
+}
+
+function buildSpecArgs(spec: Record<string, unknown>): string[] {
+  const args: string[] = [];
+  if (spec.transport === "http") {
+    args.push(spec.url as string);
+    if (spec.headers) {
+      for (const [k, v] of Object.entries(spec.headers as Record<string, string>)) {
+        args.push("--header", `${k}=${v}`);
+      }
+    }
+  } else {
+    args.push("--command", spec.command as string);
+    if (Array.isArray(spec.args) && (spec.args as string[]).length > 0) {
+      for (const a of spec.args as string[]) {
+        args.push("--arg", a);
+      }
+    }
+    if (spec.env) {
+      for (const [k, v] of Object.entries(spec.env as Record<string, string>)) {
+        args.push("--env", `${k}=${v}`);
+      }
+    }
+    if (spec.cwd) {
+      args.push("--cwd", spec.cwd as string);
+    }
+  }
+  return args;
 }
 
 /**

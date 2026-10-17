@@ -6,7 +6,7 @@
  * - stdio add: claude mcp add <name> --env KEY=VALUE -- <command> [args...]
  * 
  * Rejects:
- * - --transport sse
+ * - --transport sse (legacy SSE is not supported)
  * - --scope
  * - JSON import
  * - Desktop import
@@ -172,7 +172,7 @@ function validateClaudeArgs(flags: ParsedClaudeFlags): string | null {
   }
 
   if (flags.hasTransportSSE) {
-    return "Claude --transport sse is not supported. Use `mcpx add <name> <url>` for HTTP/SSE servers.";
+    return "Claude --transport sse is not supported. Use `mcpx add <name> <url>` for MCP v2 streamable HTTP servers.";
   }
 
   if (flags.hasJsonInput) {

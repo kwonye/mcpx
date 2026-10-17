@@ -3,10 +3,13 @@ import fs from "node:fs";
 import { homeDir } from "../core/paths.js";
 import path from "node:path";
 import { z } from "zod";
-import type { ClientAdapter, ManagedIndex, McpxConfig, Skill, SyncClientOptions, SyncResult } from "../types.js";
+import type { ClientAdapter, ManagedIndex, McpxConfig, Skill, SyncClientOptions, SyncResult, PluginSyncInput, PluginSyncResult } from "../types.js";
+import { syncPluginsToClient } from "../core/plugin-projections.js";
+import { projectSkillsToDir } from "../core/skill-projections.js";
 import { readJsonFile, writeJsonAtomic } from "../util/fs.js";
 import {
   buildImportSkip,
+  detectManagedEntryDrift,
   emptyImportScan,
   ensureManagedEntryWritable,
   errorResult,
@@ -50,6 +53,10 @@ export class KiroAdapter implements ClientAdapter {
     return true;
   }
 
+  syncPlugins(plugins: PluginSyncInput[]): PluginSyncResult {
+    return syncPluginsToClient(this.id, plugins);
+  }
+
   scanForImports(_config: McpxConfig, managedIndex: ManagedIndex) {
     const configPath = this.detectConfigPath();
     const result = emptyImportScan(this.id, configPath ?? undefined);
@@ -74,7 +81,7 @@ export class KiroAdapter implements ClientAdapter {
       }
 
       const entry = parsed.data;
-      if ((entry.type === undefined || entry.type === "http" || entry.type === "streamable-http" || entry.type === "sse") && entry.url && !entry.command) {
+      if ((entry.type === undefined || entry.type === "http" || entry.type === "streamable-http") && entry.url && !entry.command) {
         result.candidates.push({
           clientId: this.id,
           configPath,
@@ -127,15 +134,20 @@ export class KiroAdapter implements ClientAdapter {
       };
       removeSourceEntries(servers, options.sourceEntriesToRemove);
       const managedNames = options.managedEntries.map((entry) => entry.name);
+      const enabledEntries = options.managedEntries.filter((entry) => entry.enabled);
+      const enabledManagedNames = enabledEntries.map((entry) => entry.name);
       const serverEntries = Object.fromEntries(
-        options.managedEntries.map((entry) => [entry.name, {
+        enabledEntries.map((entry) => [entry.name, {
           url: entry.url,
           headers: entry.headers,
-          disabled: !entry.enabled
         }])
       ) as Record<string, unknown>;
 
-      for (const name of managedNames) {
+      const driftedNames = enabledManagedNames.filter((name) =>
+        detectManagedEntryDrift(options.managedIndex, this.id, name, servers[name])
+      );
+
+      for (const name of enabledManagedNames) {
         const conflict = ensureManagedEntryWritable(
           options.managedIndex,
           this.id,
@@ -147,7 +159,7 @@ export class KiroAdapter implements ClientAdapter {
         }
       }
 
-      pruneStaleManagedEntries(options.managedIndex, this.id, servers, managedNames);
+      pruneStaleManagedEntries(options.managedIndex, this.id, servers, enabledManagedNames);
       for (const [name, entry] of Object.entries(serverEntries)) {
         servers[name] = entry;
       }
@@ -164,35 +176,13 @@ export class KiroAdapter implements ClientAdapter {
         configPath,
         Object.fromEntries(Object.entries(serverEntries).map(([name, entry]) => [name, JSON.stringify(entry)]))
       );
-      return okResult(this.id, configPath);
+      return { ...okResult(this.id, configPath), driftedEntries: driftedNames.length > 0 ? driftedNames : undefined };
     } catch (error) {
       return errorResult(this.id, configPath, (error as Error).message);
     }
   }
 
   syncSkills(skills: Skill[]): void {
-    const skillsDir = path.join(homeDir(), ".kiro", "skills");
-    if (!fs.existsSync(skillsDir)) {
-      fs.mkdirSync(skillsDir, { recursive: true });
-    }
-
-    // List existing skills in target to prune ones we no longer manage
-    const existingFiles = fs.readdirSync(skillsDir);
-    const managedIds = new Set(skills.map(s => s.id));
-    
-    for (const file of existingFiles) {
-      if (file.endsWith(".md")) {
-        const id = path.basename(file, ".md");
-        if (!managedIds.has(id)) {
-          fs.unlinkSync(path.join(skillsDir, file));
-        }
-      }
-    }
-
-    // Write/update skills
-    for (const skill of skills) {
-      const targetPath = path.join(skillsDir, `${skill.id}.md`);
-      fs.writeFileSync(targetPath, skill.content, "utf-8");
-    }
+    projectSkillsToDir(path.join(homeDir(), ".kiro", "skills"), skills, "flat");
   }
 }

@@ -2,10 +2,13 @@ import { execFileSync } from "node:child_process";
 import { homeDir } from "../core/paths.js";
 import path from "node:path";
 import { z } from "zod";
-import type { ClientAdapter, ManagedIndex, ManagedGatewayEntry, McpxConfig, SyncClientOptions, SyncResult } from "../types.js";
+import type { ClientAdapter, ManagedIndex, ManagedGatewayEntry, McpxConfig, Skill, SyncClientOptions, SyncResult, PluginSyncInput, PluginSyncResult } from "../types.js";
+import { syncPluginsToClient } from "../core/plugin-projections.js";
+import { projectSkillsToDir } from "../core/skill-projections.js";
 import { readJsonFile, writeJsonAtomic } from "../util/fs.js";
 import {
   buildImportSkip,
+  detectManagedEntryDrift,
   emptyImportScan,
   ensureManagedEntryWritable,
   errorResult,
@@ -36,13 +39,15 @@ const claudeDesktopEntrySchema = z.object({
 // still wire its gateway in via this bridge (returning false would make
 // sync.ts skip the client as UNSUPPORTED_HTTP).
 // See https://modelcontextprotocol.io/quickstart/user
+import { APP_VERSION } from "../version.js";
+
 function buildProxyEntry(entry: ManagedGatewayEntry): { command: string; args: string[] } {
   const upstreamName = entry.name.replace(/ \(mcpx\)$/, "");
   try {
     const mcpxPath = execFileSync("which", ["mcpx"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
     if (mcpxPath) return { command: mcpxPath, args: ["proxy", upstreamName] };
   } catch {}
-  return { command: "npx", args: ["-y", "@kwonye/mcpx@latest", "proxy", upstreamName] };
+  return { command: "npx", args: ["-y", `@kwonye/mcpx@${APP_VERSION}`, "proxy", upstreamName] };
 }
 
 export class ClaudeDesktopAdapter implements ClientAdapter {
@@ -60,6 +65,18 @@ export class ClaudeDesktopAdapter implements ClientAdapter {
 
   supportsHttp(): boolean {
     return true;
+  }
+
+  syncPlugins(plugins: PluginSyncInput[]): PluginSyncResult {
+    return syncPluginsToClient(this.id, plugins);
+  }
+
+  syncSkills(skills: Skill[]): void {
+    const configPath = this.detectConfigPath();
+    if (!configPath) {
+      return;
+    }
+    projectSkillsToDir(path.join(path.dirname(configPath), "skills"), skills, "dir");
   }
 
   scanForImports(_config: McpxConfig, managedIndex: ManagedIndex) {
@@ -142,6 +159,11 @@ export class ClaudeDesktopAdapter implements ClientAdapter {
 
       const topLevelServers = ((raw.mcpServers as JsonObject | undefined) ?? {}) as JsonObject;
       removeSourceEntries(topLevelServers, options.sourceEntriesToRemove);
+      
+      const driftedNames = enabledManagedNames.filter((name) =>
+        detectManagedEntryDrift(options.managedIndex, this.id, name, topLevelServers[name])
+      );
+      
       for (const name of enabledManagedNames) {
         const topLevelConflict = ensureManagedEntryWritable(
           options.managedIndex,
@@ -172,7 +194,7 @@ export class ClaudeDesktopAdapter implements ClientAdapter {
           })
         )
       );
-      return okResult(this.id, configPath);
+      return { ...okResult(this.id, configPath), driftedEntries: driftedNames.length > 0 ? driftedNames : undefined };
     } catch (error) {
       return errorResult(this.id, configPath, (error as Error).message);
     }

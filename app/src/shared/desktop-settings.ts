@@ -1,4 +1,4 @@
-export type DesktopTab = "servers" | "projects" | "skills" | "settings";
+export type DesktopTab = "servers" | "projects" | "plugins" | "settings";
 
 export interface DesktopSettings {
   autoUpdateEnabled: boolean;

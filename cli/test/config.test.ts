@@ -98,6 +98,59 @@ describe("config loading", () => {
     });
   });
 
+  it("throws ConfigLoadError on corrupt JSON", () => {
+    const env = setupTempEnv("mcpx-config-corrupt-json-");
+    cleanups.push(env.restore);
+
+    const configPath = getConfigPath();
+    fs.mkdirSync(path.dirname(configPath), { recursive: true });
+    fs.writeFileSync(configPath, "not valid json {", "utf8");
+
+    expect(() => loadConfig()).toThrow("Failed to parse config file");
+
+    // Backup file should exist
+    const dir = path.dirname(configPath);
+    const backups = fs.readdirSync(dir).filter((f) => f.startsWith("config.json.invalid-"));
+    expect(backups.length).toBeGreaterThan(0);
+
+    // Original file untouched
+    expect(fs.readFileSync(configPath, "utf8")).toBe("not valid json {");
+  });
+
+  it("throws ConfigLoadError on schema-invalid config", () => {
+    const env = setupTempEnv("mcpx-config-schema-invalid-");
+    cleanups.push(env.restore);
+
+    const configPath = getConfigPath();
+    fs.mkdirSync(path.dirname(configPath), { recursive: true });
+    fs.writeFileSync(configPath, JSON.stringify({
+      schemaVersion: 1,
+      gateway: { port: 37373, tokenRef: "secret://local_gateway_token", autoStart: true },
+      servers: {
+        bad_server: {
+          transport: "http",
+          url: 123 // should be a string
+        }
+      }
+    }), "utf8");
+
+    expect(() => loadConfig()).toThrow("validation errors");
+
+    // Backup file should exist
+    const dir = path.dirname(configPath);
+    const backups = fs.readdirSync(dir).filter((f) => f.startsWith("config.json.invalid-"));
+    expect(backups.length).toBeGreaterThan(0);
+  });
+
+  it("returns defaults for missing config file", () => {
+    const env = setupTempEnv("mcpx-config-missing-");
+    cleanups.push(env.restore);
+
+    const config = loadConfig();
+    expect(config.servers).toEqual({});
+    expect(config.gateway.port).toBe(37373);
+  });
+
   it("drops client-internal app bundle stdio servers on load", () => {
     const env = setupTempEnv("mcpx-config-repair-internal-");
     cleanups.push(env.restore);
@@ -237,26 +290,34 @@ describe("project config and merging", () => {
     expect(globalContext.type).toBe("global");
     expect(globalContext.config.servers.globalOne).toBeDefined();
 
-    // Project context: type is "project", projectPath is set, but config is still global
+    // Project context without -l: type is "project", but writes still go to global catalog
     const originalCwd = process.cwd;
     process.cwd = () => projectPath;
     try {
+      const projectContext = resolveActiveConfig();
+      expect(projectContext.type).toBe("project");
+      expect(projectContext.projectPath).toBe(projectPath);
+      expect(projectContext.config.servers.globalOne).toBeDefined();
+
+      // Project context WITH -l: writes go to project-local .mcpx.json
       const localContext = resolveActiveConfig({ local: true });
       expect(localContext.type).toBe("project");
       expect(localContext.projectPath).toBe(projectPath);
-      // In the new model, the project context still reads global catalog
+      expect(localContext.configPath).toBe(localConfigPath);
       expect(localContext.config.servers.globalOne).toBeDefined();
 
-      // save() writes to the global config
-      localContext.config.servers.addedGlobally = {
+      localContext.config.servers.addedLocally = {
         transport: "http",
-        url: "https://new.com",
+        url: "https://local.com",
         enabled: true
       };
       localContext.save();
 
+      const savedLocal = JSON.parse(fs.readFileSync(localConfigPath, "utf8"));
+      expect(savedLocal.servers.addedLocally).toBeDefined();
+
       const savedGlobal = JSON.parse(fs.readFileSync(configPath, "utf8"));
-      expect(savedGlobal.servers.addedGlobally).toBeDefined();
+      expect(savedGlobal.servers.addedLocally).toBeUndefined();
     } finally {
       process.cwd = originalCwd;
     }

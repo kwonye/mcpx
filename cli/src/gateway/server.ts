@@ -1,21 +1,25 @@
 import http from "node:http";
 import { URL } from "node:url";
 import crypto from "node:crypto";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { Client, SdkHttpError } from "@modelcontextprotocol/client";
 import {
   StdioClientTransport,
   getDefaultEnvironment,
   type StdioServerParameters
-} from "@modelcontextprotocol/sdk/client/stdio.js";
-import { StreamableHTTPClientTransport, StreamableHTTPError } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+} from "@modelcontextprotocol/client/stdio";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
+import { createMcpHandler, ProtocolError, Server } from "@modelcontextprotocol/server";
+import { toWebRequest } from "@modelcontextprotocol/node";
+import { MCP_V2_PROTOCOL_VERSION } from "../core/mcp-v2.js";
 import { loadMergedConfig } from "../core/config.js";
 import { buildEnrichedPath } from "../core/spawn-env.js";
-import { getOAuthAccessToken, isOAuthReference, oauthReferenceServerName } from "../core/oauth.js";
+import { getOAuthAccessToken, isOAuthReference, oauthReferenceServerName, oauthSecretNames } from "../core/oauth.js";
 import { SecretsManager } from "../core/secrets.js";
+import { UpstreamError, classifyUpstreamError, SecretNotFoundError, type UpstreamErrorCode } from "../core/errors.js";
 import { APP_VERSION } from "../version.js";
+import { captureTelemetryEvent, countBucket, markTelemetryMilestone, uptimeBucket } from "../core/telemetry.js";
 import type {
   HttpServerSpec,
-  JsonRpcRequest,
   JsonRpcResponse,
   McpxConfig,
   StdioServerSpec,
@@ -25,10 +29,10 @@ import type {
 } from "../types.js";
 import { isServerEnabled } from "../types.js";
 
-const JSON_RPC_VERSION = "2.0";
 const SERVER_VERSION = APP_VERSION;
 const DEFAULT_UPSTREAM_TIMEOUT_MS = 60_000;
 const DEFAULT_CONNECT_TIMEOUT_MS = 10_000;
+const HEALTH_WINDOW_MS = 24 * 60 * 60 * 1_000;
 const OAUTH_WELL_KNOWN_PREFIXES = [
   "/.well-known/oauth-protected-resource",
   "/.well-known/oauth-authorization-server",
@@ -55,21 +59,71 @@ interface UpstreamConnectionEntry {
 interface GatewayRuntimeState {
   upstreamConnections: Map<string, UpstreamConnectionEntry>;
   tokenCache?: Map<string, { fingerprint: string; count: UpstreamTokenCount }>;
-  upstreamErrors?: Map<string, string>;
+  upstreamErrors?: Map<string, { code: string; message: string }>;
   lastWwwAuthenticate?: Map<string, string>;
+  health: Record<"tools_call" | "resources_read" | "prompts_get" | "other", { calls: number; successes: number; errors: number }>;
+  healthWindowStartedAt: number;
 }
 
-class UpstreamHttpError extends Error {
-  readonly status: number;
-  readonly wwwAuthenticate?: string;
-  readonly bodyText: string;
+type GatewayMethodFamily = "tools_call" | "resources_read" | "prompts_get" | "other";
 
-  constructor(upstreamName: string, status: number, bodyText: string, wwwAuthenticate?: string) {
-    super(`Upstream ${upstreamName} returned HTTP ${status}: ${bodyText.slice(0, 400)}`);
-    this.name = "UpstreamHttpError";
-    this.status = status;
-    this.bodyText = bodyText;
-    this.wwwAuthenticate = wwwAuthenticate;
+function gatewayMethodFamily(method: string): GatewayMethodFamily {
+  if (method === "tools/call") return "tools_call";
+  if (method === "resources/read") return "resources_read";
+  if (method === "prompts/get") return "prompts_get";
+  return "other";
+}
+
+function recordGatewayCall(runtime: GatewayRuntimeState, method: string, response: JsonRpcResponse | null): void {
+  if (Date.now() - runtime.healthWindowStartedAt >= HEALTH_WINDOW_MS) {
+    emitGatewayHealthSummary(runtime, runtime.healthWindowStartedAt);
+    resetGatewayHealth(runtime, Date.now());
+  }
+  const metric = runtime.health[gatewayMethodFamily(method)];
+  metric.calls += 1;
+  if (response?.error) {
+    metric.errors += 1;
+  } else {
+    metric.successes += 1;
+    markTelemetryMilestone("first_gateway_request_succeeded");
+  }
+}
+
+function resetGatewayHealth(runtime: GatewayRuntimeState, startedAt: number): void {
+  for (const metric of Object.values(runtime.health)) {
+    metric.calls = 0;
+    metric.successes = 0;
+    metric.errors = 0;
+  }
+  runtime.healthWindowStartedAt = startedAt;
+}
+
+function emitGatewayHealthSummary(runtime: GatewayRuntimeState, startedAt: number): void {
+  let config: McpxConfig | null = null;
+  try {
+    config = loadMergedConfig();
+  } catch {
+    // A telemetry summary is best-effort during shutdown.
+  }
+
+  const configuredServerCount = countBucket(config ? Object.keys(config.servers).length : 0);
+  const configuredClientCount = countBucket(config ? Object.keys(config.clients).length : 0);
+  const configuredPluginCount = countBucket(config ? Object.keys(config.plugins ?? {}).length : 0);
+  for (const [methodFamily, metric] of Object.entries(runtime.health) as Array<[GatewayMethodFamily, { calls: number; successes: number; errors: number }]>) {
+    if (metric.calls === 0) continue;
+    captureTelemetryEvent({
+      name: "gateway_health_summary",
+      properties: {
+        methodFamily,
+        callCount: countBucket(metric.calls),
+        successCount: countBucket(metric.successes),
+        errorCount: countBucket(metric.errors),
+        configuredServerCount,
+        configuredClientCount,
+        configuredPluginCount,
+        uptime: uptimeBucket(Date.now() - startedAt)
+      }
+    });
   }
 }
 
@@ -276,6 +330,34 @@ async function callUpstream(
   return callUpstreamOnce(upstream, method, params, secrets, runtime, passthroughAuthorizationHeader, false);
 }
 
+// When tools/resources/prompts fail with different error codes (e.g. tools/list
+// 401s while prompts/list merely 404s "method not found"), the auth signal is
+// the one the user actually needs to act on -- so it wins regardless of call
+// order.
+const ERROR_CODE_PRIORITY: UpstreamErrorCode[] = [
+  "auth_expired",
+  "auth_required",
+  "secret_missing",
+  "unreachable",
+  "timeout",
+  "upstream_error"
+];
+
+function pickPrimaryErrorCode(errors: Array<{ code?: UpstreamErrorCode }>): string | undefined {
+  let best: UpstreamErrorCode | undefined;
+  let bestRank = Number.POSITIVE_INFINITY;
+  for (const { code } of errors) {
+    if (!code) continue;
+    const rank = ERROR_CODE_PRIORITY.indexOf(code);
+    const effectiveRank = rank === -1 ? ERROR_CODE_PRIORITY.length : rank;
+    if (effectiveRank < bestRank) {
+      bestRank = effectiveRank;
+      best = code;
+    }
+  }
+  return best;
+}
+
 export async function getUpstreamTokenCounts(
   config: McpxConfig,
   secrets: SecretsManager,
@@ -289,18 +371,25 @@ export async function getUpstreamTokenCounts(
   const upstreams = listUpstreams(config);
 
   for (const upstream of upstreams) {
-    const fingerprint = specFingerprint(upstream.spec);
+    const fingerprint = specFingerprint(upstream.spec, secrets);
     const cached = runtime.tokenCache.get(upstream.name);
     if (cached?.fingerprint === fingerprint) {
-      const runtimeError = runtime.upstreamErrors?.get(upstream.name);
-      results[upstream.name] = runtimeError ? { ...cached.count, runtimeError } : cached.count;
+      const runtimeErr = runtime.upstreamErrors?.get(upstream.name);
+      results[upstream.name] = runtimeErr
+        ? { ...cached.count, runtimeError: runtimeErr.message, runtimeErrorCode: runtimeErr.code }
+        : cached.count;
       continue;
     }
 
     let toolsCount = 0;
     let resourcesCount = 0;
     let promptsCount = 0;
-    const errors: string[] = [];
+    const errors: Array<{ label: string; message: string; code?: UpstreamErrorCode }> = [];
+
+    function recordError(label: string, error: unknown): void {
+      const message = error instanceof Error ? error.message : String(error);
+      errors.push({ label, message, code: error instanceof UpstreamError ? error.code : undefined });
+    }
 
     try {
       const toolsResult = await callUpstream(upstream, "tools/list", {}, "token-tools", secrets, runtime) as { tools?: Array<unknown> };
@@ -308,7 +397,7 @@ export async function getUpstreamTokenCounts(
         toolsCount = Math.ceil(JSON.stringify(toolsResult.tools).length / 4);
       }
     } catch (error) {
-      errors.push(`tools/list: ${error instanceof Error ? error.message : String(error)}`);
+      recordError("tools/list", error);
     }
 
     try {
@@ -317,7 +406,7 @@ export async function getUpstreamTokenCounts(
         resourcesCount = Math.ceil(JSON.stringify(resourcesResult.resources).length / 4);
       }
     } catch (error) {
-      errors.push(`resources/list: ${error instanceof Error ? error.message : String(error)}`);
+      recordError("resources/list", error);
     }
 
     try {
@@ -326,7 +415,7 @@ export async function getUpstreamTokenCounts(
         promptsCount = Math.ceil(JSON.stringify(promptsResult.prompts).length / 4);
       }
     } catch (error) {
-      errors.push(`prompts/list: ${error instanceof Error ? error.message : String(error)}`);
+      recordError("prompts/list", error);
     }
 
     const total = toolsCount + resourcesCount + promptsCount;
@@ -335,14 +424,15 @@ export async function getUpstreamTokenCounts(
       resources: resourcesCount,
       prompts: promptsCount,
       total,
-      error: errors.length > 0 ? errors.join("; ") : undefined
+      error: errors.length > 0 ? errors.map((e) => `${e.label}: ${e.message}`).join("; ") : undefined,
+      errorCode: pickPrimaryErrorCode(errors)
     };
 
     if (errors.length === 0) {
       runtime.tokenCache.set(upstream.name, { fingerprint, count: countObj });
     }
-    const runtimeError = runtime.upstreamErrors?.get(upstream.name);
-    results[upstream.name] = runtimeError ? { ...countObj, runtimeError } : countObj;
+    const runtimeErr = runtime.upstreamErrors?.get(upstream.name);
+    results[upstream.name] = runtimeErr ? { ...countObj, runtimeError: runtimeErr.message, runtimeErrorCode: runtimeErr.code } : countObj;
   }
 
   return results;
@@ -372,12 +462,68 @@ function withTimeout<T>(work: Promise<T>, timeoutMs: number, timeoutMessage: str
   });
 }
 
-function specFingerprint(spec: UpstreamServerSpec): string {
-  return JSON.stringify(spec);
+function specFingerprint(spec: UpstreamServerSpec, secrets?: SecretsManager): string {
+  if (!secrets) return JSON.stringify(spec);
+  const resolvedMarkers: Record<string, string> = {};
+  const collect = (obj?: Record<string, string>) => {
+    if (!obj) return;
+    for (const [key, value] of Object.entries(obj)) {
+      if (isOAuthReference(value)) {
+        // resolveMaybeSecret only understands secret:// refs -- for an
+        // oauth:// reference it just returns the value unchanged, and that
+        // reference string never changes across a re-login or a token
+        // refresh. Without this, the fingerprint stays identical after
+        // re-authenticating, the cached upstream connection (with the old
+        // bearer token baked into its transport) never gets evicted, and
+        // re-auth silently appears to do nothing until an unrelated call
+        // happens to invalidate the connection. Use the stored token's
+        // obtainedAt instead, which changes on every login and refresh.
+        try {
+          const serverName = oauthReferenceServerName(value);
+          let storedTokens = secrets.getSecret(oauthSecretNames(serverName).tokens);
+          if (!storedTokens) {
+            // Legacy fallback for old non-hashed secret names
+            const legacy = `oauth_${serverName.toLowerCase().replace(/[^a-z0-9._-]/g, "_")}_tokens`;
+            storedTokens = secrets.getSecret(legacy);
+          }
+          const obtainedAt = storedTokens ? (JSON.parse(storedTokens) as { obtainedAt?: number }).obtainedAt : undefined;
+          resolvedMarkers[key] = obtainedAt != null ? `oauth:${serverName}:${obtainedAt}` : value;
+        } catch {
+          resolvedMarkers[key] = value;
+        }
+      } else if (value.startsWith("secret://")) {
+        try { resolvedMarkers[key] = secrets.resolveMaybeSecret(value); } catch { resolvedMarkers[key] = value; }
+      }
+    }
+  };
+  if (spec.transport === "stdio") collect(spec.env);
+  if (spec.transport === "http") collect(spec.headers);
+  return JSON.stringify({ spec, resolvedMarkers });
 }
+
+/**
+ * The passthrough connection cache key used to be a constant "<name>:passthrough"
+ * suffix that didn't depend on the actual token -- so two clients passing
+ * different Authorization headers to the same upstream shared one cached
+ * connection, and the second one silently executed under the first client's
+ * credentials for the life of that connection. Hashed (not raw) so a client's
+ * bearer token never ends up sitting in a Map key.
+ */
+function passthroughCacheSuffix(passthroughAuthorizationHeader: string): string {
+  return `passthrough:${crypto.createHash("sha256").update(passthroughAuthorizationHeader).digest("hex").slice(0, 16)}`;
+}
+
+const EXTRA_INHERITED_ENV = ["TMPDIR", "LANG"] as const;
 
 function resolveStdioEnv(spec: StdioServerSpec, secrets: SecretsManager): Record<string, string> {
   const env = getDefaultEnvironment();
+  for (const key of EXTRA_INHERITED_ENV) {
+    const value = process.env[key];
+    if (value) env[key] = value;
+  }
+  for (const [key, value] of Object.entries(process.env)) {
+    if (key.startsWith("LC_") && value) env[key] = value;
+  }
   env.PATH = buildEnrichedPath(env.PATH);
 
   for (const [key, value] of Object.entries(spec.env ?? {})) {
@@ -428,11 +574,11 @@ async function closeUpstreamConnection(entry: UpstreamConnectionEntry): Promise<
   }
 }
 
-async function reconcileUpstreamConnections(config: McpxConfig, runtime: GatewayRuntimeState): Promise<void> {
+async function reconcileUpstreamConnections(config: McpxConfig, secrets: SecretsManager, runtime: GatewayRuntimeState): Promise<void> {
   const activeSpecs = new Map(
     Object.entries(config.servers)
       .filter(([, spec]) => isServerEnabled(spec))
-      .map(([name, spec]) => [name, specFingerprint(spec)])
+      .map(([name, spec]) => [name, specFingerprint(spec, secrets)])
   );
 
   const staleKeys: string[] = [];
@@ -460,7 +606,7 @@ function invalidateUpstreamConnection(
   passthroughAuthorizationHeader: string | undefined,
   runtime: GatewayRuntimeState
 ): void {
-  const key = passthroughAuthorizationHeader ? `${upstreamName}:passthrough` : upstreamName;
+  const key = passthroughAuthorizationHeader ? `${upstreamName}:${passthroughCacheSuffix(passthroughAuthorizationHeader)}` : upstreamName;
   const existing = runtime.upstreamConnections.get(key);
   if (!existing) {
     return;
@@ -476,8 +622,8 @@ async function getUpstreamConnection(
   options: { forceOAuthRefresh?: boolean; passthroughAuthorizationHeader?: string } = {}
 ): Promise<UpstreamConnection> {
   const { forceOAuthRefresh = false, passthroughAuthorizationHeader } = options;
-  const cacheKey = passthroughAuthorizationHeader ? `${upstream.name}:passthrough` : upstream.name;
-  const fingerprint = specFingerprint(upstream.spec);
+  const cacheKey = passthroughAuthorizationHeader ? `${upstream.name}:${passthroughCacheSuffix(passthroughAuthorizationHeader)}` : upstream.name;
+  const fingerprint = specFingerprint(upstream.spec, secrets);
 
   if (!forceOAuthRefresh) {
     const existing = runtime.upstreamConnections.get(cacheKey);
@@ -518,7 +664,10 @@ async function getUpstreamConnection(
       );
     }
 
-    const client = new Client({ name: "mcpx", version: SERVER_VERSION });
+    const client = new Client(
+      { name: "mcpx", version: SERVER_VERSION },
+      { versionNegotiation: { mode: { pin: MCP_V2_PROTOCOL_VERSION } } }
+    );
     await withTimeout(
       client.connect(transport),
       DEFAULT_CONNECT_TIMEOUT_MS,
@@ -586,28 +735,36 @@ async function callUpstreamOnce(
     if (
       !forceOAuthRefresh
       && hasOAuth
-      && error instanceof StreamableHTTPError
-      && (error.code === 401 || error.code === 403)
+      && error instanceof SdkHttpError
+      && (error.status === 401 || error.status === 403)
     ) {
       return callUpstreamOnce(upstream, method, params, secrets, runtime, passthroughAuthorizationHeader, true);
     }
 
-    // Convert HTTP-level errors to UpstreamHttpError so auth-challenge detection works.
-    if (upstream.spec.transport === "http" && error instanceof StreamableHTTPError && error.code) {
-      const wwwAuthenticate = runtime.lastWwwAuthenticate?.get(upstream.name);
-      throw new UpstreamHttpError(upstream.name, error.code, error.message ?? "", wwwAuthenticate);
-    }
-
-    throw error;
+    // Classify all errors through the structured taxonomy.
+    const wwwAuthenticate = runtime.lastWwwAuthenticate?.get(upstream.name);
+    throw classifyUpstreamError(upstream.name, error, wwwAuthenticate);
   }
+}
+
+/** Constant-time comparison for the local gateway bearer token (a 256-bit secret). */
+function tokensMatch(candidate: string | undefined, expectedToken: string): boolean {
+  if (!candidate) {
+    return false;
+  }
+  const candidateBuf = Buffer.from(candidate);
+  const expectedBuf = Buffer.from(expectedToken);
+  // timingSafeEqual throws on mismatched lengths, so check that first -- a length
+  // mismatch is itself safe to short-circuit on since it isn't secret-dependent.
+  return candidateBuf.length === expectedBuf.length && crypto.timingSafeEqual(candidateBuf, expectedBuf);
 }
 
 function authHeaderIsValid(request: http.IncomingMessage, expectedToken: string): boolean {
   const localTokenHeader = request.headers["x-mcpx-local-token"];
-  if (typeof localTokenHeader === "string" && localTokenHeader === expectedToken) {
+  if (typeof localTokenHeader === "string" && tokensMatch(localTokenHeader, expectedToken)) {
     return true;
   }
-  if (Array.isArray(localTokenHeader) && localTokenHeader.includes(expectedToken)) {
+  if (Array.isArray(localTokenHeader) && localTokenHeader.some((value) => tokensMatch(value, expectedToken))) {
     return true;
   }
 
@@ -617,26 +774,11 @@ function authHeaderIsValid(request: http.IncomingMessage, expectedToken: string)
   }
 
   const [scheme, token] = authHeader.split(" ");
-  return scheme === "Bearer" && token === expectedToken;
+  return scheme === "Bearer" && tokensMatch(token, expectedToken);
 }
 
-function isAuthChallenge(error: unknown): error is UpstreamHttpError {
-  return error instanceof UpstreamHttpError && (error.status === 401 || error.status === 403);
-}
-
-function getClientAuthorizationForUpstream(request: http.IncomingMessage, expectedToken: string): string | undefined {
-  const authHeader = request.headers.authorization;
-  if (!authHeader) {
-    return undefined;
-  }
-
-  const [scheme, token] = authHeader.split(" ");
-  if (scheme === "Bearer" && token === expectedToken) {
-    // Legacy local auth mode: Authorization is the local token, not an upstream OAuth token.
-    return undefined;
-  }
-
-  return authHeader;
+function isAuthChallenge(error: unknown): error is UpstreamError {
+  return error instanceof UpstreamError && (error.code === "auth_required" || error.code === "auth_expired");
 }
 
 async function handleListTools(
@@ -666,11 +808,11 @@ async function handleListTools(
         runtime.tokenCache = new Map();
       }
       const cached = runtime.tokenCache.get(upstream.name);
-      const existing = cached?.fingerprint === specFingerprint(upstream.spec) ? cached.count : { tools: 0, resources: 0, prompts: 0, total: 0 };
+      const existing = cached?.fingerprint === specFingerprint(upstream.spec, secrets) ? cached.count : { tools: 0, resources: 0, prompts: 0, total: 0 };
       existing.tools = Math.ceil(JSON.stringify(result.tools ?? []).length / 4);
       existing.total = existing.tools + existing.resources + existing.prompts;
       delete existing.error;
-      runtime.tokenCache.set(upstream.name, { fingerprint: specFingerprint(upstream.spec), count: existing });
+      runtime.tokenCache.set(upstream.name, { fingerprint: specFingerprint(upstream.spec, secrets), count: existing });
 
       for (const tool of result.tools ?? []) {
         const name = typeof tool.name === "string" ? tool.name : "tool";
@@ -684,11 +826,19 @@ async function handleListTools(
         throw error;
       }
 
-      runtime.upstreamErrors?.set(upstream.name, error instanceof Error ? error.message : String(error));
+      const code = error instanceof UpstreamError ? error.code : "upstream_error";
+      runtime.upstreamErrors?.set(upstream.name, { code, message: error instanceof Error ? error.message : String(error) });
     }
   }
 
-  return { tools };
+  const failedUpstreams = upstreams
+    .filter((u) => runtime.upstreamErrors?.has(u.name))
+    .map((u) => ({ name: u.name, ...runtime.upstreamErrors!.get(u.name)! }));
+
+  return {
+    tools,
+    ...(failedUpstreams.length > 0 ? { _meta: { mcpxUpstreamErrors: failedUpstreams } } : {})
+  };
 }
 
 async function handleListResources(
@@ -720,11 +870,11 @@ async function handleListResources(
         runtime.tokenCache = new Map();
       }
       const cached = runtime.tokenCache.get(upstream.name);
-      const existing = cached?.fingerprint === specFingerprint(upstream.spec) ? cached.count : { tools: 0, resources: 0, prompts: 0, total: 0 };
+      const existing = cached?.fingerprint === specFingerprint(upstream.spec, secrets) ? cached.count : { tools: 0, resources: 0, prompts: 0, total: 0 };
       existing.resources = Math.ceil(JSON.stringify(result.resources ?? []).length / 4);
       existing.total = existing.tools + existing.resources + existing.prompts;
       delete existing.error;
-      runtime.tokenCache.set(upstream.name, { fingerprint: specFingerprint(upstream.spec), count: existing });
+      runtime.tokenCache.set(upstream.name, { fingerprint: specFingerprint(upstream.spec, secrets), count: existing });
 
       for (const resource of result.resources ?? []) {
         const originalUri = typeof resource.uri === "string" ? resource.uri : "";
@@ -740,11 +890,19 @@ async function handleListResources(
         throw error;
       }
 
-      runtime.upstreamErrors?.set(upstream.name, error instanceof Error ? error.message : String(error));
+      const code = error instanceof UpstreamError ? error.code : "upstream_error";
+      runtime.upstreamErrors?.set(upstream.name, { code, message: error instanceof Error ? error.message : String(error) });
     }
   }
 
-  return { resources };
+  const failedUpstreams = upstreams
+    .filter((u) => runtime.upstreamErrors?.has(u.name))
+    .map((u) => ({ name: u.name, ...runtime.upstreamErrors!.get(u.name)! }));
+
+  return {
+    resources,
+    ...(failedUpstreams.length > 0 ? { _meta: { mcpxUpstreamErrors: failedUpstreams } } : {})
+  };
 }
 
 async function handleListPrompts(
@@ -776,11 +934,11 @@ async function handleListPrompts(
         runtime.tokenCache = new Map();
       }
       const cached = runtime.tokenCache.get(upstream.name);
-      const existing = cached?.fingerprint === specFingerprint(upstream.spec) ? cached.count : { tools: 0, resources: 0, prompts: 0, total: 0 };
+      const existing = cached?.fingerprint === specFingerprint(upstream.spec, secrets) ? cached.count : { tools: 0, resources: 0, prompts: 0, total: 0 };
       existing.prompts = Math.ceil(JSON.stringify(result.prompts ?? []).length / 4);
       existing.total = existing.tools + existing.resources + existing.prompts;
       delete existing.error;
-      runtime.tokenCache.set(upstream.name, { fingerprint: specFingerprint(upstream.spec), count: existing });
+      runtime.tokenCache.set(upstream.name, { fingerprint: specFingerprint(upstream.spec, secrets), count: existing });
 
       for (const prompt of result.prompts ?? []) {
         const name = typeof prompt.name === "string" ? prompt.name : "prompt";
@@ -794,11 +952,19 @@ async function handleListPrompts(
         throw error;
       }
 
-      runtime.upstreamErrors?.set(upstream.name, error instanceof Error ? error.message : String(error));
+      const code = error instanceof UpstreamError ? error.code : "upstream_error";
+      runtime.upstreamErrors?.set(upstream.name, { code, message: error instanceof Error ? error.message : String(error) });
     }
   }
 
-  return { prompts };
+  const failedUpstreams = upstreams
+    .filter((u) => runtime.upstreamErrors?.has(u.name))
+    .map((u) => ({ name: u.name, ...runtime.upstreamErrors!.get(u.name)! }));
+
+  return {
+    prompts,
+    ...(failedUpstreams.length > 0 ? { _meta: { mcpxUpstreamErrors: failedUpstreams } } : {})
+  };
 }
 
 async function routeNamespacedCall(
@@ -851,8 +1017,9 @@ async function routeNamespacedCall(
       if (isAuthChallenge(error)) {
         throw error;
       }
-      runtime.upstreamErrors?.set(upstream.name, (error as Error).message);
-      return makeError(id, -32000, (error as Error).message);
+      const errCode = error instanceof UpstreamError ? error.code : "upstream_error";
+      runtime.upstreamErrors?.set(upstream.name, { code: errCode, message: (error as Error).message });
+      return makeError(id, -32000, (error as Error).message, { mcpxCode: errCode, upstream: upstream.name });
     }
   }
 
@@ -888,8 +1055,9 @@ async function routeNamespacedCall(
       if (isAuthChallenge(error)) {
         throw error;
       }
-      runtime.upstreamErrors?.set(upstream.name, (error as Error).message);
-      return makeError(id, -32000, (error as Error).message);
+      const errCode = error instanceof UpstreamError ? error.code : "upstream_error";
+      runtime.upstreamErrors?.set(upstream.name, { code: errCode, message: (error as Error).message });
+      return makeError(id, -32000, (error as Error).message, { mcpxCode: errCode, upstream: upstream.name });
     }
   }
 
@@ -924,98 +1092,172 @@ async function routeNamespacedCall(
     if (isAuthChallenge(error)) {
       throw error;
     }
-    runtime.upstreamErrors?.set(upstream.name, (error as Error).message);
-    return makeError(id, -32000, (error as Error).message);
+    const errCode = error instanceof UpstreamError ? error.code : "upstream_error";
+    runtime.upstreamErrors?.set(upstream.name, { code: errCode, message: (error as Error).message });
+    return makeError(id, -32000, (error as Error).message, { mcpxCode: errCode, upstream: upstream.name });
   }
 }
 
-async function handleRequestObject(
-  request: JsonRpcRequest,
-  secrets: SecretsManager,
+function getClientAuthorizationFromWebRequest(request: Request | undefined, expectedToken: string): string | undefined {
+  const authHeader = request?.headers.get("authorization");
+  if (!authHeader) {
+    return undefined;
+  }
+
+  const [scheme, token] = authHeader.split(" ");
+  if (scheme === "Bearer" && tokensMatch(token, expectedToken)) {
+    return undefined;
+  }
+
+  return authHeader;
+}
+
+async function prepareGatewayRequest(
+  request: Request | undefined,
+  expectedToken: string,
   runtime: GatewayRuntimeState,
-  upstreamFilter?: string,
-  clientAuthorizationHeader?: string
-): Promise<JsonRpcResponse | null> {
-  const id = request.id ?? null;
-
-  if (!request.method || typeof request.method !== "string") {
-    return makeError(id, -32600, "Invalid JSON-RPC request: missing method.");
-  }
-
-  if (request.method === "initialize") {
-    const requestedProtocol = (request.params as { protocolVersion?: unknown } | undefined)?.protocolVersion;
-    const protocolVersion = typeof requestedProtocol === "string" && requestedProtocol.length > 0
-      ? requestedProtocol
-      : "2025-11-25";
-
-    return makeResult(id, {
-      protocolVersion,
-      capabilities: {
-        tools: {},
-        resources: {},
-        prompts: {}
-      },
-      serverInfo: {
-        name: "mcpx",
-        version: SERVER_VERSION
-      }
-    });
-  }
-
-  if (request.method === "notifications/initialized") {
-    return null;
-  }
-
-  if (request.method === "ping") {
-    return makeResult(id, { ok: true });
-  }
-
+  secrets: SecretsManager,
+  upstreamFilter: string | undefined
+): Promise<{ config: McpxConfig; clientAuthorizationHeader?: string }> {
   const config = loadMergedConfig();
   if (upstreamFilter && listUpstreams(config, upstreamFilter).length === 0) {
-    return makeError(id, -32602, `Unknown upstream: ${upstreamFilter}`);
+    throw new ProtocolError(-32602, `Unknown upstream: ${upstreamFilter}`);
   }
-  await reconcileUpstreamConnections(config, runtime);
+  await reconcileUpstreamConnections(config, secrets, runtime);
+  return {
+    config,
+    clientAuthorizationHeader: getClientAuthorizationFromWebRequest(request, expectedToken)
+  };
+}
 
-  if (request.method === "custom/tokenCounts") {
-    const result = await getUpstreamTokenCounts(config, secrets, runtime);
-    return makeResult(id, result);
-  }
-
-  if (request.method === "custom/refreshTokenCounts") {
-    runtime.tokenCache?.clear();
-    const result = await getUpstreamTokenCounts(config, secrets, runtime);
-    return makeResult(id, result);
-  }
-
-  if (request.method === "tools/list") {
-    const result = await handleListTools(config, secrets, runtime, upstreamFilter, clientAuthorizationHeader);
-    return makeResult(id, result);
-  }
-
-  if (request.method === "resources/list") {
-    const result = await handleListResources(config, secrets, runtime, upstreamFilter, clientAuthorizationHeader);
-    return makeResult(id, result);
-  }
-
-  if (request.method === "prompts/list") {
-    const result = await handleListPrompts(config, secrets, runtime, upstreamFilter, clientAuthorizationHeader);
-    return makeResult(id, result);
-  }
-
-  if (request.method === "tools/call" || request.method === "resources/read" || request.method === "prompts/get") {
-    return routeNamespacedCall(
+async function routeGatewayCall(
+  config: McpxConfig,
+  method: "tools/call" | "resources/read" | "prompts/get",
+  params: Record<string, unknown> | undefined,
+  secrets: SecretsManager,
+  runtime: GatewayRuntimeState,
+  upstreamFilter: string | undefined,
+  clientAuthorizationHeader: string | undefined
+): Promise<unknown> {
+  let response: JsonRpcResponse;
+  try {
+    response = await routeNamespacedCall(
       config,
-      request.method,
-      request.params as Record<string, unknown> | undefined,
-      id,
+      method,
+      params,
+      null,
       secrets,
       runtime,
       upstreamFilter,
       clientAuthorizationHeader
     );
+  } catch (error) {
+    if (isAuthChallenge(error)) {
+      throw new ProtocolError(-32001, "Upstream authentication required.", {
+        mcpxCode: error.code,
+        status: error.status,
+        upstream: error.upstream,
+        wwwAuthenticate: error.wwwAuthenticate
+      });
+    }
+    throw error;
   }
+  if (response.error) {
+    throw new ProtocolError(response.error.code, response.error.message, response.error.data);
+  }
+  return response.result;
+}
 
-  return makeError(id, -32601, `Unsupported method: ${request.method}`);
+function createGatewayMcpHandler(
+  options: GatewayServerOptions,
+  runtime: GatewayRuntimeState
+): ReturnType<typeof createMcpHandler> {
+  return createMcpHandler(
+    async (context) => {
+      const requestUrl = new URL(context.requestInfo?.url ?? "http://127.0.0.1/mcp");
+      const upstreamFilter = getRequestedUpstream(requestUrl);
+      const request = context.requestInfo;
+      const clientAuthorizationHeader = getClientAuthorizationFromWebRequest(request, options.expectedToken);
+      const server = new Server(
+        { name: "mcpx", version: SERVER_VERSION },
+        {
+          capabilities: {
+            tools: {},
+            resources: {},
+            prompts: {}
+          },
+          supportedProtocolVersions: [MCP_V2_PROTOCOL_VERSION]
+        }
+      );
+
+      const recordSuccessOrFailure = async <T>(method: string, work: () => Promise<T>): Promise<T> => {
+        try {
+          const result = await work();
+          recordGatewayCall(runtime, method, null);
+          return result;
+        } catch (error) {
+          recordGatewayCall(runtime, method, makeError(null, -32000, error instanceof Error ? error.message : String(error)));
+          if (isAuthChallenge(error)) {
+            throw new ProtocolError(-32001, "Upstream authentication required.", {
+              mcpxCode: error.code,
+              status: error.status,
+              upstream: error.upstream,
+              wwwAuthenticate: error.wwwAuthenticate
+            });
+          }
+          throw error;
+        }
+      };
+
+      server.setRequestHandler("tools/list", async (_request, _context) => {
+        return recordSuccessOrFailure("tools/list", async () => {
+          const { config } = await prepareGatewayRequest(request, options.expectedToken, runtime, options.secrets, upstreamFilter);
+          return handleListTools(config, options.secrets, runtime, upstreamFilter, clientAuthorizationHeader);
+        }) as Promise<any>;
+      });
+      server.setRequestHandler("resources/list", async (_request, _context) => {
+        return recordSuccessOrFailure("resources/list", async () => {
+          const { config } = await prepareGatewayRequest(request, options.expectedToken, runtime, options.secrets, upstreamFilter);
+          return handleListResources(config, options.secrets, runtime, upstreamFilter, clientAuthorizationHeader);
+        }) as Promise<any>;
+      });
+      server.setRequestHandler("prompts/list", async (_request, _context) => {
+        return recordSuccessOrFailure("prompts/list", async () => {
+          const { config } = await prepareGatewayRequest(request, options.expectedToken, runtime, options.secrets, upstreamFilter);
+          return handleListPrompts(config, options.secrets, runtime, upstreamFilter, clientAuthorizationHeader);
+        }) as Promise<any>;
+      });
+      server.setRequestHandler("tools/call", async (request, context) => {
+        return recordSuccessOrFailure("tools/call", async () => {
+          const { config } = await prepareGatewayRequest(context.http?.req, options.expectedToken, runtime, options.secrets, upstreamFilter);
+          return routeGatewayCall(config, "tools/call", request.params as Record<string, unknown> | undefined, options.secrets, runtime, upstreamFilter, clientAuthorizationHeader) as Promise<any>;
+        });
+      });
+      server.setRequestHandler("resources/read", async (request, context) => {
+        return recordSuccessOrFailure("resources/read", async () => {
+          const { config } = await prepareGatewayRequest(context.http?.req, options.expectedToken, runtime, options.secrets, upstreamFilter);
+          return routeGatewayCall(config, "resources/read", request.params as Record<string, unknown> | undefined, options.secrets, runtime, upstreamFilter, clientAuthorizationHeader) as Promise<any>;
+        });
+      });
+      server.setRequestHandler("prompts/get", async (request, context) => {
+        return recordSuccessOrFailure("prompts/get", async () => {
+          const { config } = await prepareGatewayRequest(context.http?.req, options.expectedToken, runtime, options.secrets, upstreamFilter);
+          return routeGatewayCall(config, "prompts/get", request.params as Record<string, unknown> | undefined, options.secrets, runtime, upstreamFilter, clientAuthorizationHeader) as Promise<any>;
+        });
+      });
+
+      return server;
+    },
+    {
+      legacy: "reject",
+      responseMode: "auto",
+      onerror: (error) => {
+        if (process.env.MCPX_GATEWAY_DEBUG === "1") {
+          console.error(`[mcpx gateway] MCP handler error: ${error.message}`);
+        }
+      }
+    }
+  );
 }
 
 async function maybeHandleWellKnownOAuthRequest(
@@ -1068,13 +1310,47 @@ async function maybeHandleWellKnownOAuthRequest(
   }
 
   for (const [key, value] of Object.entries(upstream.spec.headers ?? {})) {
-    headers[key] = secrets.resolveMaybeSecret(value);
+    // resolveMaybeSecret only understands secret:// refs; for an oauth://
+    // reference it would return the literal string unchanged, forwarding a
+    // nonsensical "Authorization: oauth://<name>" header upstream. Resolve
+    // it to a real bearer token the same way the MCP call path does.
+    if (key.toLowerCase() === "authorization" && isOAuthReference(value)) {
+      try {
+        const accessToken = await getOAuthAccessToken(oauthReferenceServerName(value), upstream.spec, secrets);
+        headers[key] = `Bearer ${accessToken}`;
+      } catch {
+        // No usable token -- omit the header rather than sending the raw
+        // oauth:// marker; the upstream will respond as it would to any
+        // other unauthenticated well-known request.
+      }
+    } else {
+      headers[key] = secrets.resolveMaybeSecret(value);
+    }
   }
 
-  const upstreamResponse = await fetch(upstreamWellKnownUrl, {
-    method: "GET",
-    headers
-  });
+  const timeoutController = new AbortController();
+  const timeoutHandle = setTimeout(() => timeoutController.abort(), DEFAULT_CONNECT_TIMEOUT_MS);
+  let upstreamResponse: Response;
+  try {
+    upstreamResponse = await fetch(upstreamWellKnownUrl, {
+      method: "GET",
+      headers,
+      signal: timeoutController.signal
+    });
+  } catch (error) {
+    const isAbort = (error as { name?: string }).name === "AbortError";
+    response.statusCode = 502;
+    response.setHeader("content-type", "application/json");
+    response.end(JSON.stringify({
+      error: "upstream_unreachable",
+      message: isAbort
+        ? `Well-known request timed out after ${DEFAULT_CONNECT_TIMEOUT_MS}ms.`
+        : (error instanceof Error ? error.message : String(error))
+    }));
+    return true;
+  } finally {
+    clearTimeout(timeoutHandle);
+  }
   let bodyText = await upstreamResponse.text();
   response.statusCode = upstreamResponse.status;
 
@@ -1111,27 +1387,122 @@ async function maybeHandleWellKnownOAuthRequest(
   return true;
 }
 
+const SENSITIVE_HEADER_NAMES = new Set(["authorization", "x-mcpx-local-token"]);
+
+function redactSensitiveHeaders(headers: http.IncomingHttpHeaders): http.IncomingHttpHeaders {
+  const redacted: http.IncomingHttpHeaders = { ...headers };
+  for (const name of Object.keys(redacted)) {
+    if (SENSITIVE_HEADER_NAMES.has(name.toLowerCase())) {
+      redacted[name] = "[redacted]";
+    }
+  }
+  return redacted;
+}
+
 export function createGatewayServer(options: GatewayServerOptions): http.Server {
   const debug = process.env.MCPX_GATEWAY_DEBUG === "1";
   const runtime: GatewayRuntimeState = {
     upstreamConnections: new Map(),
-    upstreamErrors: new Map()
+    upstreamErrors: new Map(),
+    health: {
+      tools_call: { calls: 0, successes: 0, errors: 0 },
+      resources_read: { calls: 0, successes: 0, errors: 0 },
+      prompts_get: { calls: 0, successes: 0, errors: 0 },
+      other: { calls: 0, successes: 0, errors: 0 }
+    },
+    healthWindowStartedAt: Date.now()
+  };
+  const startedAt = Date.now();
+  const mcpHandler = createGatewayMcpHandler(options, runtime);
+  const handleMcpRequest = async (request: http.IncomingMessage, response: http.ServerResponse, requestUrl: URL): Promise<void> => {
+    const webRequest = await toWebRequest(request);
+    const webResponse = await mcpHandler.fetch(webRequest);
+    const body = await webResponse.text();
+    let statusCode = webResponse.status;
+    let authChallenge: string | undefined;
+    try {
+      const payload = JSON.parse(body) as { error?: { data?: { mcpxCode?: string; status?: number; wwwAuthenticate?: string } } };
+      const errorData = payload.error?.data;
+      if (errorData?.mcpxCode === "auth_required" || errorData?.mcpxCode === "auth_expired") {
+        statusCode = errorData.status ?? 401;
+        if (errorData.wwwAuthenticate) {
+          const localResourceMetadataUrl = appendUpstreamQuery(
+            `${getLocalOriginFromRequest(request)}/.well-known/oauth-protected-resource`,
+            getRequestedUpstream(requestUrl)
+          );
+          authChallenge = rewriteWwwAuthenticateResourceMetadata(errorData.wwwAuthenticate, localResourceMetadataUrl);
+        }
+      }
+    } catch {
+      // Non-JSON responses are forwarded unchanged.
+    }
+
+    response.statusCode = statusCode;
+    for (const [name, value] of webResponse.headers) {
+      if (name.toLowerCase() === "content-length") continue;
+      response.setHeader(name, value);
+    }
+    if (authChallenge) {
+      response.setHeader("www-authenticate", authChallenge);
+    }
+    response.end(body);
   };
 
   const server = http.createServer(async (request, response) => {
     let requestUrl = new URL(request.url ?? "/", `http://${request.headers.host ?? "127.0.0.1"}`);
     try {
       requestUrl = new URL(request.url ?? "/", `http://${request.headers.host ?? "127.0.0.1"}`);
-      const upstreamFilter = getRequestedUpstream(requestUrl);
       if (debug) {
         console.error(`[mcpx gateway] ${request.method ?? "?"} ${requestUrl.pathname} auth=${request.headers.authorization ? "yes" : "no"} accept=${request.headers.accept ?? ""}`);
-        console.error(`[mcpx gateway] headers=${JSON.stringify(request.headers)}`);
+        // Redact credential-bearing headers -- MCPX_GATEWAY_DEBUG dumps every
+        // request to the daemon log, which is exactly the file a user attaches
+        // to a bug report. The local gateway token and any passthrough
+        // upstream OAuth token must never land there in cleartext.
+        console.error(`[mcpx gateway] headers=${JSON.stringify(redactSensitiveHeaders(request.headers))}`);
       }
 
       if (await maybeHandleWellKnownOAuthRequest(request, response, requestUrl, options.secrets)) {
         if (debug) {
           console.error(`[mcpx gateway] -> ${response.statusCode} (well-known oauth)`);
         }
+        return;
+      }
+
+      if (requestUrl.pathname === "/health") {
+        if (!authHeaderIsValid(request, options.expectedToken)) {
+          response.statusCode = 401;
+          response.setHeader("content-type", "application/json");
+          response.end(JSON.stringify({ error: "unauthorized" }));
+          return;
+        }
+        response.statusCode = 200;
+        response.setHeader("content-type", "application/json");
+        response.end(JSON.stringify({ ok: true, server: "mcpx", protocolVersion: MCP_V2_PROTOCOL_VERSION }));
+        return;
+      }
+
+      if (requestUrl.pathname === "/internal/token-counts" || requestUrl.pathname === "/internal/token-counts/refresh") {
+        if (request.method !== "POST") {
+          response.statusCode = 405;
+          response.setHeader("allow", "POST");
+          response.end("Method Not Allowed");
+          return;
+        }
+        if (!authHeaderIsValid(request, options.expectedToken)) {
+          response.statusCode = 401;
+          response.setHeader("content-type", "application/json");
+          response.end(JSON.stringify({ error: "unauthorized" }));
+          return;
+        }
+        const config = loadMergedConfig();
+        await reconcileUpstreamConnections(config, options.secrets, runtime);
+        if (requestUrl.pathname.endsWith("/refresh")) {
+          runtime.tokenCache?.clear();
+        }
+        const counts = await getUpstreamTokenCounts(config, options.secrets, runtime);
+        response.statusCode = 200;
+        response.setHeader("content-type", "application/json");
+        response.end(JSON.stringify({ counts }));
         return;
       }
 
@@ -1145,129 +1516,20 @@ export function createGatewayServer(options: GatewayServerOptions): http.Server 
         return;
       }
 
-      if (request.method === "GET") {
-        if (!authHeaderIsValid(request, options.expectedToken)) {
-          response.statusCode = 401;
-          response.setHeader("content-type", "application/json");
-          response.end(JSON.stringify(makeError(null, -32001, "Unauthorized")));
-          if (debug) {
-            console.error(`[mcpx gateway] -> 401 (GET unauthorized)`);
-          }
-          return;
-        }
-
-        response.statusCode = 200;
-        response.setHeader("content-type", "application/json");
-        response.end(JSON.stringify({ ok: true, server: "mcpx" }));
-        if (debug) {
-          console.error(`[mcpx gateway] -> 200 (GET ok)`);
-        }
-        return;
-      }
-
-      if (request.method !== "POST") {
-        response.statusCode = 405;
-        response.end("Method Not Allowed");
-        if (debug) {
-          console.error(`[mcpx gateway] -> 405`);
-        }
-        return;
-      }
-
       if (!authHeaderIsValid(request, options.expectedToken)) {
         response.statusCode = 401;
         response.setHeader("content-type", "application/json");
-        response.end(JSON.stringify(makeError(null, -32001, "Unauthorized")));
+        response.end(JSON.stringify({ error: "unauthorized" }));
         if (debug) {
-          console.error(`[mcpx gateway] -> 401 (POST unauthorized)`);
+          console.error(`[mcpx gateway] -> 401 (MCP unauthorized)`);
         }
         return;
       }
 
-      let body = "";
-      request.setEncoding("utf8");
-
-      for await (const chunk of request) {
-        body += chunk;
-        if (body.length > 10_000_000) {
-          response.statusCode = 413;
-          response.end("Payload Too Large");
-          if (debug) {
-            console.error(`[mcpx gateway] -> 413`);
-          }
-          return;
-        }
-      }
-
-      const parsed = JSON.parse(body) as JsonRpcRequest | JsonRpcRequest[];
-      const hasInitialize = Array.isArray(parsed)
-        ? parsed.some((item) => item.method === "initialize")
-        : parsed.method === "initialize";
-      const responses: JsonRpcResponse[] = [];
-      const clientAuthorizationHeader = getClientAuthorizationForUpstream(request, options.expectedToken);
-
-      if (Array.isArray(parsed)) {
-        for (const item of parsed) {
-          if (debug) {
-            console.error(`[mcpx gateway] rpc method=${item.method} id=${item.id ?? "null"}`);
-          }
-          const rpcResponse = await handleRequestObject(item, options.secrets, runtime, upstreamFilter, clientAuthorizationHeader);
-          if (debug && rpcResponse?.error) {
-            console.error(`[mcpx gateway] rpc error code=${rpcResponse.error.code} message=${rpcResponse.error.message}`);
-          }
-          if (rpcResponse) {
-            responses.push(rpcResponse);
-          }
-        }
-      } else {
-        if (debug) {
-          console.error(`[mcpx gateway] rpc method=${parsed.method} id=${parsed.id ?? "null"}`);
-          if (parsed.method === "initialize") {
-            console.error(`[mcpx gateway] rpc initialize params=${JSON.stringify(parsed.params ?? {})}`);
-          }
-        }
-        const rpcResponse = await handleRequestObject(parsed, options.secrets, runtime, upstreamFilter, clientAuthorizationHeader);
-        if (debug && rpcResponse?.error) {
-          console.error(`[mcpx gateway] rpc error code=${rpcResponse.error.code} message=${rpcResponse.error.message}`);
-        }
-        if (rpcResponse) {
-          responses.push(rpcResponse);
-        }
-      }
-
-      response.statusCode = 200;
-      const acceptsSse = (request.headers.accept ?? "").includes("text/event-stream");
-      if (acceptsSse) {
-        response.setHeader("content-type", "text/event-stream");
-        response.setHeader("cache-control", "no-cache");
-        response.setHeader("connection", "keep-alive");
-      } else {
-        response.setHeader("content-type", "application/json");
-      }
-      if (hasInitialize) {
-        const sessionId = crypto.randomUUID();
-        response.setHeader("mcp-session-id", sessionId);
-        response.setHeader("MCP-Session-Id", sessionId);
-      }
-      if (debug) {
-        console.error(`[mcpx gateway] -> 200 (rpc)`);
-      }
-
-      if (acceptsSse) {
-        const payloads = responses.length > 0 ? responses : [];
-        for (const payload of payloads) {
-          response.write(`event: message\n`);
-          response.write(`data: ${JSON.stringify(payload)}\n\n`);
-        }
-        response.end();
-      } else if (responses.length === 1) {
-        response.end(JSON.stringify(responses[0]));
-      } else {
-        response.end(JSON.stringify(responses));
-      }
+      await handleMcpRequest(request, response, requestUrl);
     } catch (error) {
       if (isAuthChallenge(error)) {
-        response.statusCode = error.status;
+        response.statusCode = error.status ?? 401;
         response.setHeader("content-type", "application/json");
         if (error.wwwAuthenticate) {
           const localResourceMetadataUrl = appendUpstreamQuery(
@@ -1277,9 +1539,9 @@ export function createGatewayServer(options: GatewayServerOptions): http.Server 
           response.setHeader("www-authenticate", rewriteWwwAuthenticateResourceMetadata(error.wwwAuthenticate, localResourceMetadataUrl));
         }
         response.end(JSON.stringify(makeError(null, -32001, "Upstream authentication required.", {
+          mcpxCode: error.code,
           status: error.status,
-          body: error.bodyText,
-          wwwAuthenticate: error.wwwAuthenticate
+          upstream: error.upstream
         })));
         if (debug) {
           console.error(`[mcpx gateway] -> ${error.status} upstream auth challenge`);
@@ -1297,6 +1559,8 @@ export function createGatewayServer(options: GatewayServerOptions): http.Server 
   });
 
   server.on("close", () => {
+    emitGatewayHealthSummary(runtime, startedAt);
+    void mcpHandler.close();
     for (const entry of runtime.upstreamConnections.values()) {
       void closeUpstreamConnection(entry);
     }

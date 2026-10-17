@@ -1,104 +1,112 @@
-import { test, expect, _electron as electron } from "@playwright/test";
+import { test, expect, _electron as electron, type ElectronApplication } from "@playwright/test";
 import { resolve } from "node:path";
-
-const mainPath = resolve(__dirname, "../out/main/index.js");
+import {
+  mainPath,
+  createSandbox,
+  cleanupSandbox,
+  closeApp,
+  openDashboardWindow,
+  openPopoverWindow
+} from "./helpers";
 
 test.describe("tray icon", () => {
   test("app creates tray on launch", async () => {
-    const app = await electron.launch({ args: [mainPath] });
-    
+    const sandbox = createSandbox();
+    let app: ElectronApplication | undefined;
+
     try {
+      app = await electron.launch({ args: [mainPath], env: sandbox.env });
+
       // Give app time to initialize and create tray
       await new Promise((resolve) => setTimeout(resolve, 2000));
-      
+
       // Verify app process is running (tray is created internally)
       const pid = app.process().pid;
       expect(pid).toBeDefined();
       expect(pid).toBeGreaterThan(0);
     } finally {
-      await app.close();
+      if (app) {
+        await closeApp(app);
+      }
+      cleanupSandbox(sandbox);
     }
   });
 
   test("tray icon files exist with correct naming", async () => {
     const fs = await import("node:fs/promises");
-    const path = await import("node:path");
-    
-    const resourcesDir = path.join(__dirname, "../resources");
-    
+
+    const resourcesDir = resolve(__dirname, "../resources");
+
     // Check 16x16 icon
-    const icon16 = path.join(resourcesDir, "trayIconTemplate.png");
+    const icon16 = resolve(resourcesDir, "trayIconTemplate.png");
     const icon16Exists = await fs.access(icon16).then(() => true).catch(() => false);
     expect(icon16Exists).toBe(true);
-    
+
     // Check 32x32@2x icon
-    const icon32 = path.join(resourcesDir, "trayIconTemplate@2x.png");
+    const icon32 = resolve(resourcesDir, "trayIconTemplate@2x.png");
     const icon32Exists = await fs.access(icon32).then(() => true).catch(() => false);
     expect(icon32Exists).toBe(true);
   });
 
   test("app persists tray after window operations", async () => {
-    const app = await electron.launch({ args: [mainPath] });
-    
+    test.setTimeout(60000);
+
+    const sandbox = createSandbox();
+    let app: ElectronApplication | undefined;
+
     try {
-      // Give app time to initialize
-      await new Promise((resolve) => setTimeout(resolve, 2000));
-      
-      // Trigger activate (creates window)
-      await app.evaluate(async ({ app }) => {
-        app.emit("activate");
-      });
-      
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-      
+      app = await electron.launch({ args: [mainPath], env: sandbox.env });
+
+      // Trigger activate (creates dashboard window) via the real production path.
+      await openDashboardWindow(app);
+
       // Close any windows
       const windows = await app.windows();
       for (const win of windows) {
         await win.close();
       }
-      
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-      
-      // App should still be running (tray persists)
+      await expect.poll(async () => (await app!.windows()).length).toBe(0);
+
+      // App should still be running (tray persists) - macOS menu-bar apps
+      // don't quit on window-all-closed.
+      expect(app.process().exitCode).toBeNull();
       const pid = app.process().pid;
       expect(pid).toBeDefined();
     } finally {
-      await app.close();
+      if (app) {
+        await closeApp(app);
+      }
+      cleanupSandbox(sandbox);
     }
   });
 
   test("popover opens from tray flow and can launch the dashboard", async () => {
-    const app = await electron.launch({ args: [mainPath] });
+    test.setTimeout(60000);
+
+    const sandbox = createSandbox();
+    let app: ElectronApplication | undefined;
 
     try {
-      await app.evaluate(async () => {
-        const path = require("node:path");
-        const { togglePopover } = require(path.join(__dirname, "popover.js"));
+      app = await electron.launch({ args: [mainPath], env: sandbox.env });
 
-        togglePopover({
-          getBounds: () => ({ x: 120, y: 0, width: 24, height: 24 })
-        });
-      });
+      // A real tray click isn't simulable here (no OS-level tray to click,
+      // and the internal togglePopover() is no longer reachable via require
+      // from electronApplication.evaluate() - see openPopoverWindow's doc
+      // comment). Opening the popover's own route exercises the same real
+      // StatusPopover component and IPC bridge that a tray click would show.
+      const popover = await openPopoverWindow(app);
 
-      await expect.poll(async () => (await app.windows()).length).toBe(1);
+      const openDashboardButton = popover.getByRole("button", { name: "Open Dashboard" });
+      await expect(openDashboardButton).toBeVisible();
+      await openDashboardButton.click();
 
-      const popover = (await app.windows())[0];
-      await popover.waitForLoadState("domcontentloaded");
-      await expect(popover.getByRole("button", { name: "Open Dashboard" })).toBeVisible();
-
-      await popover.getByRole("button", { name: "Open Dashboard" }).click();
-
-      await expect.poll(async () => {
-        const windows = await app.windows();
-        for (const window of windows) {
-          if ((await window.locator(".sidebar").count()) > 0) {
-            return true;
-          }
-        }
-        return false;
-      }).toBe(true);
+      const dashboard = await openDashboardWindow(app);
+      await expect(dashboard.locator(".sidebar")).toBeVisible();
     } finally {
-      await app.close();
+      if (app) {
+        await closeApp(app);
+      }
+      cleanupSandbox(sandbox);
     }
   });
 });

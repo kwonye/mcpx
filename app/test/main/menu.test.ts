@@ -33,19 +33,19 @@ describe("application menu", () => {
     expect(template[0].label).toMatch(/mcpx/);
   });
 
-  it("routes Cmd+Q and Cmd+W through app-control", async () => {
+  it("routes Cmd+Q through app-control and Cmd+W via native close", async () => {
     const { buildApplicationMenu } = await import("../../src/main/menu");
 
     buildApplicationMenu();
 
     const template = buildFromTemplate.mock.calls[0][0];
     const quitItem = template[0].submenu.find((item: { accelerator?: string }) => item.accelerator === "CommandOrControl+Q");
-    const closeItem = template[3].submenu.find((item: { accelerator?: string }) => item.accelerator === "CommandOrControl+W");
+    const closeItem = template[3].submenu.find((item: { role?: string }) => item.role === "close");
 
     quitItem.click();
-    closeItem.click();
 
     expect(quitApp).toHaveBeenCalledTimes(1);
-    expect(hideDashboard).toHaveBeenCalledTimes(1);
+    expect(closeItem).toBeDefined();
+    expect(hideDashboard).not.toHaveBeenCalled();
   });
 });

@@ -1,4 +1,6 @@
-export type ClientId = "claude" | "claude-desktop" | "codex" | "cursor" | "cline" | "opencode" | "kiro" | "vscode" | "qwen";
+export type ClientId = "claude" | "claude-desktop" | "codex" | "cursor" | "cline" | "opencode" | "kiro" | "vscode" | "qwen" | "openclaw" | "hermes";
+
+export type PluginComponent = "mcpServers" | "skills" | "hooks" | "agents" | "commands";
 
 export interface HttpServerSpec {
   transport: "http";
@@ -51,6 +53,8 @@ export interface McpxConfig {
   servers: Record<string, UpstreamServerSpec>;
   clients: Partial<Record<ClientId, ClientSyncState>>;
   projects?: Record<string, ProjectConfig>;
+  plugins?: Record<string, ManagedPlugin>;
+  marketplaces?: Record<string, ManagedMarketplace>;
 }
 
 export interface ManagedEntry {
@@ -132,11 +136,38 @@ export interface SyncResult {
   status: ClientStatus;
   configPath?: string;
   message?: string;
+  driftedEntries?: string[];
 }
 
 export interface Skill {
-  id: string; // The filename without .md
+  id: string;
   content: string;
+  /** Canonical directory containing SKILL.md and optional resources. */
+  root?: string;
+  source?: "authored" | "installed";
+  readOnly?: boolean;
+}
+
+export interface PluginSyncInput {
+  pluginId: string;
+  pluginName: string;
+  pluginRoot: string;
+  components: Record<PluginComponent, boolean>;
+  approvals: Partial<Record<PluginComponent, boolean>>;
+  enabled: boolean;
+  serverNames: string[];
+  skills: DiscoveredComponent[];
+  commands: DiscoveredComponent[];
+  agents: DiscoveredComponent[];
+  hooks: DiscoveredComponent[];
+}
+
+export interface PluginSyncResult {
+  clientId: ClientId;
+  status: "SYNCED" | "ERROR" | "SKIPPED";
+  projectedDirs: string[];
+  unsupported: PluginComponent[];
+  error?: string;
 }
 
 export interface ClientAdapter {
@@ -146,6 +177,7 @@ export interface ClientAdapter {
   scanForImports(config: McpxConfig, managedIndex: ManagedIndex): ClientImportScanResult;
   syncGateway(config: McpxConfig, options: SyncClientOptions): SyncResult;
   syncSkills?(skills: Skill[]): void;
+  syncPlugins?(plugins: PluginSyncInput[]): PluginSyncResult;
 }
 
 export interface SyncClientOptions {
@@ -204,4 +236,140 @@ export interface UpstreamTokenCount {
   total: number;
   error?: string;
   runtimeError?: string;
+  errorCode?: string;
+  runtimeErrorCode?: string;
+}
+
+export type PluginSourceType = "github" | "git" | "git-subdir" | "local" | "npm" | "marketplace";
+
+export interface PluginSource {
+  type: PluginSourceType;
+  original: string;
+  ref?: string;
+  resolvedSha?: string;
+  path?: string;
+}
+
+export interface DiscoveredComponent {
+  id: string;
+  type: PluginComponent;
+  path: string;
+  description?: string;
+}
+
+export interface DiscoveredMcpServer {
+  id: string;
+  transport?: "stdio" | "http";
+  command: string;
+  args?: string[];
+  env?: Record<string, string>;
+  cwd?: string;
+  url?: string;
+  oauthResource?: string;
+}
+
+export interface DiscoveredComponents {
+  skills: DiscoveredComponent[];
+  commands: DiscoveredComponent[];
+  agents: DiscoveredComponent[];
+  hooks: DiscoveredComponent[];
+  mcpServers: DiscoveredMcpServer[];
+}
+
+export interface PluginManifest {
+  name: string;
+  version: string;
+  description?: string;
+  source?: string;
+  icon?: string;
+  assets?: string[];
+  entry?: string;
+  author?: { name: string; email?: string; url?: string };
+  homepage?: string;
+  repository?: string;
+  license?: string;
+  keywords?: string[];
+  displayName?: string;
+  category?: string;
+  declaredCapabilities?: string[];
+}
+
+export type MarketplaceFormat = "claude" | "codex";
+export type MarketplaceSourceType = "github" | "git" | "local" | "hosted-json";
+
+export interface ManagedMarketplace {
+  name: string;
+  displayName: string;
+  source: string;
+  sourceType: MarketplaceSourceType;
+  manifestPath?: string;
+  format?: MarketplaceFormat;
+  builtIn: boolean;
+  autoUpdate: boolean;
+  addedAt: string;
+  lastCheckedAt?: string;
+  lastUpdatedAt?: string;
+  resolvedRevision?: string;
+  status: "ready" | "stale" | "error" | "unavailable";
+  error?: string;
+}
+
+export interface MarketplaceListing {
+  id: string;
+  name: string;
+  displayName: string;
+  marketplace: string;
+  description?: string;
+  author?: { name: string; email?: string; url?: string };
+  homepage?: string;
+  version?: string;
+  category?: string;
+  tags: string[];
+  source: unknown;
+  supportedCapabilities: string[];
+  unsupportedCapabilities: string[];
+  compatible: boolean;
+  installed: boolean;
+  authentication?: string;
+}
+
+export interface MarketplacePluginDetail extends MarketplaceListing {
+  manifest: PluginManifest | null;
+  discovered: DiscoveredComponents;
+  resolvedSource?: string;
+  sourceFingerprint?: string;
+}
+
+export interface ManagedPlugin {
+  id: string;
+  name: string;
+  source: string;
+  version: string;
+  ref: string;
+  resolvedSha: string;
+  installedAt: string;
+  root: string;
+  dataDir: string;
+  components: Record<PluginComponent, boolean>;
+  discovered: DiscoveredComponents;
+  enabled: boolean;
+  status: "healthy" | "unhealthy" | "preparing" | "updating" | "error";
+  error?: string;
+  serverNames: string[];
+  projectedClients: string[];
+  config?: Record<string, unknown>;
+  approvals?: Partial<Record<PluginComponent, boolean>>;
+  marketplace?: {
+    name: string;
+    pluginName: string;
+    sourceFingerprint: string;
+  };
+  updateError?: string;
+  pinned?: boolean;
+  previous?: { version: string; resolvedSha: string; root: string };
+  projectOverrides?: Record<string, {
+    enabled?: boolean;
+    components?: Partial<Record<PluginComponent, boolean>>;
+    config?: Record<string, unknown>;
+  }>;
 }

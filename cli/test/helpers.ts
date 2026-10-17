@@ -14,6 +14,7 @@ export function setupTempEnv(prefix: string): TempEnvContext {
     MCPX_CONFIG_HOME: process.env.MCPX_CONFIG_HOME,
     MCPX_DATA_HOME: process.env.MCPX_DATA_HOME,
     MCPX_STATE_HOME: process.env.MCPX_STATE_HOME,
+    MCPX_NO_UPDATE: process.env.MCPX_NO_UPDATE,
     MCPX_SECRET_local_gateway_token: process.env.MCPX_SECRET_local_gateway_token
   };
 
@@ -28,6 +29,7 @@ export function setupTempEnv(prefix: string): TempEnvContext {
     process.env.MCPX_CONFIG_HOME = original.MCPX_CONFIG_HOME;
     process.env.MCPX_DATA_HOME = original.MCPX_DATA_HOME;
     process.env.MCPX_STATE_HOME = original.MCPX_STATE_HOME;
+    process.env.MCPX_NO_UPDATE = original.MCPX_NO_UPDATE;
     process.env.MCPX_SECRET_local_gateway_token = original.MCPX_SECRET_local_gateway_token;
     fs.rmSync(root, { recursive: true, force: true });
   };

@@ -2,10 +2,13 @@ import os from "node:os";
 import { homeDir } from "../core/paths.js";
 import path from "node:path";
 import { z } from "zod";
-import type { ClientAdapter, ManagedIndex, McpxConfig, SyncClientOptions, SyncResult } from "../types.js";
+import type { ClientAdapter, ManagedIndex, McpxConfig, Skill, SyncClientOptions, SyncResult, PluginSyncInput, PluginSyncResult } from "../types.js";
+import { syncPluginsToClient } from "../core/plugin-projections.js";
+import { projectSkillsToDir } from "../core/skill-projections.js";
 import { readJsonFile, writeJsonAtomic } from "../util/fs.js";
 import {
   buildImportSkip,
+  detectManagedEntryDrift,
   emptyImportScan,
   ensureManagedEntryWritable,
   errorResult,
@@ -43,6 +46,14 @@ export class CursorAdapter implements ClientAdapter {
 
   supportsHttp(): boolean {
     return true;
+  }
+
+  syncPlugins(plugins: PluginSyncInput[]): PluginSyncResult {
+    return syncPluginsToClient(this.id, plugins);
+  }
+
+  syncSkills(skills: Skill[]): void {
+    projectSkillsToDir(path.join(homeDir(), ".cursor", "skills"), skills, "dir");
   }
 
   scanForImports(_config: McpxConfig, managedIndex: ManagedIndex) {
@@ -130,6 +141,11 @@ export class CursorAdapter implements ClientAdapter {
         }])
       ) as Record<string, unknown>;
       const enabledManagedNames = enabledEntries.map((entry) => entry.name);
+      
+      const driftedNames = enabledManagedNames.filter((name) =>
+        detectManagedEntryDrift(options.managedIndex, this.id, name, servers[name])
+      );
+      
       for (const name of enabledManagedNames) {
         const conflict = ensureManagedEntryWritable(
           options.managedIndex,
@@ -164,7 +180,7 @@ export class CursorAdapter implements ClientAdapter {
           ])
         )
       );
-      return okResult(this.id, configPath);
+      return { ...okResult(this.id, configPath), driftedEntries: driftedNames.length > 0 ? driftedNames : undefined };
     } catch (error) {
       return errorResult(this.id, configPath, (error as Error).message);
     }

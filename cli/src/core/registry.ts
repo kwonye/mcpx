@@ -23,10 +23,19 @@ export function addServer(config: McpxConfig, name: string, spec: UpstreamServer
 
 export function removeServer(config: McpxConfig, name: string, force = false): void {
   if (!config.servers[name] && !force) {
-    throw new Error(`Server \"${name}\" does not exist.`);
+    throw new Error(`Server "${name}" does not exist.`);
   }
 
   delete config.servers[name];
+
+  // Strip the server name from every project's disabledServers
+  if (config.projects) {
+    for (const project of Object.values(config.projects)) {
+      if (project.disabledServers) {
+        project.disabledServers = project.disabledServers.filter((s) => s !== name);
+      }
+    }
+  }
 }
 
 export function updateServer(config: McpxConfig, name: string, spec: UpstreamServerSpec): void {
@@ -69,22 +78,28 @@ export function ensureGatewayToken(config: McpxConfig, secrets: SecretsManager):
     return envValue;
   }
 
-  // 2. Token file
+  // 2. Token file — single source of truth (no store write)
   try {
     const fileValue = fs.readFileSync(tokenPath, "utf8").trim();
     if (fileValue) {
-      secrets.setSecret(secretName, fileValue);
       return fileValue;
     }
   } catch {
     // File doesn't exist — fall through
   }
 
-  // 3. Generate new token
+  // 3. Migration fallback: if encrypted store has the token, re-create the file
+  const storeValue = secrets.getSecret(secretName);
+  if (storeValue) {
+    ensureParentDir(tokenPath);
+    fs.writeFileSync(tokenPath, storeValue, { mode: 0o600 });
+    return storeValue;
+  }
+
+  // 4. Generate new token — write to file only (never to encrypted store)
   const token = crypto.randomBytes(32).toString("base64url");
   ensureParentDir(tokenPath);
   fs.writeFileSync(tokenPath, token, { mode: 0o600 });
-  secrets.setSecret(secretName, token);
   return token;
 }
 
@@ -95,7 +110,8 @@ export function rotateGatewayToken(config: McpxConfig, secrets: SecretsManager):
 
   ensureParentDir(tokenPath);
   fs.writeFileSync(tokenPath, token, { mode: 0o600 });
-  secrets.setSecret(secretName, token);
+  // Remove the encrypted-store mirror so there's only one source of truth
+  secrets.removeSecret(secretName);
 
   return token;
 }
@@ -126,12 +142,18 @@ export function setProjectServerEnabled(
   projectPath: string,
   serverName: string,
   enabled: boolean
-): void {
+): { effective: boolean; reason?: "globally_disabled" } {
   if (!globalConfig.projects) globalConfig.projects = {};
   const resolvedPath = path.resolve(projectPath);
   const project = globalConfig.projects[resolvedPath];
   if (!project) {
     throw new Error(`Project "${resolvedPath}" is not registered.`);
+  }
+
+  // Validate server exists
+  const serverSpec = globalConfig.servers[serverName];
+  if (!serverSpec) {
+    throw new Error(`Server "${serverName}" does not exist.`);
   }
 
   if (!project.disabledServers) {
@@ -140,14 +162,15 @@ export function setProjectServerEnabled(
 
   if (enabled) {
     project.disabledServers = project.disabledServers.filter((s) => s !== serverName);
-    // Vice-versa rule: if the server is globally disabled, flip it ON too
-    const serverSpec = globalConfig.servers[serverName];
-    if (serverSpec && !isServerEnabled(serverSpec)) {
-      globalConfig.servers[serverName] = { ...serverSpec, enabled: true };
+    // If the server is globally disabled, the project enable is not effective
+    if (!isServerEnabled(serverSpec)) {
+      return { effective: false, reason: "globally_disabled" };
     }
   } else {
     if (!project.disabledServers.includes(serverName)) {
       project.disabledServers.push(serverName);
     }
   }
+
+  return { effective: true };
 }

@@ -3,19 +3,22 @@ import fs from "node:fs";
 import { homeDir } from "../core/paths.js";
 import path from "node:path";
 import { z } from "zod";
-import type { ClientAdapter, ManagedIndex, McpxConfig, SyncClientOptions, SyncResult } from "../types.js";
+import type { ClientAdapter, ManagedIndex, McpxConfig, Skill, SyncClientOptions, SyncResult, PluginSyncInput, PluginSyncResult } from "../types.js";
+import { syncPluginsToClient } from "../core/plugin-projections.js";
+import { projectSkillsToDir } from "../core/skill-projections.js";
 import { readJsonFile, writeJsonAtomic } from "../util/fs.js";
 import {
   buildImportSkip,
+  detectManagedEntryDrift,
   emptyImportScan,
   ensureManagedEntryWritable,
   errorResult,
   isManagedGatewayProjection,
   okResult,
   pruneStaleManagedEntries,
+  purgeManagedFromDisabledArray,
   removeSourceEntries,
-  setManagedEntries,
-  syncDisabledMcpServersArray
+  setManagedEntries
 } from "./utils/index.js";
 
 type JsonObject = Record<string, unknown>;
@@ -63,6 +66,14 @@ export class ClaudeAdapter implements ClientAdapter {
 
   supportsHttp(): boolean {
     return true;
+  }
+
+  syncPlugins(plugins: PluginSyncInput[]): PluginSyncResult {
+    return syncPluginsToClient(this.id, plugins);
+  }
+
+  syncSkills(skills: Skill[]): void {
+    projectSkillsToDir(path.join(homeDir(), ".claude", "skills"), skills, "dir");
   }
 
   scanForImports(_config: McpxConfig, managedIndex: ManagedIndex) {
@@ -158,6 +169,11 @@ export class ClaudeAdapter implements ClientAdapter {
 
       const topLevelServers = ((raw.mcpServers as JsonObject | undefined) ?? {}) as JsonObject;
       removeSourceEntries(topLevelServers, options.sourceEntriesToRemove);
+      
+      const driftedNames = enabledManagedNames.filter((name) =>
+        detectManagedEntryDrift(options.managedIndex, this.id, name, topLevelServers[name])
+      );
+      
       for (const name of enabledManagedNames) {
         const topLevelConflict = ensureManagedEntryWritable(
           options.managedIndex,
@@ -176,7 +192,7 @@ export class ClaudeAdapter implements ClientAdapter {
       }
       raw.mcpServers = topLevelServers;
 
-      syncDisabledMcpServersArray(raw, managedNames, options.managedEntries);
+      purgeManagedFromDisabledArray(raw, managedNames);
 
       // Per-directory scoping: reconcile each Claude project entry against registered
       // mcpx project scopes. Unregistered project entries get their managed disabled
@@ -216,7 +232,7 @@ export class ClaudeAdapter implements ClientAdapter {
         configPath,
         Object.fromEntries(Object.entries(serverEntries).map(([name, entry]) => [name, JSON.stringify(entry)]))
       );
-      return okResult(this.id, configPath);
+      return { ...okResult(this.id, configPath), driftedEntries: driftedNames.length > 0 ? driftedNames : undefined };
     } catch (error) {
       return errorResult(this.id, configPath, (error as Error).message);
     }

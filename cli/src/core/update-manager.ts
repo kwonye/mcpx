@@ -1,8 +1,11 @@
 import fs from "node:fs";
 import path from "node:path";
-import { execSync, spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
+import { promisify } from "node:util";
 import { getUpdatesDir, getUpdateLockPath, ensureDir } from "./paths.js";
 import { checkForUpdates, stageUpdate, clearStagedUpdate, getStagedUpdate, removeOldVersions, compareVersions } from "./update.js";
+
+const execFileAsync = promisify(execFile);
 
 function acquireLock(): boolean {
   const lockPath = getUpdateLockPath();
@@ -54,6 +57,9 @@ async function downloadAndStageUpdate(): Promise<{ success: boolean; version?: s
   }
 
   const targetVersion = updateStatus.latestVersion;
+  if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(targetVersion)) {
+    return { success: false, error: "Update returned an invalid version" };
+  }
   const updatesDir = getUpdatesDir();
   const versionDir = path.join(updatesDir, `v${targetVersion}`);
 
@@ -67,29 +73,26 @@ async function downloadAndStageUpdate(): Promise<{ success: boolean; version?: s
   try {
     ensureDir(versionDir);
 
-    execSync(`npm pack @kwonye/mcpx@${targetVersion} --json`, {
-      cwd: versionDir,
-      stdio: ["pipe", "pipe", "pipe"]
-    });
+    await execFileAsync("npm", ["pack", `@kwonye/mcpx@${targetVersion}`, "--json"], { cwd: versionDir });
 
     const tarballPath = path.join(versionDir, `kwonye-mcpx-${targetVersion}.tgz`);
     if (!fs.existsSync(tarballPath)) {
       throw new Error("Downloaded tarball not found");
     }
 
-    execSync(`tar -xzf ${tarballPath} --strip-components=1`, {
-      cwd: versionDir,
-      stdio: ["pipe", "pipe", "pipe"]
-    });
+    await execFileAsync("tar", ["-xzf", tarballPath, "--strip-components=1"], { cwd: versionDir });
 
-    execSync("npm install --production --ignore-scripts", {
-      cwd: versionDir,
-      stdio: ["pipe", "pipe", "pipe"]
-    });
+    await execFileAsync("npm", ["install", "--production", "--ignore-scripts"], { cwd: versionDir });
 
     const cliPath = path.join(versionDir, "dist", "cli.js");
     if (!fs.existsSync(cliPath)) {
       throw new Error("CLI entry point not found in downloaded package");
+    }
+
+    try {
+      await execFileAsync(process.execPath, [cliPath, "--version"], { timeout: 10_000 });
+    } catch (smokeTestError) {
+      throw new Error(`Downloaded CLI failed smoke test (--version): ${smokeTestError instanceof Error ? smokeTestError.message : String(smokeTestError)}`);
     }
 
     stageUpdate(targetVersion, cliPath);
@@ -111,6 +114,9 @@ async function downloadAndStageUpdate(): Promise<{ success: boolean; version?: s
 }
 
 export function startBackgroundUpdateCheck(): void {
+  if (process.env.MCPX_NO_UPDATE === "1") {
+    return;
+  }
   if (isUpdateInProgress()) {
     return;
   }
@@ -134,9 +140,10 @@ export function startBackgroundUpdateCheck(): void {
 
   child.unref();
 
-  setTimeout(() => {
+  const releaseTimer = setTimeout(() => {
     releaseLock();
   }, 60000);
+  releaseTimer.unref?.();
 }
 
 export async function runBackgroundUpdate(): Promise<void> {
@@ -159,24 +166,30 @@ export async function performUpdate(): Promise<{ success: boolean; message: stri
   if (isUpdateInProgress()) {
     return { success: false, message: "Another update is already in progress." };
   }
+  if (!acquireLock()) {
+    return { success: false, message: "Another update is already in progress." };
+  }
+  try {
+    const result = await downloadAndStageUpdate();
 
-  const result = await downloadAndStageUpdate();
+    if (result.success && result.version) {
+      return {
+        success: true,
+        message: `Update to v${result.version} ready! Will activate on next run.`
+      };
+    }
 
-  if (result.success && result.version) {
+    if (result.error === "No update available") {
+      return { success: true, message: "Already on latest version." };
+    }
+
     return {
-      success: true,
-      message: `Update to v${result.version} ready! Will activate on next run.`
+      success: false,
+      message: result.error ?? "Update failed"
     };
+  } finally {
+    releaseLock();
   }
-
-  if (result.error === "No update available") {
-    return { success: true, message: "Already on latest version." };
-  }
-
-  return {
-    success: false,
-    message: result.error ?? "Update failed"
-  };
 }
 
 export function performRollback(): { success: boolean; message: string } {
