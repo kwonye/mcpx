@@ -360,8 +360,13 @@ flowchart TB
         Others["Other harnesses"]
     end
 
-    Claude & Codex & Others -->|"MCP over HTTP"| Gateway
-    Claude & Codex & Others -->|"MCP over stdio"| Proxy
+    Claude & Codex & Others --> HTTP["MCP over HTTP"]
+    Claude & Codex & Others --> Stdio["MCP over stdio"]
+    Claude & Codex & Others -.-> Native["Native configuration,<br/>skills and plugins"]
+
+    HTTP --> Gateway
+    Stdio --> Proxy
+    Native -.-> Adapters
 
     subgraph MCPX["mcpx · Local service"]
         Proxy["Stdio proxy"] --> Gateway["Authenticated MCP gateway"]
@@ -379,14 +384,14 @@ flowchart TB
         Control --> Lifecycle["Daemon lifecycle"]
     end
 
-    Claude & Codex & Others -.->|"Native configuration,<br/>skills and plugins"| Adapters
-
     Runtime --> Local["Local MCP processes"]
     Runtime --> Remote["Remote MCP servers"]
 
     GUI["Desktop GUI"] --> Control
     TUI["CLI / TUI"] --> Control
 ```
+
+Claude Desktop uses the stdio proxy to reach the local mcpx gateway. Its [remote HTTP connectors](https://support.claude.com/en/articles/11175166-get-started-with-custom-connectors-using-remote-mcp) connect from Anthropic's cloud and require a publicly reachable server; they cannot connect directly to mcpx on localhost.
 
 ## Notes
 
