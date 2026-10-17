@@ -350,6 +350,44 @@ This is a monorepo containing:
 
 The desktop app imports the CLI's core logic directly via a `@mcpx/core` TypeScript alias, so both packages share identical configuration parsing, sync logic, and secret management.
 
+The target architecture consolidates MCP traffic and harness-native skills and plugins through one local service:
+
+```mermaid
+flowchart TB
+    subgraph Harnesses["Coding harnesses"]
+        Claude["Claude Code"]
+        Codex["Codex"]
+        Others["Other harnesses"]
+    end
+
+    Claude & Codex & Others -->|"MCP over HTTP"| Gateway
+    Claude & Codex & Others -->|"MCP over stdio"| Proxy
+
+    subgraph MCPX["mcpx · Local service"]
+        Proxy["Stdio proxy"] --> Gateway["Authenticated MCP gateway"]
+
+        Gateway --> Router["Routing and access policy"]
+        Router --> Runtime["Upstream runtime"]
+        Runtime --> Secrets["Encrypted credentials"]
+
+        Adapters["Harness adapters"] --> Sync["Sync and ownership engine"]
+        Sync --> Catalog["MCP · Skill · Plugin catalog"]
+        Sync --> Recovery["Operation journal and recovery"]
+
+        Control["Management API"] --> Catalog
+        Control --> Sync
+        Control --> Lifecycle["Daemon lifecycle"]
+    end
+
+    Claude & Codex & Others -.->|"Native configuration,<br/>skills and plugins"| Adapters
+
+    Runtime --> Local["Local MCP processes"]
+    Runtime --> Remote["Remote MCP servers"]
+
+    GUI["Desktop GUI"] --> Control
+    TUI["CLI / TUI"] --> Control
+```
+
 ## Notes
 
 - Client connectivity is HTTP-first; upstreams can be HTTP or stdio
