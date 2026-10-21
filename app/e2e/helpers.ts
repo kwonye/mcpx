@@ -17,6 +17,7 @@ export const preloadPath = resolve(__dirname, "../out/preload/index.js");
 
 export interface Sandbox {
   env: NodeJS.ProcessEnv;
+  launchArgs: string[];
   stateHome: string;
   dirs: string[];
 }
@@ -34,12 +35,14 @@ export function createSandbox(): Sandbox {
   const stateHome = mkdtempSync(join(tmpdir(), "mcpx-e2e-state-"));
 
   return {
+    launchArgs: [`--user-data-dir=${join(home, "electron-data")}`],
     env: {
       ...process.env,
       HOME: home,
       MCPX_CONFIG_HOME: configHome,
       MCPX_DATA_HOME: dataHome,
       MCPX_STATE_HOME: stateHome,
+      MCPX_TELEMETRY_DISABLED: "1",
       MCPX_NO_UPDATE: "1"
     },
     stateHome,

@@ -7,7 +7,7 @@ test.describe("app launch", () => {
     let app: ElectronApplication | undefined;
 
     try {
-      app = await electron.launch({ args: [mainPath], env: sandbox.env });
+      app = await electron.launch({ args: [...sandbox.launchArgs, mainPath], env: sandbox.env });
 
       // The app should have at least one window (even if hidden)
       // or the tray should be created. We verify the app process is running.
@@ -30,7 +30,7 @@ test.describe("app launch", () => {
     try {
       for (let i = 0; i < launchAttempts; i++) {
         // Launch the app
-        const app = await electron.launch({ args: [mainPath], env: sandbox.env });
+        const app = await electron.launch({ args: [...sandbox.launchArgs, mainPath], env: sandbox.env });
 
         try {
           // Verify the app process is running
@@ -57,7 +57,7 @@ test.describe("dashboard window", () => {
     let app: ElectronApplication | undefined;
 
     try {
-      app = await electron.launch({ args: [mainPath], env: sandbox.env });
+      app = await electron.launch({ args: [...sandbox.launchArgs, mainPath], env: sandbox.env });
       const window = await openDashboardWindow(app);
 
       // Verify the root element exists

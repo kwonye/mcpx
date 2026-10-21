@@ -26,9 +26,9 @@ test("adds a local marketplace, discovers a plugin, and installs it", async () =
     writeJson(join(marketplace, "plugins", "reviewer", ".claude-plugin", "plugin.json"), { name: "reviewer", version: "1.0.0" });
     writeFileSync(join(marketplace, "plugins", "reviewer", "skills", "review", "SKILL.md"), "---\ndescription: Review code\n---\nReview this change.");
 
-    app = await electron.launch({ args: [mainPath], env: sandbox.env });
+    app = await electron.launch({ args: [...sandbox.launchArgs, mainPath], env: sandbox.env });
     const window = await openDashboardWindow(app);
-    await window.getByRole("button", { name: "Plugins" }).click();
+    await window.getByRole("button", { name: "Library" }).click();
     await window.getByRole("tab", { name: "Marketplaces" }).click();
     await window.getByPlaceholder(/GitHub owner\/repo/).fill(marketplace);
     await window.getByRole("button", { name: "Add marketplace" }).click();

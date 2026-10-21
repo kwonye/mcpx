@@ -9,7 +9,7 @@ test.describe("window-all-closed", () => {
     let app: ElectronApplication | undefined;
 
     try {
-      app = await electron.launch({ args: [mainPath], env: sandbox.env });
+      app = await electron.launch({ args: [...sandbox.launchArgs, mainPath], env: sandbox.env });
 
       const pid = app.process().pid;
       expect(pid).toBeDefined();
@@ -42,7 +42,7 @@ test.describe("activate", () => {
     let app: ElectronApplication | undefined;
 
     try {
-      app = await electron.launch({ args: [mainPath], env: sandbox.env });
+      app = await electron.launch({ args: [...sandbox.launchArgs, mainPath], env: sandbox.env });
 
       // Initially no windows (menu bar app).
       expect((await app.windows()).length).toBe(0);
@@ -75,7 +75,7 @@ test.describe("before-quit", () => {
     let app: ElectronApplication | undefined;
 
     try {
-      app = await electron.launch({ args: [mainPath], env: sandbox.env });
+      app = await electron.launch({ args: [...sandbox.launchArgs, mainPath], env: sandbox.env });
 
       const pid = app.process().pid;
       expect(pid).toBeDefined();

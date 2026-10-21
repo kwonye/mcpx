@@ -15,7 +15,7 @@ test.describe("tray icon", () => {
     let app: ElectronApplication | undefined;
 
     try {
-      app = await electron.launch({ args: [mainPath], env: sandbox.env });
+      app = await electron.launch({ args: [...sandbox.launchArgs, mainPath], env: sandbox.env });
 
       // Give app time to initialize and create tray
       await new Promise((resolve) => setTimeout(resolve, 2000));
@@ -55,7 +55,7 @@ test.describe("tray icon", () => {
     let app: ElectronApplication | undefined;
 
     try {
-      app = await electron.launch({ args: [mainPath], env: sandbox.env });
+      app = await electron.launch({ args: [...sandbox.launchArgs, mainPath], env: sandbox.env });
 
       // Trigger activate (creates dashboard window) via the real production path.
       await openDashboardWindow(app);
@@ -87,7 +87,7 @@ test.describe("tray icon", () => {
     let app: ElectronApplication | undefined;
 
     try {
-      app = await electron.launch({ args: [mainPath], env: sandbox.env });
+      app = await electron.launch({ args: [...sandbox.launchArgs, mainPath], env: sandbox.env });
 
       // A real tray click isn't simulable here (no OS-level tray to click,
       // and the internal togglePopover() is no longer reachable via require

@@ -9,7 +9,7 @@ test.describe("UI polish", () => {
     let app: ElectronApplication | undefined;
 
     try {
-      app = await electron.launch({ args: [mainPath], env: sandbox.env });
+      app = await electron.launch({ args: [...sandbox.launchArgs, mainPath], env: sandbox.env });
       await openDashboardWindow(app);
 
       expect(await app.windows()).toHaveLength(1);
@@ -34,7 +34,7 @@ test.describe("UI polish", () => {
     let app: ElectronApplication | undefined;
 
     try {
-      app = await electron.launch({ args: [mainPath], env: sandbox.env });
+      app = await electron.launch({ args: [...sandbox.launchArgs, mainPath], env: sandbox.env });
       const window = await openDashboardWindow(app);
 
       const bgColor = await window.evaluate(() => {
@@ -57,7 +57,7 @@ test.describe("UI polish", () => {
     let app: ElectronApplication | undefined;
 
     try {
-      app = await electron.launch({ args: [mainPath], env: sandbox.env });
+      app = await electron.launch({ args: [...sandbox.launchArgs, mainPath], env: sandbox.env });
       const window = await openDashboardWindow(app);
 
       const sidebar = await window.locator(".sidebar").count();
@@ -80,7 +80,7 @@ test.describe("UI polish", () => {
     let app: ElectronApplication | undefined;
 
     try {
-      app = await electron.launch({ args: [mainPath], env: sandbox.env });
+      app = await electron.launch({ args: [...sandbox.launchArgs, mainPath], env: sandbox.env });
       const window = await openDashboardWindow(app);
 
       const navButtons = await window.locator(".nav-button").count();
@@ -100,7 +100,7 @@ test.describe("UI polish", () => {
     let app: ElectronApplication | undefined;
 
     try {
-      app = await electron.launch({ args: [mainPath], env: sandbox.env });
+      app = await electron.launch({ args: [...sandbox.launchArgs, mainPath], env: sandbox.env });
       const window = await openDashboardWindow(app);
 
       const sidebarLogoBox = await window.locator(".sidebar-logo").boundingBox();

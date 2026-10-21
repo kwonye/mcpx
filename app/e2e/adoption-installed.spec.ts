@@ -15,7 +15,7 @@ test("installed app adopts native integrations, serves MCP, and undoes the cutov
   fs.writeFileSync(path.join(skillPath, "SKILL.md"), "---\nname: review\ndescription: Review a change carefully\n---\n# Review");
   fs.writeFileSync(path.join(skillPath, "references/guide.md"), "Keep this supporting file.");
   fs.writeFileSync(nativePath, JSON.stringify({ mcpServers: { echo: { command: process.execPath, args: [path.resolve(__dirname, "../../cli/test/fixtures/mock-stdio-mcp-server.cjs")], env: { API_KEY: "fixture-private-value" } } }, unrelated: "keep" }));
-  const app = await electron.launch({ executablePath, args: ["--dev", `--user-data-dir=${path.join(home, "electron-data")}`], env: { ...sandbox.env, MCPX_TELEMETRY_DISABLED: "1", MCPX_NO_UPDATE: "1" } });
+  const app = await electron.launch({ executablePath, args: ["--dev", ...sandbox.launchArgs], env: sandbox.env });
   try {
     const window = await openDashboardWindow(app);
     await window.getByRole("button", { name: /Overview$/ }).click();

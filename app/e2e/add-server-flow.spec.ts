@@ -7,6 +7,7 @@ const mainPath = resolve(__dirname, "../out/main/index.js");
 
 interface Sandbox {
   env: NodeJS.ProcessEnv;
+  launchArgs: string[];
   stateHome: string;
   dirs: string[];
 }
@@ -23,12 +24,14 @@ function createSandbox(): Sandbox {
   const stateHome = mkdtempSync(join(tmpdir(), "mcpx-e2e-state-"));
 
   return {
+    launchArgs: [`--user-data-dir=${join(home, "electron-data")}`],
     env: {
       ...process.env,
       HOME: home,
       MCPX_CONFIG_HOME: configHome,
       MCPX_DATA_HOME: dataHome,
       MCPX_STATE_HOME: stateHome,
+      MCPX_TELEMETRY_DISABLED: "1",
       MCPX_NO_UPDATE: "1"
     },
     stateHome,
@@ -150,9 +153,10 @@ test.describe("add server flow", () => {
     let app: ElectronApplication | undefined;
 
     try {
-      app = await electron.launch({ args: [mainPath], env: sandbox.env });
+      app = await electron.launch({ args: [...sandbox.launchArgs, mainPath], env: sandbox.env });
       const window = await openDashboardWindow(app);
 
+      await window.getByRole("button", { name: "My Servers" }).click();
       await window.locator("#cli-command").fill("add e2etest -- echo hi");
       await window.locator(".cli-command-form button[type=\"submit\"]").click();
 
@@ -174,9 +178,10 @@ test.describe("add server flow", () => {
     let app: ElectronApplication | undefined;
 
     try {
-      app = await electron.launch({ args: [mainPath], env: sandbox.env });
+      app = await electron.launch({ args: [...sandbox.launchArgs, mainPath], env: sandbox.env });
       const window = await openDashboardWindow(app);
 
+      await window.getByRole("button", { name: "My Servers" }).click();
       await window.locator("#cli-command").fill("definitely not valid");
       await window.locator(".cli-command-form button[type=\"submit\"]").click();
 
