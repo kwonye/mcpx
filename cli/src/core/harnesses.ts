@@ -18,6 +18,7 @@ export interface HarnessInstallation {
   transports: string[];
   components: string[];
   reload: string;
+  sync?: McpxConfig["clients"][string];
 }
 
 export function installationAdapters(config: McpxConfig): Array<{ installation: HarnessInstallation; adapter: ClientAdapter }> {
@@ -43,4 +44,17 @@ export function installationAdapters(config: McpxConfig): Array<{ installation: 
   }
   return result;
 }
-export function listHarnesses(config: McpxConfig): HarnessInstallation[] { return installationAdapters(config).map(item => item.installation); }
+export function listHarnesses(config: McpxConfig): HarnessInstallation[] {
+  return installationAdapters(config).map(({ installation }) => ({ ...installation, sync: config.clients[installation.id] }));
+}
+
+/** The same target selection applies to previews and every sync entry point. */
+export function synchronizationTargets(config: McpxConfig, targets?: string[]): string[] {
+  const installations = listHarnesses(config);
+  if (targets !== undefined) {
+    const unknown = targets.filter(id => !installations.some(installation => installation.id === id));
+    if (unknown.length) throw new Error(`Unknown harness installation: ${unknown.join(", ")}`);
+    return [...new Set(targets)];
+  }
+  return installations.filter(installation => installation.detected || config.harnesses?.[installation.id]).map(installation => installation.id);
+}

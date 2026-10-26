@@ -33,7 +33,14 @@ const requestSchema = z.object({ version: z.literal(1), method: z.string(), args
 let queue: Promise<unknown> = Promise.resolve();
 let activeWriters = 0;
 export function coordinate<T>(work: () => Promise<T>): Promise<T> {
-  const execute = async () => { activeWriters++; try { const result = await work(); compileRuntimeSnapshot(); return result; } finally { activeWriters--; } };
+  const execute = async () => {
+    activeWriters++;
+    try { return await work(); }
+    finally {
+      try { compileRuntimeSnapshot(); }
+      finally { activeWriters--; }
+    }
+  };
   const next = queue.then(execute, execute);
   queue = next.catch(() => undefined);
   return next;
@@ -100,7 +107,16 @@ export async function startControlServer(): Promise<() => Promise<void>> {
         if (input.method === "adoption.plan") return work();
         const operation: Operation = { id: crypto.randomUUID(), label: input.method, phase: "applying", progress: 0, startedAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
         saveOperation(operation);
-        try { const result = await work(); operation.phase = result && typeof result === "object" && "hasErrors" in result && result.hasErrors ? "failed" : "complete"; operation.progress = 1; saveOperation(operation); return result; }
+        try {
+          const result = await work();
+          const outcome = z.object({ hasErrors: z.boolean().optional(), sync: z.object({ hasErrors: z.boolean() }).optional() }).safeParse(result);
+          const failed = outcome.success && (outcome.data.hasErrors || outcome.data.sync?.hasErrors);
+          operation.phase = failed ? "failed" : "complete";
+          operation.progress = 1;
+          if (failed) operation.message = "The integration was saved, but synchronization needs attention. Review the affected harness diagnostics and retry sync.";
+          saveOperation(operation);
+          return result;
+        }
         catch (error) { operation.phase = "failed"; operation.message = "Operation failed. Review the affected integration and retry."; saveOperation(operation); throw error; }
       });
       response.writeHead(200, { "content-type": "application/json" });

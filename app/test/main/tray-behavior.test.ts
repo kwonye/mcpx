@@ -71,7 +71,7 @@ describe("tray click behavior", () => {
     tray.handlers["right-click"]();
     expect(hidePopoverMock).toHaveBeenCalledTimes(1);
     expect(tray.popUpContextMenu).toHaveBeenCalledTimes(1);
-    expect(createFromPathMock).toHaveBeenCalledWith(expect.stringContaining("trayIconTemplate-"));
+    expect(createFromPathMock).toHaveBeenCalledWith(expect.stringContaining(process.platform === "darwin" ? "trayIconTemplate-" : "linux/tray-icon.png"));
 
     const menu = tray.popUpContextMenu.mock.calls[0][0] as { template: Array<{ label: string; click?: () => void }> };
     menu.template.find((item) => item.label === "Quit")?.click?.();

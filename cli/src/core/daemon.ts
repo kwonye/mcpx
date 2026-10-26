@@ -10,7 +10,7 @@ import { loadConfig } from "./config.js";
 import { mutateConfig } from "./config-store.js";
 import { lockOwnerAlive } from "./file-state.js";
 import { controlRequest, startControlServer } from "./control.js";
-import { syncAllClients, persistSyncState } from "./sync.js";
+import { synchronizeClients } from "./sync.js";
 import { startBackgroundUpdateCheck } from "./update-manager.js";
 import { withManagedIndexLock } from "./managed-index-lock.js";
 import { getManagedIndexPath } from "./paths.js";
@@ -247,8 +247,7 @@ async function startDaemonWithLease(config: McpxConfig, cliPath: string, secrets
     const fresh = loadConfig();
     const targets = Object.keys(fresh.clients);
     if (targets.length) {
-      const summary = syncAllClients(fresh, secrets, { targetClients: targets });
-      await mutateConfig(latest => persistSyncState(summary, latest));
+      await synchronizeClients({ targetClients: targets }, secrets);
     }
   }
 

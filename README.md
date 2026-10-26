@@ -164,6 +164,12 @@ mcpx add next-devtools npx next-devtools-mcp@latest
 
 `mcpx add` and `mcpx remove` auto-sync by default. Run `mcpx sync` when you want a manual re-sync or to target specific clients.
 
+Sync defaults to detected harnesses and installations explicitly enrolled in mcpx.
+Use `mcpx sync <client>` to configure a specific installation. Observe-only
+installations are left untouched, including when explicitly targeted.
+CLI, desktop, plugin operations, and OAuth completion use the same locked sync
+transaction. See [architecture](docs/architecture.md) for ownership and credential boundaries.
+
 #### Client-native compatibility shims
 
 ```bash

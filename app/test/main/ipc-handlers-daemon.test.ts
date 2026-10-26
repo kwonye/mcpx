@@ -217,7 +217,7 @@ describe("ipc-handlers.ts - daemon + settings + misc group", () => {
       startDaemon: startDaemonMock,
       stopDaemon: stopDaemonMock,
       restartDaemon: restartDaemonMock,
-      syncAllClients: vi.fn(),
+      synchronizeClients: vi.fn(),
       persistSyncState: vi.fn(),
       addServer: vi.fn(),
       removeServer: vi.fn(),

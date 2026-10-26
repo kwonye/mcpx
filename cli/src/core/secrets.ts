@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { z } from "zod";
 import { withManagedIndexLock } from "./managed-index-lock.js";
 import fs from "node:fs";
 import { getSecretsStorePath, getSecretsKeyPath, ensureParentDir } from "./paths.js";
@@ -18,6 +19,7 @@ interface EncryptedEnvelope {
 interface SecretsData {
   secrets: Record<string, string>;
 }
+const secretsDataSchema = z.object({ secrets: z.record(z.string(), z.string()) });
 
 function loadKey(keyPath: string): Buffer {
   try {
@@ -46,14 +48,15 @@ function readSecretsData(storePath: string, keyPath: string): SecretsData | null
   if (!envelope || envelope.version !== 1 || envelope.algorithm !== ALGORITHM) return null;
 
   try {
-    const key = loadKey(keyPath);
+    // Reading an existing vault must never generate a replacement encryption key.
+    const key = Buffer.from(fs.readFileSync(keyPath, "utf8").trim(), "base64");
     const iv = Buffer.from(envelope.iv, "base64");
     const authTag = Buffer.from(envelope.authTag, "base64");
     const ciphertext = Buffer.from(envelope.ciphertext, "base64");
     const decipher = crypto.createDecipheriv(ALGORITHM, key, iv);
     decipher.setAuthTag(authTag);
     const decrypted = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
-    return JSON.parse(decrypted.toString("utf8"));
+    return secretsDataSchema.parse(JSON.parse(decrypted.toString("utf8")));
   } catch {
     return null;
   }
@@ -94,14 +97,12 @@ export class SecretsManager {
     return data?.secrets ?? null;
   }
 
-  private recoverCorruptStore(): void {
-    try {
-      if (fs.existsSync(this.storePath)) {
-        fs.renameSync(this.storePath, `${this.storePath}.corrupt-${Date.now()}`);
-      }
-    } catch {
-      // best effort
+  private writableStore(): Record<string, string> {
+    const map = this.readStore();
+    if (map === null && fs.existsSync(this.storePath)) {
+      throw new Error("The encrypted credentials store could not be read. Restore its original key or backup before changing credentials. Existing files have been preserved.");
     }
+    return map ?? {};
   }
 
   listSecretNames(): string[] {
@@ -110,31 +111,20 @@ export class SecretsManager {
 
   setSecret(name: string, value: string): void {
     return withManagedIndexLock(`${this.storePath}.lock`, () => {
-    let map = this.readStore();
-    if (map === null) {
-      // readStore() returns null both when the store simply doesn't exist yet
-      // (normal on first run) and when it exists but failed to decrypt (a
-      // corrupt file, or the encryption key was lost/regenerated) -- only the
-      // latter is destructive enough to warn about: every stored secret
-      // (API keys, OAuth tokens) is about to become unrecoverable.
-      if (fs.existsSync(this.storePath)) {
-        console.error(`[mcpx] Warning: the secrets store at ${this.storePath} could not be read (corrupt, or its encryption key changed) and is being reset. All previously stored secrets will need to be re-entered.`);
-      }
-      this.recoverCorruptStore();
-      map = {};
-    }
-    map[name] = value;
-    const envelope = buildEnvelope(this.keyPath, { secrets: map });
-    writeJsonAtomic(this.storePath, envelope);
+      const map = this.writableStore();
+      map[name] = value;
+      const envelope = buildEnvelope(this.keyPath, { secrets: map });
+      writeJsonAtomic(this.storePath, envelope);
     });
   }
 
   removeSecret(name: string): void {
     return withManagedIndexLock(`${this.storePath}.lock`, () => {
-    const map = this.readStore() ?? {};
-    delete map[name];
-    const envelope = buildEnvelope(this.keyPath, { secrets: map });
-    writeJsonAtomic(this.storePath, envelope);
+      const map = this.writableStore();
+      if (!(name in map)) return;
+      delete map[name];
+      const envelope = buildEnvelope(this.keyPath, { secrets: map });
+      writeJsonAtomic(this.storePath, envelope);
     });
   }
 

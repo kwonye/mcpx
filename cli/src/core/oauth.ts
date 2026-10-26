@@ -19,7 +19,7 @@ import type { HttpServerSpec, McpxConfig, UpstreamServerSpec } from "../types.js
 import { loadConfig } from "./config.js";
 import { mutateConfig } from "./config-store.js";
 import { SecretsManager } from "./secrets.js";
-import { syncAllClients, persistSyncState } from "./sync.js";
+import { synchronizeClients } from "./sync.js";
 import { UpstreamError } from "./errors.js";
 import { getOAuthLockPath, ensureDir } from "./paths.js";
 
@@ -742,11 +742,7 @@ export async function runOAuthLogin(
       await mutateConfig((config) => {
         bindOAuthReference(config, serverName);
       }, configPath);
-      const config = loadConfig(configPath);
-      const summary = syncAllClients(config, secrets);
-      await mutateConfig((freshConfig) => {
-        persistSyncState(summary, freshConfig);
-      }, configPath);
+      await synchronizeClients({ configPath }, secrets);
 
       new McpxOAuthProvider(serverName, secrets).invalidateCredentials("verifier");
       return { serverName, authorized: true };

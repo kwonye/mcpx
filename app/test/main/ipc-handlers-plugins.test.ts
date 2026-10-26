@@ -228,7 +228,7 @@ describe("ipc-handlers.ts - plugins group", () => {
       startDaemon: vi.fn(async () => ({ started: true })),
       stopDaemon: vi.fn(() => ({ started: false })),
       restartDaemon: vi.fn(async () => ({ started: true })),
-      syncAllClients: vi.fn(async () => makeSyncSummary()),
+      synchronizeClients: vi.fn(async () => makeSyncSummary()),
       persistSyncState: vi.fn(),
       addServer: vi.fn(),
       removeServer: vi.fn(),

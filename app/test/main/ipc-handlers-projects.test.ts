@@ -214,7 +214,7 @@ describe("ipc-handlers.ts - projects group", () => {
       startDaemon: vi.fn(async () => ({ started: true })),
       stopDaemon: vi.fn(() => ({ started: false })),
       restartDaemon: vi.fn(async () => ({ started: true })),
-      syncAllClients: syncAllClientsMock,
+      synchronizeClients: syncAllClientsMock,
       persistSyncState: persistSyncStateMock,
       addServer: vi.fn(),
       removeServer: vi.fn(),

@@ -241,7 +241,7 @@ describe("ipc-handlers.ts - servers group", () => {
       startDaemon: vi.fn(async () => ({ started: true })),
       stopDaemon: vi.fn(() => ({ started: false })),
       restartDaemon: vi.fn(async () => ({ started: true })),
-      syncAllClients: syncAllClientsMock,
+      synchronizeClients: syncAllClientsMock,
       persistSyncState: persistSyncStateMock,
       addServer: addServerMock,
       removeServer: removeServerMock,
@@ -510,11 +510,10 @@ describe("ipc-handlers.ts - servers group", () => {
 
   // ---------------------------------------------------------------------------
   describe("SYNC_ALL", () => {
-    it("syncs the loaded config, persists sync state through mutateConfig, and returns the summary", async () => {
+    it("delegates to the shared synchronization transaction and returns its summary", async () => {
       const result = await invokeHandler(IPC.SYNC_ALL);
 
-      expect(syncAllClientsMock).toHaveBeenCalledWith(fakeConfig, expect.any(MockSecretsManager));
-      expect(mutateConfigMock).toHaveBeenCalled();
+      expect(syncAllClientsMock).toHaveBeenCalledWith({}, expect.any(MockSecretsManager));
       expect(result).toBe(fakeSyncSummary);
     });
 

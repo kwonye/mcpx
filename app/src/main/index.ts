@@ -54,7 +54,7 @@ function readOptional<T>(read: () => T): T | undefined {
 let daemonRunning = false;
 
 /**
- * Register macOS/Linux lifecycle event handlers.
+ * Register lifecycle event handlers for the tray app on every platform.
  * Extracted into a separate function for testability.
  */
 export function registerLifecycleHandlers(deps: {
@@ -63,11 +63,7 @@ export function registerLifecycleHandlers(deps: {
   hideDashboard: () => void;
 }): void {
   deps.app.on("window-all-closed", () => {
-    if (process.platform === "win32") {
-      deps.app.quit();
-    } else if (process.platform === "linux" && !process.env.MCPX_ENABLE_TRAY) {
-      deps.app.quit();
-    }
+    // The tray remains available after closing the dashboard. Quit is explicit.
   });
 
   deps.app.on("activate", () => {

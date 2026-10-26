@@ -197,7 +197,7 @@ describe("ipc-handlers.ts - skills group", () => {
       startDaemon: vi.fn(async () => ({ started: true })),
       stopDaemon: vi.fn(() => ({ started: false })),
       restartDaemon: vi.fn(async () => ({ started: true })),
-      syncAllClients: vi.fn(() => fakeSyncSummary),
+      synchronizeClients: vi.fn(() => fakeSyncSummary),
       persistSyncState: vi.fn(),
       addServer: vi.fn(),
       removeServer: vi.fn(),

@@ -33,6 +33,7 @@ describe("cli enable/disable commands", () => {
     });
 
     const config = defaultConfig();
+    config.harnesses = { vscode: { mode: "selected" } };
     config.servers.vercel = {
       transport: "http",
       url: "https://mcp.vercel.com"

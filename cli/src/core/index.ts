@@ -68,8 +68,8 @@ export {
 export type { DaemonStatus, DaemonStartResult } from "./daemon.js";
 
 // Sync
-export { syncAllClients, getGatewayUrl, getGatewayInternalUrl, persistSyncState } from "./sync.js";
-export type { SyncSummary } from "./sync.js";
+export { synchronizeClients, syncAllClients, getGatewayUrl, getGatewayInternalUrl, persistSyncState } from "./sync.js";
+export type { SyncOptions, SyncSummary } from "./sync.js";
 
 // Registry (server add/remove)
 export { addServer, removeServer, updateServer, setServerEnabled, setProjectServerEnabled, registerProject, unregisterProject, ensureGatewayToken, rotateGatewayToken } from "./registry.js";

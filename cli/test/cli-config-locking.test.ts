@@ -104,6 +104,7 @@ describe("cli config locking", () => {
     });
 
     const config = defaultConfig();
+    config.harnesses = { vscode: { mode: "selected" } };
     config.servers.existing = { transport: "stdio", command: "existing-cmd" };
     saveConfig(config);
 

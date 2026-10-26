@@ -22,7 +22,7 @@ import { SecretsManager, readSecretValueFromStdin } from "./core/secrets.js";
 import { probeHttpAuthRequirement } from "./core/auth-probe.js";
 import { fetchRegistryServerDetail, selectBestPackage, extractRequiredInputs, mapRegistryToSpec } from "./core/registry-client.js";
 import type { RequiredInput } from "./core/registry-client.js";
-import { syncAllClients, persistSyncState } from "./core/sync.js";
+import { syncAllClients, synchronizeClients } from "./core/sync.js";
 import { isServerEnabled, type ClientId, type ClientStatus, type HttpServerSpec, type McpxConfig, type StdioServerSpec, type UpstreamServerSpec, type PluginComponent } from "./types.js";
 import { parseCompatibilityArgs } from "./compat/index.js";
 import {
@@ -321,15 +321,8 @@ async function ensureDaemonIfEnabled(cliPath: string, secrets: SecretsManager): 
 async function autoSyncManagedEntries(cliPath: string): Promise<void> {
   const secrets = new SecretsManager();
   await ensureDaemonIfEnabled(cliPath, secrets);
-  // Reload fresh right before syncing (rather than trusting a snapshot the
-  // caller may have loaded before an earlier config mutation completed), and
-  // persist the resulting client-sync state through the config lock so this
-  // never clobbers a concurrent mutation's changes with a stale save.
-  const config = loadMergedConfig();
-  const summary = syncAllClients(config, secrets);
-  await mutateConfig((freshConfig) => {
-    persistSyncState(summary, freshConfig);
-  });
+  // Use the same locked transaction as desktop and plugin operations.
+  const summary = await synchronizeClients({}, secrets);
   printSyncSummary(summary, false);
   ensureExitCodeForSyncFailures(summary.hasErrors);
 }
@@ -477,11 +470,7 @@ async function performOAuthLogout(
 
   let sync: ReturnType<typeof syncAllClients> | undefined;
   if (removedBinding) {
-    const syncSourceConfig = loadConfig();
-    sync = syncAllClients(syncSourceConfig, secrets);
-    await mutateConfig((freshConfig) => {
-      persistSyncState(sync!, freshConfig);
-    });
+    sync = await synchronizeClients({}, secrets);
   }
 
   return { removedSecrets, removedBinding, sync };
@@ -1036,10 +1025,7 @@ async function reconnectGatewayAndSync(cliPath: string): Promise<void> {
   const secrets = new SecretsManager();
   const restart = await restartDaemon(config, cliPath, secrets);
   process.stdout.write(`${restart.message} pid=${restart.pid} port=${restart.port}\n`);
-  const summary = syncAllClients(config, secrets);
-  await mutateConfig((freshConfig) => {
-    persistSyncState(summary, freshConfig);
-  });
+  const summary = await synchronizeClients({}, secrets);
   printSyncSummary(summary, false);
 }
 
@@ -1077,7 +1063,7 @@ async function setServerEnabledInteractively(
 
           if (handled) {
             process.stdout.write(`${enabled ? "Enabled" : "Disabled"} server: ${serverName}\n`);
-            process.stdout.write("Auto-syncing managed gateway entries across all supported clients...\n");
+            process.stdout.write("Syncing managed integrations to detected and selected harnesses...\n");
             await autoSyncManagedEntries(cliPath);
             return true;
           }
@@ -1090,7 +1076,7 @@ async function setServerEnabledInteractively(
     setServerEnabled(freshConfig, serverName, enabled);
   });
   process.stdout.write(`${enabled ? "Enabled" : "Disabled"} server: ${serverName}\n`);
-  process.stdout.write("Auto-syncing managed gateway entries across all supported clients...\n");
+  process.stdout.write("Syncing managed integrations to detected and selected harnesses...\n");
   await autoSyncManagedEntries(cliPath);
   return true;
 }
@@ -1303,7 +1289,7 @@ function registerEnabledCommand(parent: Command, enabled: boolean, cliPath: stri
 
       process.stdout.write(`${enabled ? "Enabled" : "Disabled"} server: ${name} (${type} config)\n`);
       capture(enabled ? "server_enabled" : "server_disabled", { scope: type });
-      process.stdout.write("Auto-syncing managed gateway entries across all supported clients...\n");
+      process.stdout.write("Syncing managed integrations to detected and selected harnesses...\n");
       await autoSyncManagedEntries(cliPath);
       captureTelemetryEvent({
         name: "operation_completed",
@@ -1425,7 +1411,7 @@ function registerAddCommand(parent: Command, cliPath: string): void {
         }
       }
 
-      process.stdout.write("Auto-syncing managed gateway entries across all supported clients...\n");
+      process.stdout.write("Syncing managed integrations to detected and selected harnesses...\n");
       await autoSyncManagedEntries(cliPath);
       markTelemetryMilestone("first_server_added");
       captureTelemetryEvent({
@@ -1458,7 +1444,7 @@ function registerRemoveCommand(parent: Command, cliPath: string): void {
 
       process.stdout.write(`Removed server: ${name} ${type === "project" ? `from project: ${projectPath}` : "globally"}\n`);
       capture("server_removed", { scope: type });
-      process.stdout.write("Auto-syncing managed gateway entries across all supported clients...\n");
+      process.stdout.write("Syncing managed integrations to detected and selected harnesses...\n");
       await autoSyncManagedEntries(cliPath);
       captureTelemetryEvent({
         name: "operation_completed",
@@ -1556,7 +1542,6 @@ function registerSyncCommand(program: Command, cliPath: string): void {
     .description("Sync gateway configuration to supported clients (e.g. `mcpx sync claude`)")
     .action(async (clients: string[], options: { client: string[]; json?: boolean; import?: boolean; dryRun?: boolean }) => {
       const startedAt = Date.now();
-      let config = loadConfig();
       const targetClients = parseClientList([...(clients ?? []), ...(options.client ?? [])]);
       if (options.dryRun) { process.stdout.write(JSON.stringify(planSynchronization(targetClients), null, 2) + "\n"); return; }
       const secrets = new SecretsManager();
@@ -1564,12 +1549,8 @@ function registerSyncCommand(program: Command, cliPath: string): void {
       if (options.import && process.env.MCPX_CONTROL_CHILD === "1") {
         const plan = planAdoption(targetClients);
         if (plan.items.some(item => ["import", "reuse"].includes(item.action))) await applyAdoption(plan);
-        config = loadConfig();
       }
-      const summary = syncAllClients(config, secrets, { targetClients, importScan: options.import && process.env.MCPX_CONTROL_CHILD !== "1" });
-      await mutateConfig((freshConfig) => {
-        persistSyncState(summary, freshConfig);
-      });
+      const summary = await synchronizeClients({ targetClients, importScan: options.import && process.env.MCPX_CONTROL_CHILD !== "1" }, secrets);
       printSyncSummary(summary, options.json ?? false);
       ensureExitCodeForSyncFailures(summary.hasErrors);
       if (!summary.hasErrors) markTelemetryMilestone("first_sync_succeeded");
@@ -2121,8 +2102,8 @@ function registerSkillsCommands(program: Command): void {
         return;
       }
       saveSkill(id, `---\nname: ${id}\ndescription: Instructions for using ${id}.\n---\n\nAdd your instructions here.`);
-      const summary = syncAllClients(loadConfig(), new SecretsManager());
-      await mutateConfig((config) => persistSyncState(summary, config));
+      const summary = await synchronizeClients();
+      ensureExitCodeForSyncFailures(summary.hasErrors);
       process.stdout.write(`Skill "${id}" created.\n`);
       captureTelemetryEvent({
         name: "operation_completed",
@@ -2142,8 +2123,8 @@ function registerSkillsCommands(program: Command): void {
         return;
       }
       deleteSkill(id);
-      const summary = syncAllClients(loadConfig(), new SecretsManager());
-      await mutateConfig((config) => persistSyncState(summary, config));
+      const summary = await synchronizeClients();
+      ensureExitCodeForSyncFailures(summary.hasErrors);
       process.stdout.write(`Skill "${id}" removed.\n`);
       captureTelemetryEvent({
         name: "operation_completed",
@@ -2167,8 +2148,8 @@ function registerSkillsCommands(program: Command): void {
     .action(async (source: string, options: { skill?: string }) => {
       try {
         const installed = await installSkillFromSource(source, options.skill);
-        const summary = syncAllClients(loadConfig(), new SecretsManager());
-        await mutateConfig((freshConfig) => persistSyncState(summary, freshConfig));
+        const summary = await synchronizeClients();
+        ensureExitCodeForSyncFailures(summary.hasErrors);
         process.stdout.write(`Skill installed: ${installed.id}\n`);
       } catch (error) {
         process.stderr.write(`Error: ${error instanceof Error ? error.message : String(error)}\n`);
@@ -2178,8 +2159,8 @@ function registerSkillsCommands(program: Command): void {
 
   skill.command("pin <id>").description("Pin an installed skill at its current revision").action((id: string) => { pinSkill(id); process.stdout.write(`Skill pinned: ${id}\n`); });
   skill.command("unpin <id>").description("Allow an installed skill to update").action((id: string) => { unpinSkill(id); process.stdout.write(`Skill unpinned: ${id}\n`); });
-  skill.command("update <id>").description("Update an installed skill from its source").action(async (id: string) => { const skill = await updateSkill(id); const summary = syncAllClients(loadConfig(), new SecretsManager()); await mutateConfig((freshConfig) => persistSyncState(summary, freshConfig)); process.stdout.write(`Skill updated: ${skill.id}\n`); });
-  skill.command("rollback <id>").description("Restore the previous installed skill revision").action(async (id: string) => { const skill = rollbackSkill(id); const summary = syncAllClients(loadConfig(), new SecretsManager()); await mutateConfig((freshConfig) => persistSyncState(summary, freshConfig)); process.stdout.write(`Skill rolled back: ${skill.id}\n`); });
+  skill.command("update <id>").description("Update an installed skill from its source").action(async (id: string) => { const skill = await updateSkill(id); const summary = await synchronizeClients(); ensureExitCodeForSyncFailures(summary.hasErrors); process.stdout.write(`Skill updated: ${skill.id}\n`); });
+  skill.command("rollback <id>").description("Restore the previous installed skill revision").action(async (id: string) => { const skill = rollbackSkill(id); const summary = await synchronizeClients(); ensureExitCodeForSyncFailures(summary.hasErrors); process.stdout.write(`Skill rolled back: ${skill.id}\n`); });
 }
 
 function registerShareCommands(program: Command): void {
@@ -2212,8 +2193,8 @@ function registerShareCommands(program: Command): void {
         const result = await importEnvironment(directory, { dryRun: options.dryRun, locked: options.locked, inputs: options.input });
         process.stdout.write(JSON.stringify(result, null, 2) + "\n");
         if (!options.dryRun) {
-          const summary = syncAllClients(loadConfig(), new SecretsManager());
-          await mutateConfig((freshConfig) => persistSyncState(summary, freshConfig));
+          const summary = await synchronizeClients();
+          ensureExitCodeForSyncFailures(summary.hasErrors);
         }
       } catch (error) {
         process.stderr.write(`Error: ${error instanceof Error ? error.message : String(error)}\n`);
@@ -2423,7 +2404,7 @@ function registerProjectCommands(program: Command, cliPath: string): void {
       });
       process.stdout.write(`Unregistered project "${entry.name}" (${resolvedPath}) from the global configuration.\n`);
       
-      process.stdout.write("Auto-syncing managed gateway entries across all supported clients...\n");
+      process.stdout.write("Syncing managed integrations to detected and selected harnesses...\n");
       await autoSyncManagedEntries(cliPath);
       captureTelemetryEvent({
         name: "operation_completed",

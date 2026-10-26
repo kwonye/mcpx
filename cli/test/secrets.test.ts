@@ -110,43 +110,18 @@ describe("SecretsManager with encrypted file store", () => {
     expect(sm.getSecret("anything")).toBeNull();
   });
 
-  it("renames corrupt store on set and creates fresh store", () => {
+  it("preserves an unreadable vault on attempted writes and removals", () => {
     const env = setupTempEnv("mcpx-secrets-");
     cleanups.push(env.restore);
-
     const storePath = getSecretsStorePath();
     fs.mkdirSync(path.dirname(storePath), { recursive: true });
     fs.writeFileSync(storePath, "garbage data\n");
-
+    const before = fs.readFileSync(storePath);
     const sm = new SecretsManager();
-    sm.setSecret("after_corrupt", "works");
-
-    const dir = path.dirname(storePath);
-    const corruptFiles = fs.readdirSync(dir).filter((f) => f.startsWith("secrets.json.corrupt-"));
-    expect(corruptFiles.length).toBeGreaterThanOrEqual(1);
-
-    expect(sm.getSecret("after_corrupt")).toBe("works");
-  });
-
-  it("warns instead of silently discarding every secret when the store can't be decrypted", () => {
-    // Regression test: recovering from a corrupt/undecryptable store destroys
-    // every previously stored secret (API keys, OAuth tokens) with no signal
-    // to the user at all -- at minimum this must be a visible warning, not a
-    // silent reset.
-    const env = setupTempEnv("mcpx-secrets-");
-    cleanups.push(env.restore);
-
-    const storePath = getSecretsStorePath();
-    fs.mkdirSync(path.dirname(storePath), { recursive: true });
-    fs.writeFileSync(storePath, "garbage data\n");
-
-    const errorSpy = spyOn(console, "error").mockImplementation(() => {});
-    new SecretsManager().setSecret("after_corrupt", "works");
-
-    expect(errorSpy).toHaveBeenCalled();
-    const warned = errorSpy.mock.calls.some((call) => String(call[0]).includes("could not be read"));
-    expect(warned).toBe(true);
-    errorSpy.mockRestore();
+    expect(() => sm.setSecret("new", "value")).toThrow("could not be read");
+    expect(() => sm.removeSecret("old")).toThrow("could not be read");
+    expect(fs.readFileSync(storePath)).toEqual(before);
+    expect(fs.existsSync(getSecretsKeyPath())).toBe(false);
   });
 
   it("does not warn on a completely fresh store (no file yet)", () => {
@@ -176,25 +151,21 @@ describe("SecretsManager with encrypted file store", () => {
     expect(sm.listSecretNames()).toEqual([]);
   });
 
-  it("regenerates key and store when key file is deleted", () => {
+  it("preserves credentials when a missing key is restored", () => {
     const env = setupTempEnv("mcpx-secrets-");
     cleanups.push(env.restore);
-
     const sm = new SecretsManager();
     sm.setSecret("before", "value");
-
     const keyPath = getSecretsKeyPath();
-    const storePath = getSecretsStorePath();
-    expect(fs.existsSync(keyPath)).toBe(true);
-    expect(fs.existsSync(storePath)).toBe(true);
-
+    const key = fs.readFileSync(keyPath);
+    const vault = fs.readFileSync(getSecretsStorePath());
     fs.unlinkSync(keyPath);
-
     expect(sm.getSecret("before")).toBeNull();
-
-    sm.setSecret("after_regenerated", "works");
-    expect(sm.getSecret("after_regenerated")).toBe("works");
-    expect(sm.getSecret("before")).toBeNull();
+    expect(fs.existsSync(keyPath)).toBe(false);
+    expect(() => sm.setSecret("after", "replacement")).toThrow("could not be read");
+    expect(fs.readFileSync(getSecretsStorePath())).toEqual(vault);
+    fs.writeFileSync(keyPath, key);
+    expect(sm.getSecret("before")).toBe("value");
   });
 
   it("resolveMaybeSecret passthrough, resolve, and not-found throw", () => {
