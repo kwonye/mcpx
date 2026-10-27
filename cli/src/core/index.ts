@@ -80,7 +80,8 @@ export { exportEnvironment, importEnvironment } from "./share.js";
 export type { ShareEnvironment, ShareLock } from "./share.js";
 
 // Secrets
-export { SecretsManager } from "./secrets.js";
+export { SecretsManager, describeSecretBackend, getSecretBackend, switchSecretBackend } from "./secrets.js";
+export type { SecretBackendSwitchResult } from "./secrets.js";
 
 // Server Auth
 export {
@@ -156,6 +157,7 @@ export type {
   HttpServerSpec,
   StdioServerSpec,
   GatewayConfig,
+  SecretBackendKind,
   ClientSyncState,
   ManagedIndex,
   ManagedEntry,

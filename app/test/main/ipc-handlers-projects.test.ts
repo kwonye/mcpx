@@ -226,6 +226,8 @@ describe("ipc-handlers.ts - projects group", () => {
       saveSkill: vi.fn(),
       deleteSkill: vi.fn(),
       SecretsManager: MockSecretsManager,
+      getSecretBackend: vi.fn(() => "file"),
+      switchSecretBackend: vi.fn(() => ({ backend: "file", changed: false, migrated: [], preserved: [], removedFrom: null })),
       buildStatusReport: vi.fn(async () => ({})),
       loadManagedIndex: vi.fn(() => ({ schemaVersion: 1, managed: {} })),
       probeHttpAuthRequirement: vi.fn(async () => ({ authRequired: false })),

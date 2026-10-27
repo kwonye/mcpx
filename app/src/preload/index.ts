@@ -14,7 +14,7 @@ import type {
 import { IPC } from "../shared/ipc-channels";
 import type { DesktopSettingsPatch } from "../shared/desktop-settings";
 import type { DesktopSettings } from "../shared/desktop-settings";
-import type { TelemetryPreferences, TelemetryStatus } from "@mcpx/core";
+import type { SecretBackendKind, SecretBackendSwitchResult, TelemetryPreferences, TelemetryStatus } from "@mcpx/core";
 
 const ALLOWED_CHANNELS = new Set<string>(Object.values(IPC));
 const REMOTE_ERROR_PREFIX = /^Error invoking remote method '[^']+':\s*(?:Error:\s*)?/;
@@ -46,6 +46,8 @@ const api = {
   getStatus: () => invokeIpc<StatusReport>(IPC.GET_STATUS),
   getServers: () => invokeIpc<Array<Record<string, unknown>>>(IPC.GET_SERVERS),
   getDesktopSettings: () => invokeIpc<DesktopSettings>(IPC.GET_DESKTOP_SETTINGS),
+  getSecretBackend: () => invokeIpc<SecretBackendKind>(IPC.GET_SECRET_BACKEND),
+  setSecretBackend: (backend: SecretBackendKind) => invokeIpc<SecretBackendSwitchResult>(IPC.SET_SECRET_BACKEND, backend),
   getTelemetryStatus: () => invokeIpc<TelemetryStatus>(IPC.GET_TELEMETRY_STATUS),
   acknowledgeTelemetryNotice: () => invokeIpc<TelemetryPreferences>(IPC.ACKNOWLEDGE_TELEMETRY_NOTICE),
   addServer: (name: string, spec: unknown) => invokeIpc(IPC.ADD_SERVER, name, spec),

@@ -4,6 +4,8 @@ export const IPC = {
   GET_STATUS: "mcpx:get-status",
   GET_SERVERS: "mcpx:get-servers",
   GET_DESKTOP_SETTINGS: "mcpx:get-desktop-settings",
+  GET_SECRET_BACKEND: "mcpx:get-secret-backend",
+  SET_SECRET_BACKEND: "mcpx:set-secret-backend",
   GET_TELEMETRY_STATUS: "mcpx:get-telemetry-status",
   ACKNOWLEDGE_TELEMETRY_NOTICE: "mcpx:acknowledge-telemetry-notice",
   ADD_SERVER: "mcpx:add-server",

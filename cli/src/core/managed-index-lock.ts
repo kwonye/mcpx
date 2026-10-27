@@ -3,9 +3,9 @@ import path from "node:path";
 
 import { lockOwnerAlive } from "./file-state.js";
 
-export function withManagedIndexLock<T>(lockPath: string, fn: () => T): T {
+export function withManagedIndexLock<T>(lockPath: string, fn: () => T, timeoutMs = 5000): T {
   fs.mkdirSync(path.dirname(lockPath), { recursive: true });
-  const deadline = Date.now() + 5000;
+  const deadline = Date.now() + timeoutMs;
   while (true) {
     try {
       fs.writeFileSync(lockPath, `${process.pid}\n`, { flag: "wx" });

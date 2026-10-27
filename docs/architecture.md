@@ -43,8 +43,12 @@ are marked failed even when their canonical installation was saved successfully.
 
 ## Authentication
 
-Upstream API keys and OAuth credentials live in the shared AES-256-GCM encrypted
-vault. Canonical server definitions contain `secret://` or `oauth://` references.
+Upstream API keys and OAuth credentials live in one shared store. The default
+is an AES-256-GCM encrypted file whose key sits next to the ciphertext. An
+opt-in OS keychain backend (macOS Keychain via `security`, Linux libsecret via
+`secret-tool`) is available with `mcpx secret backend keychain`; switching
+backends copies every secret and deletes the previous copy only after the new
+copy verifies. Canonical server definitions contain `secret://` or `oauth://` references.
 HTTP credentials bind to headers; stdio credentials bind to explicitly named
 environment variables. The gateway resolves references and refreshes upstream
 OAuth credentials for all harnesses using that canonical server.
