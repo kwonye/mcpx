@@ -32,7 +32,7 @@ function operationPath(id: string) { return path.join(root(), `${z.uuid().parse(
 export function snapshot(target: string): FileSnapshot {
   let stat: fs.Stats;
   try { stat = fs.lstatSync(target); } catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return { kind: "missing" }; throw error; }
-  if (stat.isSymbolicLink()) return { kind: "link", content: fs.readlinkSync(target) };
+  if (stat.isSymbolicLink()) return { kind: "link", content: readLink(target) };
   if (!stat.isDirectory()) return { kind: "file", content: fs.readFileSync(target).toString("base64"), mode: stat.mode & 0o777 };
   const files: NonNullable<FileSnapshot["files"]> = {};
   let bytes = 0;
@@ -41,7 +41,7 @@ export function snapshot(target: string): FileSnapshot {
       const relative = prefix ? `${prefix}/${name}` : name;
       const full = path.join(dir, name);
       const info = fs.lstatSync(full);
-      if (info.isSymbolicLink()) files[relative] = { kind: "link", content: fs.readlinkSync(full) };
+      if (info.isSymbolicLink()) files[relative] = { kind: "link", content: readLink(full) };
       else if (info.isDirectory()) { files[relative] = { kind: "directory", mode: info.mode & 0o777 }; walk(full, relative); }
       else if (info.isFile()) {
         bytes += info.size;
@@ -63,6 +63,35 @@ function snapshotForHash(value: FileSnapshot): FileSnapshot {
   if (!value.files) return stripped;
   return { ...stripped, files: Object.fromEntries(Object.entries(value.files).map(([name, entry]) => [name, strip(entry)])) };
 }
+/** Windows junctions store an absolute target, often with a `\\?\` prefix. Planned links are relative to the link. */
+export function normalizeLinkContent(linkPath: string, raw: string): string {
+  if (process.platform !== "win32") return raw;
+  const paths = path.win32;
+  let target = raw;
+  if (target.startsWith("\\\\?\\UNC\\")) target = `\\\\${target.slice(8)}`;
+  else if (target.startsWith("\\\\?\\")) target = target.slice(4);
+  if (!/^[a-zA-Z]:\\?$/.test(target)) target = target.replace(/[\\/]+$/, "");
+  if (!paths.isAbsolute(target)) return target.replaceAll("/", "\\");
+  return paths.relative(paths.dirname(linkPath), target);
+}
+function readLink(linkPath: string): string {
+  return normalizeLinkContent(linkPath, fs.readlinkSync(linkPath));
+}
+function placeLink(linkPath: string, content: string): void {
+  if (process.platform !== "win32") {
+    fs.symlinkSync(content, linkPath);
+    return;
+  }
+  const absolute = path.resolve(path.dirname(linkPath), content);
+  try {
+    fs.symlinkSync(absolute, linkPath, "junction");
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    // Junctions can only point at directories. File links stay relative symlinks.
+    if (code !== "EINVAL" && code !== "ENOTDIR" && code !== "ENOENT") throw error;
+    fs.symlinkSync(content, linkPath, "file");
+  }
+}
 export function snapshotHash(value: FileSnapshot): string { return sha256(JSON.stringify(snapshotForHash(value))); }
 export function textSnapshot(content: string): FileSnapshot { return { kind: "file", content: Buffer.from(content).toString("base64"), mode: 0o600 }; }
 export function snapshotText(value: FileSnapshot): string { return value.content ? Buffer.from(value.content, "base64").toString("utf8") : ""; }
@@ -72,7 +101,7 @@ export function writeSnapshot(target: string, state: FileSnapshot): void {
   const temp = `${target}.mcpx-${crypto.randomUUID()}`;
   try {
     if (state.kind === "file") fs.writeFileSync(temp, Buffer.from(state.content!, "base64"), { mode: state.mode ?? 0o600 });
-    else if (state.kind === "link") fs.symlinkSync(state.content!, temp, process.platform === "win32" ? "junction" : undefined);
+    else if (state.kind === "link") placeLink(temp, state.content!);
     else {
       fs.mkdirSync(temp, { mode: state.mode ?? 0o700 });
       for (const [relative, entry] of Object.entries(state.files ?? {})) {
@@ -80,7 +109,7 @@ export function writeSnapshot(target: string, state: FileSnapshot): void {
         if (!dest.startsWith(path.resolve(temp) + path.sep)) throw new Error("Invalid snapshot path");
         fs.mkdirSync(path.dirname(dest), { recursive: true });
         if (entry.kind === "directory") fs.mkdirSync(dest, { recursive: true, mode: entry.mode ?? 0o700 });
-        else if (entry.kind === "link") fs.symlinkSync(entry.content!, dest);
+        else if (entry.kind === "link") placeLink(dest, entry.content!);
         else fs.writeFileSync(dest, Buffer.from(entry.content!, "base64"), { mode: entry.mode ?? 0o600 });
       }
     }

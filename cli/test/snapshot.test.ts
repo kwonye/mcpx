@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import { snapshotHash } from "../src/core/operations.js";
+import { normalizeLinkContent, snapshotHash } from "../src/core/operations.js";
 
 describe("snapshotHash", () => {
   const original = Object.getOwnPropertyDescriptor(process, "platform");
@@ -24,5 +24,17 @@ describe("snapshotHash", () => {
     expect(strict).toBe(snapshotHash({ kind: "file", content: "YQ==", mode: 0o666 }));
     expect(windows).toBe(sameContent);
     expect(strict).not.toBe(snapshotHash({ kind: "file", content: "Yg==", mode: 0o666 }));
+  });
+
+  it("compares Windows junction targets as paths relative to the link", () => {
+    Object.defineProperty(process, "platform", { value: "win32" });
+    expect(normalizeLinkContent(
+      "D:\\workspace\\skills\\review",
+      "\\\\?\\D:\\workspace\\data\\mcpx\\skills\\review"
+    )).toBe("..\\data\\mcpx\\skills\\review");
+    expect(normalizeLinkContent(
+      "D:\\workspace\\skills\\review",
+      "..\\data\\mcpx\\skills\\review"
+    )).toBe("..\\data\\mcpx\\skills\\review");
   });
 });

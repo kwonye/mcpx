@@ -37,7 +37,7 @@ describe("local management coordinator", () => {
       await controlRequest("harness.mode", ["pi", "automatic"]);
       const native = path.join(process.env.HOME!, ".pi/agent/mcp.json");
       fs.mkdirSync(path.dirname(native), { recursive: true });
-      fs.writeFileSync(native, JSON.stringify({ mcpServers: { echo: { command: process.execPath, args: [fileURLToPath(new URL("./fixtures/mock-stdio-mcp-server.cjs", import.meta.url))] } } }));
+      fs.writeFileSync(native, JSON.stringify({ mcpServers: { echo: { command: "node", args: [fileURLToPath(new URL("./fixtures/mock-stdio-mcp-server.cjs", import.meta.url))] } } }));
       const time = new Date().toISOString();
       const interrupted: Operation = { id: crypto.randomUUID(), label: "Interrupted adoption", phase: "recovery-required", startedAt: time, updatedAt: time, progress: 0 };
       saveOperation(interrupted);
@@ -45,7 +45,7 @@ describe("local management coordinator", () => {
       expect(loadConfig().servers.echo).toBeUndefined();
       interrupted.phase = "rolled-back";
       saveOperation(interrupted);
-      const deadline = Date.now() + 12000;
+      const deadline = Date.now() + 8000;
       while (!loadConfig().servers.echo && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 100));
       expect(loadConfig().servers.echo?.transport).toBe("stdio");
       const projected = JSON.parse(fs.readFileSync(native, "utf8"));
