@@ -53,7 +53,17 @@ export function snapshot(target: string): FileSnapshot {
   walk(target);
   return { kind: "directory", files, mode: stat.mode & 0o777 };
 }
-export function snapshotHash(value: FileSnapshot): string { return sha256(JSON.stringify(value)); }
+function snapshotForHash(value: FileSnapshot): FileSnapshot {
+  if (process.platform !== "win32") return value;
+  const strip = <T extends { mode?: number }>(entry: T): Omit<T, "mode"> => {
+    const { mode: _mode, ...rest } = entry;
+    return rest;
+  };
+  const stripped = strip(value);
+  if (!value.files) return stripped;
+  return { ...stripped, files: Object.fromEntries(Object.entries(value.files).map(([name, entry]) => [name, strip(entry)])) };
+}
+export function snapshotHash(value: FileSnapshot): string { return sha256(JSON.stringify(snapshotForHash(value))); }
 export function textSnapshot(content: string): FileSnapshot { return { kind: "file", content: Buffer.from(content).toString("base64"), mode: 0o600 }; }
 export function snapshotText(value: FileSnapshot): string { return value.content ? Buffer.from(value.content, "base64").toString("utf8") : ""; }
 export function writeSnapshot(target: string, state: FileSnapshot): void {

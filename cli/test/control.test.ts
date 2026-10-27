@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import crypto from "node:crypto";
 import { listOperations, saveOperation, type Operation } from "../src/core/operations.js";
 import { setupTempEnv } from "./helpers.js";
-import { coordinate, startControlServer, controlRequest, controlSocketPath, subscribeControlEvents } from "../src/core/control.js";
+import { coordinate, startControlServer, controlRequest, controlConnectOptions, subscribeControlEvents } from "../src/core/control.js";
 import { loadConfig } from "../src/core/config.js";
 import { mutateConfig } from "../src/core/config-store.js";
 import { runtimeConfig } from "../src/core/runtime-snapshot.js";
@@ -59,7 +59,7 @@ describe("local management coordinator", () => {
     const stop = await startControlServer();
     let unsubscribe = () => {};
     try {
-      const unauthorized = await new Promise<number>(resolve => { const request = http.get({ socketPath: controlSocketPath(), path: "/v1/events" }, response => { response.resume(); resolve(response.statusCode!); }); request.on("error", () => resolve(0)); });
+      const unauthorized = await new Promise<number>(resolve => { const request = http.get({ ...controlConnectOptions(), path: "/v1/events" }, response => { response.resume(); resolve(response.statusCode!); }); request.on("error", () => resolve(0)); });
       expect(unauthorized).toBe(403);
       const events: string[] = [];
       unsubscribe = subscribeControlEvents(event => { if (event.operation) events.push(event.operation.phase); });

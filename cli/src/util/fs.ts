@@ -15,16 +15,27 @@ export function readJsonFile<T>(filePath: string, fallback: T): T {
   }
 }
 
+function fsyncBestEffort(descriptor: number): void {
+  try {
+    fs.fsyncSync(descriptor);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    // Windows returns EPERM for fsync on directories and on some new files.
+    if (code === "EPERM" || code === "EINVAL" || code === "ENOTSUP") return;
+    throw error;
+  }
+}
+
 export function writeJsonAtomic(filePath: string, data: unknown): void {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   const tempPath = `${filePath}.tmp-${process.pid}-${Date.now()}`;
   const content = `${JSON.stringify(data, null, 2)}\n`;
   const descriptor = fs.openSync(tempPath, "w", 0o600);
-  try { fs.writeFileSync(descriptor, content); fs.fsyncSync(descriptor); } finally { fs.closeSync(descriptor); }
+  try { fs.writeFileSync(descriptor, content); fsyncBestEffort(descriptor); } finally { fs.closeSync(descriptor); }
   fs.renameSync(tempPath, filePath);
   if (process.platform !== "win32") {
     const directory = fs.openSync(path.dirname(filePath), "r");
-    try { fs.fsyncSync(directory); } finally { fs.closeSync(directory); }
+    try { fsyncBestEffort(directory); } finally { fs.closeSync(directory); }
   }
 }
 
