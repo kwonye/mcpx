@@ -229,6 +229,8 @@ describe("ipc-handlers.ts - daemon + settings + misc group", () => {
       saveSkill: vi.fn(),
       deleteSkill: vi.fn(),
       SecretsManager: MockSecretsManager,
+      getSecretBackend: vi.fn(() => "file"),
+      switchSecretBackend: vi.fn(() => ({ backend: "file", changed: false, migrated: [], preserved: [], removedFrom: null })),
       buildStatusReport: buildStatusReportMock,
       loadManagedIndex: loadManagedIndexMock,
       probeHttpAuthRequirement: vi.fn(),

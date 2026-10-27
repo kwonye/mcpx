@@ -215,7 +215,7 @@ After manual edits, run `mcpx sync` to propagate changes.
 ## What it does
 
 - Stores upstream servers in a central config (`~/.config/mcpx/config.json`)
-- Stores upstream auth in one consolidated secure store (AES-256-GCM encrypted file) so each MCP auth flow is done once and reused across all synced clients
+- Stores upstream auth in one shared secret store (an AES-256-GCM file by default, or an opt-in OS keychain) so each MCP auth flow is done once and reused across all synced clients
 - Runs a local MCP gateway daemon (`http://127.0.0.1:<port>/mcp`)
 - Syncs managed gateway entries into supported clients:
   - Claude / Claude Code
@@ -230,7 +230,7 @@ After manual edits, run `mcpx sync` to propagate changes.
   - Hermes
 - Gives each upstream a top-level client entry (`/vercel`, `/next-devtools`, etc.) while routing through one local daemon
 - Uses local gateway-token auth for client → gateway (`x-mcpx-local-token`)
-- Supports encrypted-file backed secret references for upstream headers (AES-256-GCM, no Keychain)
+- Supports secret references for upstream headers. The default file store needs no Keychain prompts; `mcpx secret backend keychain` opts into the OS keychain instead
 - Passes upstream OAuth challenges through to compatible clients
 - Proxies OAuth well-known metadata endpoints in single-upstream mode
 
@@ -252,6 +252,9 @@ add legacy protocol support.
 mcpx secret set vercel_auth_header --value "Bearer <token>"
 mcpx secret ls
 mcpx secret rm vercel_auth_header
+mcpx secret backend                 # show file (default) or keychain
+mcpx secret backend keychain        # move secrets into the OS keychain
+mcpx secret backend file            # move secrets back to the encrypted file
 
 mcpx auth set vercel --header Authorization --value "Bearer <token>"
 mcpx auth set next-devtools --env NEXT_DEVTOOLS_TOKEN --value "<token>"
@@ -261,7 +264,7 @@ mcpx auth rotate-local-token
 
 # OAuth
 mcpx auth login vercel     # browser sign-in for an HTTP upstream that supports OAuth
-mcpx auth status           # sign-in state, token expiry, and secret-binding status (offline)
+mcpx auth status           # sign-in state, token expiry, secret-binding status, and the active secret backend (offline)
 mcpx auth logout vercel    # clear stored OAuth credentials and the Authorization binding
 ```
 
@@ -418,8 +421,17 @@ flowchart TB
 
 Claude Desktop uses the stdio proxy to reach the local mcpx gateway. Its [remote HTTP connectors](https://support.claude.com/en/articles/11175166-get-started-with-custom-connectors-using-remote-mcp) connect from Anthropic's cloud and require a publicly reachable server; they cannot connect directly to mcpx on localhost.
 
+## Secrets
+
+mcpx keeps upstream credentials out of client config files. `MCPX_SECRET_<name>` overrides the stored value for that name on every backend, including CI and other headless sessions where a prompt is impossible.
+
+The default backend is an AES-256-GCM encrypted file, `secrets.json`, next to `secrets.key` in the data directory (`~/.local/share/mcpx`, or `MCPX_DATA_HOME`). Node's built-in `crypto` does the encryption, so there is no native dependency and no system prompt. The tradeoff is that the encryption key sits on disk beside the ciphertext: any program running as your user can read both files and decrypt the secrets.
+
+`mcpx secret backend keychain` opts into the OS keychain and moves the secrets that are already stored. mcpx deletes the encrypted file and its key only after the keychain copy reads back successfully. macOS uses the login Keychain through the built-in `security` command. Linux uses libsecret through `secret-tool` (`libsecret-tools` on Debian/Ubuntu, `libsecret` on Fedora). Windows and other platforms have no keychain backend and keep the encrypted file. The OS protects the keychain item and may prompt for access. A locked session or a missing secret service cannot unlock it, and a background gateway waits while that prompt is open. `mcpx secret backend file` copies the keychain item back into the encrypted file and then deletes the keychain item.
+
+`mcpx secret ls` and `mcpx auth status` show which backend is active. The desktop app uses the same store; Settings has an OS keychain toggle.
+
 ## Notes
 
 - Client connectivity is HTTP-first; upstreams can be HTTP or stdio
-- Secrets are stored in an encrypted file (`secrets.json` + `secrets.key` in the data directory) using AES-256-GCM via Node's built-in `crypto`. No native dependencies, no Keychain prompts.
-- `MCPX_SECRET_<name>` env var overrides work on all platforms for CI/headless
+- Secret storage is described in [Secrets](#secrets). `MCPX_SECRET_<name>` overrides the stored value on every platform

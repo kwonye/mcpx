@@ -28,6 +28,8 @@ import {
   exportEnvironment,
   importEnvironment,
   SecretsManager,
+  getSecretBackend,
+  switchSecretBackend,
   buildStatusReport,
   loadManagedIndex,
   probeHttpAuthRequirement,
@@ -336,6 +338,13 @@ export function registerIpcHandlers(options: { controlService?: boolean } = {}):
 
   registerHandler(IPC.GET_DESKTOP_SETTINGS, () => {
     return loadDesktopSettings();
+  });
+
+  registerHandler(IPC.GET_SECRET_BACKEND, () => getSecretBackend());
+
+  registerHandler(IPC.SET_SECRET_BACKEND, (_event, backend: unknown) => {
+    const parsed = z.enum(["file", "keychain"]).parse(backend);
+    return switchSecretBackend(parsed);
   });
 
   registerHandler(IPC.GET_TELEMETRY_STATUS, () => getTelemetryStatus());
