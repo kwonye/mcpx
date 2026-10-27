@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import { normalizeLinkContent, pathFingerprint } from "../src/core/file-state.js";
-import { snapshotHash } from "../src/core/operations.js";
+import { snapshotHash, writeSnapshot } from "../src/core/operations.js";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -50,6 +50,31 @@ describe("snapshotHash", () => {
     Object.defineProperty(process, "platform", { value: "win32" });
     try {
       expect(pathFingerprint(link)).toBe(sha256("link:..\\canonical"));
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("writeSnapshot", () => {
+  it("replaces and removes a symlink without deleting the directory it points at", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "mcpx-link-replace-"));
+    const canonical = path.join(root, "canonical");
+    const next = path.join(root, "next");
+    const link = path.join(root, "review");
+    fs.mkdirSync(canonical, { recursive: true });
+    fs.mkdirSync(next, { recursive: true });
+    fs.writeFileSync(path.join(canonical, "SKILL.md"), "Keep me");
+    fs.writeFileSync(path.join(next, "SKILL.md"), "Version two");
+    fs.symlinkSync("canonical", link);
+    try {
+      writeSnapshot(link, { kind: "link", content: "next" });
+      expect(fs.readFileSync(path.join(link, "SKILL.md"), "utf8")).toBe("Version two");
+      expect(fs.readFileSync(path.join(canonical, "SKILL.md"), "utf8")).toBe("Keep me");
+      writeSnapshot(link, { kind: "missing" });
+      expect(fs.existsSync(link)).toBe(false);
+      expect(fs.readFileSync(path.join(next, "SKILL.md"), "utf8")).toBe("Version two");
+      expect(fs.readFileSync(path.join(canonical, "SKILL.md"), "utf8")).toBe("Keep me");
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }

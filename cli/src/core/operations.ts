@@ -82,11 +82,33 @@ function placeLink(linkPath: string, content: string): void {
     fs.symlinkSync(content, linkPath, "file");
   }
 }
+/** Drop a symlink or junction. `rm` with `recursive` can follow a Windows junction and delete its target. */
+function removeLink(target: string): void {
+  try {
+    fs.unlinkSync(target);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") return;
+    // Junctions are directories. unlink returns EPERM or EISDIR; rmdir removes only the reparse point.
+    if (code !== "EPERM" && code !== "EISDIR") throw error;
+    fs.rmdirSync(target);
+  }
+}
+function removeSnapshotTarget(target: string): void {
+  let stat: fs.Stats;
+  try { stat = fs.lstatSync(target); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw error;
+  }
+  if (stat.isSymbolicLink()) removeLink(target);
+  else fs.rmSync(target, { recursive: true, force: true });
+}
 export function snapshotHash(value: FileSnapshot): string { return sha256(JSON.stringify(snapshotForHash(value))); }
 export function textSnapshot(content: string): FileSnapshot { return { kind: "file", content: Buffer.from(content).toString("base64"), mode: 0o600 }; }
 export function snapshotText(value: FileSnapshot): string { return value.content ? Buffer.from(value.content, "base64").toString("utf8") : ""; }
 export function writeSnapshot(target: string, state: FileSnapshot): void {
-  if (state.kind === "missing") { fs.rmSync(target, { recursive: true, force: true }); return; }
+  if (state.kind === "missing") { removeSnapshotTarget(target); return; }
   fs.mkdirSync(path.dirname(target), { recursive: true });
   const temp = `${target}.mcpx-${crypto.randomUUID()}`;
   try {
@@ -104,9 +126,11 @@ export function writeSnapshot(target: string, state: FileSnapshot): void {
       }
     }
     const existing = snapshot(target);
-    if (existing.kind === "directory" || (state.kind === "directory" && existing.kind !== "missing")) fs.rmSync(target, { recursive: true, force: true });
+    // Windows refuses to rename onto a junction. Remove the link first so the target directory stays.
+    if (existing.kind === "link") removeLink(target);
+    else if (existing.kind === "directory" || (state.kind === "directory" && existing.kind !== "missing")) fs.rmSync(target, { recursive: true, force: true });
     fs.renameSync(temp, target);
-  } finally { fs.rmSync(temp, { recursive: true, force: true }); }
+  } finally { removeSnapshotTarget(temp); }
 }
 export function saveOperation(operation: Operation): void {
   operation.updatedAt = new Date().toISOString();
