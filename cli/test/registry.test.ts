@@ -8,16 +8,18 @@ import { SecretsManager } from "../src/core/secrets.js";
 import { setupTempEnv } from "./helpers.js";
 
 describe("setProjectServerEnabled", () => {
+  const project = path.resolve("/my/project");
+
   it("disables a server for a project by adding to disabledServers", () => {
     const config = defaultConfig();
     config.servers.github = { transport: "http", url: "https://github.com/mcp", enabled: true };
     config.projects = {
-      "/my/project": { name: "my-project", path: "/my/project", disabledServers: [] }
+      [project]: { name: "my-project", path: project, disabledServers: [] }
     };
 
     setProjectServerEnabled(config, "/my/project", "github", false);
 
-    expect(config.projects["/my/project"].disabledServers).toContain("github");
+    expect(config.projects[project].disabledServers).toContain("github");
     // Global flag unchanged
     expect(config.servers.github.enabled).toBe(true);
   });
@@ -26,31 +28,31 @@ describe("setProjectServerEnabled", () => {
     const config = defaultConfig();
     config.servers.github = { transport: "http", url: "https://github.com/mcp", enabled: true };
     config.projects = {
-      "/my/project": { name: "my-project", path: "/my/project", disabledServers: ["github"] }
+      [project]: { name: "my-project", path: project, disabledServers: ["github"] }
     };
 
     setProjectServerEnabled(config, "/my/project", "github", true);
 
-    expect(config.projects["/my/project"].disabledServers).not.toContain("github");
+    expect(config.projects[project].disabledServers).not.toContain("github");
   });
 
   it("does not duplicate entries when disabling an already-disabled server", () => {
     const config = defaultConfig();
     config.servers.github = { transport: "http", url: "https://github.com/mcp", enabled: true };
     config.projects = {
-      "/my/project": { name: "my-project", path: "/my/project", disabledServers: ["github"] }
+      [project]: { name: "my-project", path: project, disabledServers: ["github"] }
     };
 
     setProjectServerEnabled(config, "/my/project", "github", false);
 
-    expect(config.projects["/my/project"].disabledServers?.filter((s) => s === "github").length).toBe(1);
+    expect(config.projects[project].disabledServers?.filter((s) => s === "github").length).toBe(1);
   });
 
   it("reports globally_disabled reason when enabling a globally-disabled server in a project", () => {
     const config = defaultConfig();
     config.servers.github = { transport: "http", url: "https://github.com/mcp", enabled: false };
     config.projects = {
-      "/my/project": { name: "my-project", path: "/my/project", disabledServers: ["github"] }
+      [project]: { name: "my-project", path: project, disabledServers: ["github"] }
     };
 
     const result = setProjectServerEnabled(config, "/my/project", "github", true);
@@ -59,7 +61,7 @@ describe("setProjectServerEnabled", () => {
     expect(result.effective).toBe(false);
     expect(result.reason).toBe("globally_disabled");
     expect(config.servers.github.enabled).toBe(false);
-    expect(config.projects["/my/project"].disabledServers).not.toContain("github");
+    expect(config.projects[project].disabledServers).not.toContain("github");
   });
 
   it("resolves path with path.resolve so keys are consistent", () => {
@@ -78,7 +80,7 @@ describe("setProjectServerEnabled", () => {
   it("throws for unknown server", () => {
     const config = defaultConfig();
     config.projects = {
-      "/my/project": { name: "my-project", path: "/my/project", disabledServers: ["github"] }
+      [project]: { name: "my-project", path: project, disabledServers: ["github"] }
     };
     expect(() => setProjectServerEnabled(config, "/my/project", "nonexistent", true)).toThrow("does not exist");
   });
@@ -156,8 +158,9 @@ describe("gateway token management", () => {
     expect(fs.existsSync(tokenPath)).toBe(true);
 
     const stat = fs.statSync(tokenPath);
-    const mode = stat.mode & 0o777;
-    expect(mode).toBe(0o600);
+    if (process.platform !== "win32") {
+      expect(stat.mode & 0o777).toBe(0o600);
+    }
 
     const fileContent = fs.readFileSync(tokenPath, "utf8").trim();
     expect(fileContent).toBe(token);

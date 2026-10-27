@@ -19,6 +19,16 @@ export function controlSocketPath() {
   const normal = path.join(getRuntimeDir(), "control.sock");
   return Buffer.byteLength(normal) < 96 ? normal : path.join(os.tmpdir(), `mcpx-${process.getuid?.() ?? "user"}-${sha256(getConfigPath()).slice(0, 12)}.sock`);
 }
+function windowsControlPort(): number {
+  const hash = sha256(`${os.userInfo().username}:${getConfigPath()}`);
+  return 49152 + (Number.parseInt(hash.slice(0, 4), 16) % 16384);
+}
+export function controlConnectOptions(): { socketPath: string } | { host: string; port: number } {
+  // Bun on Windows fails named-pipe listen with ENOENT. A stable loopback port
+  // keeps the server and its clients on the same endpoint.
+  if (process.platform === "win32") return { host: "127.0.0.1", port: windowsControlPort() };
+  return { socketPath: controlSocketPath() };
+}
 function controlKey(): string {
   const file = path.join(getRuntimeDir(), "control.key");
   fs.mkdirSync(getRuntimeDir(), { recursive: true, mode: 0o700 });
@@ -47,17 +57,26 @@ export function coordinate<T>(work: () => Promise<T>): Promise<T> {
 }
 
 export async function startControlServer(): Promise<() => Promise<void>> {
-  const socketPath = controlSocketPath();
+  const connect = controlConnectOptions();
   controlKey();
-  if (process.platform !== "win32" && fs.existsSync(socketPath)) {
-    if (!fs.lstatSync(socketPath).isSocket()) throw new Error("Control socket path is occupied by a non-socket file.");
+  if ("socketPath" in connect && fs.existsSync(connect.socketPath)) {
+    if (!fs.lstatSync(connect.socketPath).isSocket()) throw new Error("Control socket path is occupied by a non-socket file.");
     try {
       await controlRequest("snapshot");
       throw new Error("Another mcpx control service is already running");
     } catch (error) {
+      if ((error as Error).message === "Another mcpx control service is already running") throw error;
       if (!["ENOENT", "ECONNREFUSED", "FailedToOpenSocket"].includes((error as NodeJS.ErrnoException).code ?? "")) throw error;
     }
-    fs.unlinkSync(socketPath);
+    fs.unlinkSync(connect.socketPath);
+  } else if (!("socketPath" in connect)) {
+    try {
+      await controlRequest("snapshot");
+      throw new Error("Another mcpx control service is already running");
+    } catch (error) {
+      if ((error as Error).message === "Another mcpx control service is already running") throw error;
+      if (!["ENOENT", "ECONNREFUSED", "ECONNRESET", "FailedToOpenSocket"].includes((error as NodeJS.ErrnoException).code ?? "")) throw error;
+    }
   }
   const clients = new Set<http.ServerResponse>();
   const leases = new Map<string, (success?: boolean) => void>();
@@ -130,7 +149,12 @@ export async function startControlServer(): Promise<() => Promise<void>> {
     for (const client of clients) client.write(`data: ${JSON.stringify({ type: "operation", operation })}\n\n`);
   };
   operationEvents.on("change", notify);
-  await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(socketPath, () => { server.removeListener("error", reject); if (process.platform !== "win32") fs.chmodSync(socketPath, 0o600); resolve(); }); });
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    const ready = () => { server.removeListener("error", reject); if ("socketPath" in connect) fs.chmodSync(connect.socketPath, 0o600); resolve(); };
+    if ("socketPath" in connect) server.listen(connect.socketPath, ready);
+    else server.listen(connect.port, connect.host, ready);
+  });
   markInterruptedOperations();
   compileRuntimeSnapshot();
   let reconciling = false;
@@ -167,7 +191,7 @@ export function controlRequest<T = unknown>(method: string, args: unknown[] = []
     const supplied = [...args];
     while (supplied.length && supplied.at(-1) === undefined) supplied.pop();
     const body = JSON.stringify({ version: CONTROL_VERSION, method, args: supplied });
-    const request = http.request({ socketPath: controlSocketPath(), path: "/v1/command", method: "POST", headers: { authorization: `Bearer ${controlKey()}`, "content-type": "application/json", "content-length": Buffer.byteLength(body) } }, response => {
+    const request = http.request({ ...controlConnectOptions(), path: "/v1/command", method: "POST", headers: { authorization: `Bearer ${controlKey()}`, "content-type": "application/json", "content-length": Buffer.byteLength(body) } }, response => {
       let data = "";
       response.on("data", chunk => { data += chunk; });
       response.on("end", () => { try { const parsed = JSON.parse(data); if (response.statusCode !== 200) reject(new Error(parsed.error ?? "Management request failed")); else resolve(parsed.result); } catch { reject(new Error("Invalid management response")); } });
@@ -188,7 +212,7 @@ export async function ensureControlService(cliPath: string): Promise<void> {
 import { SecretsManager as SecretsManagerForControl } from "./secrets.js";
 export function subscribeControlEvents(listener: (event: { type: string; operation?: Operation }) => void, onError?: (error: Error) => void): () => void {
   let closed = false;
-  const request = http.get({ socketPath: controlSocketPath(), path: "/v1/events", headers: { authorization: `Bearer ${controlKey()}` } }, response => {
+  const request = http.get({ ...controlConnectOptions(), path: "/v1/events", headers: { authorization: `Bearer ${controlKey()}` } }, response => {
     response.on("end", () => { if (!closed) onError?.(new Error("Local service disconnected")); });
     let pending = "";
     response.on("data", chunk => {

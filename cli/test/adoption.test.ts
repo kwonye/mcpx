@@ -249,7 +249,7 @@ it("tracks projected Pi package MCP servers across updates without claiming same
     expect(adopted.packages![pkg.id].servers).not.toContain("native-package__personal");
     const projectedSettings = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
     const projectedLoadRoot = typeof projectedSettings.packages[0] === "string" ? projectedSettings.packages[0] : projectedSettings.packages[0].source;
-    expect(projectedLoadRoot).toContain("/projections/");
+    expect(projectedLoadRoot.includes(`${path.sep}projections${path.sep}`)).toBe(true);
 
     write(path.join(source, ".mcp.json"), { mcpServers: {
       active: { url: "https://updated.example/mcp" },

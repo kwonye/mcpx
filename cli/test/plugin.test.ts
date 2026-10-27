@@ -62,6 +62,10 @@ describe("plugin source parsing", () => {
 
     const s3 = parseSource("../other");
     expect(s3.type).toBe("local");
+
+    expect(parseSource("C:\\Users\\test\\plugin").type).toBe("local");
+    expect(parseSource("C:/Users/test/plugin").type).toBe("local");
+    expect(parseSource("\\\\server\\share\\plugin").type).toBe("local");
   });
 
   it("parses npm sources", () => {
