@@ -9,6 +9,7 @@ import { getConfigPath } from "./paths.js";
 import { getStateRoot } from "./paths.js";
 import { SecretsManager } from "./secrets.js";
 import { writeJsonAtomic, sha256 } from "../util/fs.js";
+import { normalizeLinkContent } from "./file-state.js";
 
 export interface Operation {
   id: string;
@@ -62,17 +63,6 @@ function snapshotForHash(value: FileSnapshot): FileSnapshot {
   const stripped = strip(value);
   if (!value.files) return stripped;
   return { ...stripped, files: Object.fromEntries(Object.entries(value.files).map(([name, entry]) => [name, strip(entry)])) };
-}
-/** Windows junctions store an absolute target, often with a `\\?\` prefix. Planned links are relative to the link. */
-export function normalizeLinkContent(linkPath: string, raw: string): string {
-  if (process.platform !== "win32") return raw;
-  const paths = path.win32;
-  let target = raw;
-  if (target.startsWith("\\\\?\\UNC\\")) target = `\\\\${target.slice(8)}`;
-  else if (target.startsWith("\\\\?\\")) target = target.slice(4);
-  if (!/^[a-zA-Z]:\\?$/.test(target)) target = target.replace(/[\\/]+$/, "");
-  if (!paths.isAbsolute(target)) return target.replaceAll("/", "\\");
-  return paths.relative(paths.dirname(linkPath), target);
 }
 function readLink(linkPath: string): string {
   return normalizeLinkContent(linkPath, fs.readlinkSync(linkPath));

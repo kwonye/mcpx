@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import { normalizeLinkContent, snapshotHash } from "../src/core/operations.js";
+import { normalizeLinkContent, pathFingerprint } from "../src/core/file-state.js";
+import { snapshotHash } from "../src/core/operations.js";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { sha256 } from "../src/util/fs.js";
 
 describe("snapshotHash", () => {
   const original = Object.getOwnPropertyDescriptor(process, "platform");
@@ -36,5 +41,17 @@ describe("snapshotHash", () => {
       "D:\\workspace\\skills\\review",
       "..\\data\\mcpx\\skills\\review"
     )).toBe("..\\data\\mcpx\\skills\\review");
+  });
+
+  it("hashes a Windows link by the relative target stored in the manifest", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "mcpx-link-hash-"));
+    const link = path.join(root, "obsolete");
+    fs.symlinkSync("../canonical", link);
+    Object.defineProperty(process, "platform", { value: "win32" });
+    try {
+      expect(pathFingerprint(link)).toBe(sha256("link:..\\canonical"));
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
 });
