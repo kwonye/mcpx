@@ -39,7 +39,7 @@ export interface SecretBackendSwitchResult {
 
 export function describeSecretBackend(backend: SecretBackendKind): string {
   if (backend === "keychain") {
-    return "OS keychain (macOS Keychain via the security command, or Linux libsecret via secret-tool). The operating system protects the secrets and may prompt for access. A locked session or a missing secret service cannot unlock them, and the background gateway waits while that prompt is open.";
+    return "OS keychain (macOS Keychain via the security command, or Linux libsecret via secret-tool). Secret values are written on the tool's standard input, not as process arguments. The operating system protects the secrets and may prompt for access. A locked session or a missing secret service cannot unlock them, and the background gateway waits while that prompt is open.";
   }
   return "AES-256-GCM encrypted file (secrets.json + secrets.key in the data directory). The encryption key sits next to the ciphertext, so other programs running as your user can read these secrets. No system prompts, and it works in headless sessions.";
 }

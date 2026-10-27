@@ -8,6 +8,7 @@ import {
   KEYCHAIN_ACCOUNT,
   KEYCHAIN_LABEL,
   KEYCHAIN_SERVICE,
+  SECURITY_INTERACTIVE_MAX_LINE,
   setSecretCommandRunnerForTests,
   setSecretKeychainPlatformForTests,
   type SecretCommandRequest,
@@ -47,9 +48,62 @@ function encodePayload(secrets: Record<string, string>): string {
   return Buffer.from(JSON.stringify({ v: 1, secrets }), "utf8").toString("base64");
 }
 
+/** Apple `security -i` split_line, enough to read the single-quoted commands mcpx sends. */
+function splitSecurityLine(line: string): string[] {
+  const args: string[] = [];
+  let index = 0;
+  while (index < line.length) {
+    while (index < line.length && /\s/.test(line[index] ?? "")) index += 1;
+    if (index >= line.length) break;
+    const quote = line[index] === "'" || line[index] === "\"" ? line[index] : null;
+    if (quote) index += 1;
+    let arg = "";
+    if (quote) {
+      while (index < line.length && line[index] !== quote) {
+        if (line[index] === "\\") {
+          index += 1;
+          if (index < line.length) arg += line[index++];
+          continue;
+        }
+        arg += line[index++];
+      }
+      if (line[index] !== quote) throw new Error("unclosed quote");
+      index += 1;
+    } else {
+      while (index < line.length && !/\s/.test(line[index] ?? "")) {
+        if (line[index] === "\\") {
+          index += 1;
+          if (index < line.length) arg += line[index++];
+          continue;
+        }
+        arg += line[index++];
+      }
+    }
+    args.push(arg);
+  }
+  return args;
+}
+
+function assertSecretsNotInSpawnedArgs(calls: SecretCommandRequest[], hidden: string[]): void {
+  for (const call of calls) {
+    for (const secret of hidden) {
+      expect(call.command).not.toContain(secret);
+      for (const arg of call.args) expect(arg).not.toContain(secret);
+    }
+    if (call.command !== "security" || !call.input?.startsWith("add-generic-password")) continue;
+    expect(call.args).toEqual(["-i"]);
+    const line = call.input.slice(0, -1);
+    expect(call.input.endsWith("\n")).toBe(true);
+    expect(line.includes("\n")).toBe(false);
+    expect(line.length).toBeLessThanOrEqual(SECURITY_INTERACTIVE_MAX_LINE);
+    expect(line).not.toContain("-A");
+  }
+}
+
 function createFakeOsSecretStore() {
-  let stored: string | null = null;
+  const items = new Map<string, string>();
   let failWrites = false;
+  let failWritesRemaining = 0;
   let failDeletes = false;
   let tamperReads = false;
   let honestReadsRemaining = 0;
@@ -62,8 +116,9 @@ function createFakeOsSecretStore() {
     return { status: 127, stdout: "", stderr: `${request.command}: not found` };
   };
 
-  function readValue(): string | null {
-    if (stored === null) return null;
+  function readValue(account: string): string | null {
+    const stored = items.get(account);
+    if (stored === undefined) return null;
     if (!tamperReads) return stored;
     if (honestReadsRemaining > 0) {
       honestReadsRemaining -= 1;
@@ -72,18 +127,35 @@ function createFakeOsSecretStore() {
     return encodePayload({ tampered: "1" });
   }
 
-  function handleSecurity(request: SecretCommandRequest): SecretCommandResult {
-    const action = request.args[0];
+  function rejectWrite(): SecretCommandResult | null {
+    if (!failWrites && failWritesRemaining <= 0) return null;
+    if (failWritesRemaining > 0) failWritesRemaining -= 1;
+    return { status: 1, stdout: "", stderr: "write failed" };
+  }
+
+  function accountFrom(args: string[]): string {
+    const index = args.indexOf("-a");
+    const account = index >= 0 ? args[index + 1] : undefined;
+    if (!account) return "";
+    return account;
+  }
+
+  function dispatchSecurity(args: string[], fromInteractive: boolean): SecretCommandResult {
+    const action = args[0];
+    const account = accountFrom(args);
     if (action === "add-generic-password") {
-      if (failWrites) return { status: 1, stdout: "", stderr: "write failed" };
-      const index = request.args.indexOf("-w");
-      const password = request.args[index + 1];
-      if (!password) return { status: 1, stdout: "", stderr: "missing password" };
-      stored = password;
+      if (!fromInteractive) return { status: 1, stdout: "", stderr: "refusing password on argv" };
+      const rejected = rejectWrite();
+      if (rejected) return rejected;
+      const index = args.indexOf("-w");
+      const password = index >= 0 ? args[index + 1] : undefined;
+      if (!password || index === args.length - 1) return { status: 1, stdout: "", stderr: "missing password" };
+      if (!account) return { status: 1, stdout: "", stderr: "missing account" };
+      items.set(account, password);
       return { status: 0, stdout: "", stderr: "" };
     }
     if (action === "find-generic-password") {
-      const value = readValue();
+      const value = readValue(account);
       if (value === null) {
         return { status: 44, stdout: "", stderr: "The specified item could not be found in the keychain." };
       }
@@ -91,30 +163,50 @@ function createFakeOsSecretStore() {
     }
     if (action === "delete-generic-password") {
       if (failDeletes) return { status: 1, stdout: "", stderr: "delete failed" };
-      if (stored === null) {
+      if (!account || !items.has(account)) {
         return { status: 44, stdout: "", stderr: "The specified item could not be found in the keychain." };
       }
-      stored = null;
+      items.delete(account);
       return { status: 0, stdout: "", stderr: "" };
     }
-    return { status: 1, stdout: "", stderr: `unexpected security ${action}` };
+    return { status: 1, stdout: "", stderr: `unexpected security ${action ?? ""}` };
+  }
+
+  function handleSecurity(request: SecretCommandRequest): SecretCommandResult {
+    if (request.args[0] === "-i") {
+      if (request.args.length !== 1) return { status: 1, stdout: "", stderr: "unexpected security -i args" };
+      const input = request.input ?? "";
+      const line = input.endsWith("\n") ? input.slice(0, -1) : input;
+      if (!input.endsWith("\n") || line.includes("\n") || line.length > SECURITY_INTERACTIVE_MAX_LINE) {
+        return { status: 1, stdout: "", stderr: "security -i line would truncate" };
+      }
+      try {
+        return dispatchSecurity(splitSecurityLine(line), true);
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
+        return { status: 1, stdout: "", stderr: detail };
+      }
+    }
+    return dispatchSecurity(request.args, false);
   }
 
   function handleSecretTool(request: SecretCommandRequest): SecretCommandResult {
     const action = request.args[0];
     if (action === "store") {
-      if (failWrites) return { status: 1, stdout: "", stderr: "write failed" };
-      stored = request.input ?? "";
+      const rejected = rejectWrite();
+      if (rejected) return rejected;
+      items.clear();
+      items.set(KEYCHAIN_ACCOUNT, request.input ?? "");
       return { status: 0, stdout: "", stderr: "" };
     }
     if (action === "lookup") {
-      const value = readValue();
+      const value = readValue(KEYCHAIN_ACCOUNT);
       if (value === null) return { status: 1, stdout: "", stderr: "secret-tool: item not found\n" };
       return { status: 0, stdout: value, stderr: "" };
     }
     if (action === "clear") {
       if (failDeletes) return { status: 1, stdout: "", stderr: "delete failed" };
-      stored = null;
+      items.clear();
       return { status: 0, stdout: "", stderr: "" };
     }
     return { status: 1, stdout: "", stderr: `unexpected secret-tool ${action}` };
@@ -124,13 +216,20 @@ function createFakeOsSecretStore() {
     runner,
     calls,
     seed(value: string) {
-      stored = value;
+      items.clear();
+      items.set(KEYCHAIN_ACCOUNT, value);
     },
     snapshot() {
-      return stored;
+      return items.get(KEYCHAIN_ACCOUNT) ?? null;
+    },
+    accounts() {
+      return [...items.keys()].sort();
     },
     setFailWrites(next: boolean) {
       failWrites = next;
+    },
+    failNextWrites(count: number) {
+      failWritesRemaining = count;
     },
     setFailDeletes(next: boolean) {
       failDeletes = next;
@@ -231,18 +330,14 @@ describe("keychain secret backend", () => {
     expect(secrets.getSecret("alpha")).toBe("päss\nword");
     expect(secrets.listSecretNames()).toEqual(["alpha", "beta"]);
 
-    const add = fake.calls.filter((call) => call.args[0] === "add-generic-password").at(-1);
+    const add = fake.calls.filter((call) => call.input?.startsWith("add-generic-password")).at(-1);
     expect(add?.command).toBe("security");
-    expect(add?.args.slice(0, -1)).toEqual([
-      "add-generic-password",
-      "-s", KEYCHAIN_SERVICE,
-      "-a", KEYCHAIN_ACCOUNT,
-      "-l", KEYCHAIN_LABEL,
-      "-U",
-      "-w"
-    ]);
-    expect(add?.args).not.toContain("-A");
-    expect(decodePayload(add?.args.at(-1) ?? "").secrets).toMatchObject({ alpha: "päss\nword", beta: "two" });
+    expect(add?.args).toEqual(["-i"]);
+    const password = / -w '([^']*)'/.exec(add?.input ?? "")?.[1] ?? "";
+    expect(decodePayload(password).secrets).toMatchObject({ alpha: "päss\nword", beta: "two" });
+    expect(add?.input).toContain(`-a ${KEYCHAIN_ACCOUNT}`);
+    expect(add?.input).toContain(`-l '${KEYCHAIN_LABEL}'`);
+    assertSecretsNotInSpawnedArgs(fake.calls, ["päss\nword", "two", password]);
 
     secrets.removeSecret("alpha");
     expect(secrets.getSecret("alpha")).toBeNull();
@@ -451,6 +546,7 @@ describe("keychain secret backend", () => {
     ]);
     expect(store?.input).toBeDefined();
     expect(decodePayload(store?.input ?? "").secrets).toEqual({ alpha: "linux-value" });
+    assertSecretsNotInSpawnedArgs(fake.calls, ["linux-value", store?.input ?? ""]);
     expect(fs.existsSync(getSecretsStorePath())).toBe(false);
     expect(new SecretsManager().getSecret("alpha")).toBe("linux-value");
   });
@@ -475,6 +571,48 @@ describe("keychain secret backend", () => {
     });
     expect(new SecretsManager().getSecret("alpha")).toBe("from-env");
     expect(() => new SecretsManager().getSecret("other")).toThrow(/not supported on win32/);
+  });
+
+  it("reads a legacy single keychain item and splits a vault that exceeds one security -i line", () => {
+    const env = setupTempEnv("mcpx-secret-keychain-");
+    cleanups.push(env.restore);
+    const fake = useFake();
+    const legacy = `legacy-${"L".repeat(5000)}`;
+    fake.seed(encodePayload({ alpha: legacy }));
+    const config = defaultConfig();
+    config.secrets = { backend: "keychain" };
+    saveConfig(config);
+
+    expect(new SecretsManager().getSecret("alpha")).toBe(legacy);
+    assertSecretsNotInSpawnedArgs(fake.calls, [legacy, fake.snapshot() ?? ""]);
+
+    const secret = `päss\nword:${"S".repeat(6000)}`;
+    new SecretsManager().setSecret("alpha", secret);
+    expect(new SecretsManager().getSecret("alpha")).toBe(secret);
+    expect(fake.snapshot()?.startsWith("mcpx-keychain-chunks:")).toBe(true);
+    expect(fake.accounts().some((account) => account.startsWith(`${KEYCHAIN_ACCOUNT}.`))).toBe(true);
+    const payload = encodePayload({ alpha: secret });
+    assertSecretsNotInSpawnedArgs(fake.calls, [secret, legacy, payload]);
+    expect(fake.calls.some((call) => call.args.includes(payload) || call.args.includes(secret))).toBe(false);
+
+    new SecretsManager().setSecret("alpha", "small");
+    expect(decodePayload(fake.snapshot() ?? "").secrets).toEqual({ alpha: "small" });
+    expect(fake.accounts()).toEqual([KEYCHAIN_ACCOUNT]);
+    assertSecretsNotInSpawnedArgs(fake.calls, [secret, "small", encodePayload({ alpha: "small" })]);
+  });
+
+  it("restores the previous keychain vault when a chunked write fails", () => {
+    const env = setupTempEnv("mcpx-secret-keychain-");
+    cleanups.push(env.restore);
+    const fake = useFake();
+    const secret = `päss\nword:${"S".repeat(6000)}`;
+    switchSecretBackend("keychain");
+    new SecretsManager().setSecret("alpha", secret);
+    fake.failNextWrites(1);
+
+    expect(() => new SecretsManager().setSecret("alpha", `${secret}x`)).toThrow(/write failed/);
+    expect(new SecretsManager().getSecret("alpha")).toBe(secret);
+    assertSecretsNotInSpawnedArgs(fake.calls, [secret, `${secret}x`]);
   });
 
   it("reports a missing secret-tool without deleting the file store", () => {
