@@ -1,0 +1,53 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-15, windows-latest]
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+
+      - name: Install CLI dependencies
+        run: bun install --frozen-lockfile
+        working-directory: cli
+
+      - name: Install desktop dependencies
+        run: bun install --frozen-lockfile
+        working-directory: app
+
+      - name: Typecheck desktop
+        run: bun run typecheck
+        working-directory: app
+
+      - name: Test CLI
+        run: bun run test
+        working-directory: cli
+
+      - name: Test desktop
+        run: bun run test
+        working-directory: app
