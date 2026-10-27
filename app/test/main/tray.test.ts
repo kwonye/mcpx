@@ -1,8 +1,17 @@
 import { describe, it, expect } from "vitest";
 import { readFile, access } from "node:fs/promises";
 import { join } from "node:path";
+import { readFileSync } from "node:fs";
 
 describe("tray icon requirements", () => {
+  it("unpacks resources so nativeImage can read tray icons outside app.asar", () => {
+    const packageJson = JSON.parse(readFileSync(join(__dirname, "../../package.json"), "utf-8")) as {
+      build?: { asarUnpack?: string[] };
+    };
+
+    expect(packageJson.build?.asarUnpack).toEqual(expect.arrayContaining(["resources/**"]));
+  });
+
   describe("ICON-02: Template naming convention", () => {
     it("uses Template suffix for automatic dark mode adaptation", async () => {
       const iconPath = join(__dirname, "../../resources/trayIconTemplate.png");

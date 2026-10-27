@@ -4,6 +4,17 @@ import { hidePopover, togglePopover } from "./popover";
 import { getDesktopProductName, isDevDesktopApp } from "./app-flavor";
 import { quitApp } from "./app-control";
 
+/**
+ * nativeImage.createFromPath() reads the real filesystem and cannot see files
+ * packed inside app.asar. Packaged builds unpack resources/ next to the archive.
+ */
+function resourcePath(...segments: string[]): string {
+  if (app.isPackaged) {
+    return join(process.resourcesPath, "app.asar.unpacked", "resources", ...segments);
+  }
+  return join(__dirname, "../../resources", ...segments);
+}
+
 let tray: Tray | null = null;
 let daemonRunning = false;
 let onStartDaemonRequested: (() => void) | null = null;
@@ -66,19 +77,17 @@ function buildContextMenu(daemonRunning: boolean): Menu {
 function loadStatusIcons(): { normal: StatusIcons; dev: StatusIcons } {
   if (process.platform !== "darwin") {
     // Linux and Windows: use PNG icons (no template image support)
-    const icon = nativeImage.createFromPath(
-      join(__dirname, "../../resources/linux/tray-icon.png")
-    );
+    const icon = nativeImage.createFromPath(resourcePath("linux", "tray-icon.png"));
     return {
       normal: { green: icon, red: icon },
       dev: { green: icon, red: icon }
     };
   }
 
-  const normalGreen = nativeImage.createFromPath(join(__dirname, "../../resources/trayIconTemplate-green.png"));
-  const normalRed = nativeImage.createFromPath(join(__dirname, "../../resources/trayIconTemplate-red.png"));
-  const devGreen = nativeImage.createFromPath(join(__dirname, "../../resources/trayIconDevTemplate-green.png"));
-  const devRed = nativeImage.createFromPath(join(__dirname, "../../resources/trayIconDevTemplate-red.png"));
+  const normalGreen = nativeImage.createFromPath(resourcePath("trayIconTemplate-green.png"));
+  const normalRed = nativeImage.createFromPath(resourcePath("trayIconTemplate-red.png"));
+  const devGreen = nativeImage.createFromPath(resourcePath("trayIconDevTemplate-green.png"));
+  const devRed = nativeImage.createFromPath(resourcePath("trayIconDevTemplate-red.png"));
 
   if (process.platform === "darwin") {
     normalGreen.setTemplateImage(true);
@@ -98,9 +107,9 @@ function getStatusIcon(running: boolean): NativeImage {
   const icons = cachedIcons[isDev ? 'dev' : 'normal'];
   
   if (running) {
-    return icons?.green || nativeImage.createFromPath(join(__dirname, "../../resources", isDev ? "trayIconDevTemplate-green.png" : "trayIconTemplate-green.png"));
+    return icons?.green || nativeImage.createFromPath(resourcePath(isDev ? "trayIconDevTemplate-green.png" : "trayIconTemplate-green.png"));
   } else {
-    return icons?.red || nativeImage.createFromPath(join(__dirname, "../../resources", isDev ? "trayIconDevTemplate-red.png" : "trayIconTemplate-red.png"));
+    return icons?.red || nativeImage.createFromPath(resourcePath(isDev ? "trayIconDevTemplate-red.png" : "trayIconTemplate-red.png"));
   }
 }
 
