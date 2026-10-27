@@ -1,5 +1,10 @@
 // @vitest-environment node
+import { join } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+
+function trayIconFragment(): string {
+  return process.platform === "darwin" ? "trayIconTemplate-" : join("linux", "tray-icon.png");
+}
 
 describe("tray click behavior", () => {
   const togglePopoverMock = vi.fn();
@@ -77,7 +82,7 @@ describe("tray click behavior", () => {
     tray.handlers["right-click"]();
     expect(hidePopoverMock).toHaveBeenCalledTimes(1);
     expect(tray.popUpContextMenu).toHaveBeenCalledTimes(1);
-    expect(createFromPathMock).toHaveBeenCalledWith(expect.stringContaining(process.platform === "darwin" ? "trayIconTemplate-" : "linux/tray-icon.png"));
+    expect(createFromPathMock).toHaveBeenCalledWith(expect.stringContaining(trayIconFragment()));
     expect(createFromPathMock.mock.calls.every((call) => !String(call[0]).includes("app.asar.unpacked"))).toBe(true);
 
     const menu = tray.popUpContextMenu.mock.calls[0][0] as { template: Array<{ label: string; click?: () => void }> };
@@ -107,7 +112,7 @@ describe("tray click behavior", () => {
 
       expect(createFromPathMock).toHaveBeenCalled();
       expect(createFromPathMock.mock.calls.every((call) => String(call[0]).includes("app.asar.unpacked"))).toBe(true);
-      expect(createFromPathMock).toHaveBeenCalledWith(expect.stringContaining(process.platform === "darwin" ? "trayIconTemplate-" : "linux/tray-icon.png"));
+      expect(createFromPathMock).toHaveBeenCalledWith(expect.stringContaining(trayIconFragment()));
     } finally {
       if (previousResourcesPath === undefined) {
         Reflect.deleteProperty(process, "resourcesPath");
