@@ -11,12 +11,19 @@ Coding harnesses connect to the MCP gateway at
 `x-mcpx-local-token`. The gateway routes MCP requests to configured HTTP and
 stdio upstreams and applies the harness consumer's access scope.
 
-The app and management CLI use a local control API over a Unix-domain socket
-(Windows uses a named pipe). Its separate control key is stored with the
-runtime files and is required for commands and event subscriptions. It carries
-management operations and status; MCP protocol traffic does not use this
-interface. The desktop renderer calls through Electron IPC to the main process,
-which connects to the same local service.
+The app and management CLI use a local control API. On macOS and Linux that
+is a Unix-domain socket, `runtime/control.sock` under the state directory, or
+a shorter socket in the temp directory when that path is 96 bytes or longer.
+On Windows, Bun cannot listen on a named pipe, so the service listens on
+`127.0.0.1` at a stable port in the dynamic range, derived from the user and
+the config path. A separate control key is stored with the runtime files and
+is required for commands and event subscriptions. The API carries management
+operations and status; MCP protocol traffic does not use this interface. The
+desktop renderer calls through Electron IPC to the main process, which
+connects to the same local service. The desktop app starts the bundled CLI
+(`resources/cli/dist/cli.js` in a package, or `cli/dist/cli.js` found by
+walking up from the app directory in development) and passes that path as
+`MCPX_CLI_ENTRY` so the gateway process can find the same runtime.
 
 Management writes pass through one serialized queue. Mutating CLI commands
 that still run their existing command handlers acquire a process lease first;

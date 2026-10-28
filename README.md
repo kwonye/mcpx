@@ -15,18 +15,18 @@
 - **macOS** — Desktop app (menubar tray) + CLI
 - **Linux** — Desktop app (system tray) + CLI
 - **Windows** — Desktop app (system tray) + CLI
-- **CLI only**: Any platform with Node.js/Bun
+- **CLI only**: Any platform with Node.js >= 20 or Bun >= 1.4.0
 
 ## Desktop App
 
 The mcpx desktop app is the easiest way to manage your MCP servers. It runs in your system tray with a full dashboard for server discovery, configuration, and monitoring.
 
-- **Menubar tray** — Gateway status, quick server list, and one-click dashboard access from the menu bar
+- **Tray** — Gateway status, a quick server list, and one-click dashboard access
 - **Dashboard** — Start/stop the gateway daemon, view connected servers, and add new ones with a paste-and-go command input
 - **Browse Registry** — Discover and one-click install servers from the official MCP Registry
 - **Projects** — Organize servers into project-specific groups
 - **Skills** — Create and manage shared MCP skill definitions
-- **Settings** — Configure auto-start, launch-at-login, and auto-updates
+- **Settings** — Configure auto-start, launch-at-login, auto-updates, and whether secrets use the OS keychain
 - **Privacy & diagnostics** — Independently control anonymous usage analytics
   and crash diagnostics, reset the random installation ID, and review the
   complete [privacy policy](PRIVACY.md)
@@ -59,28 +59,34 @@ bun run desktop-install:dev
 **Linux:**
 ```bash
 git clone https://github.com/kwonye/mcpx.git
-cd mcpx/app
+cd mcpx/cli
+bun install
+bun run build
+cd ../app
 bun install
 bun run build
 bunx electron-builder build --linux
 ```
 
-This produces an AppImage and `.deb` in `app/dist/`.
+This produces an AppImage and `.deb` in `app/dist/`. The package copies `cli/dist` and starts that CLI as the gateway, so build the CLI before `electron-builder`.
 
 **Windows:**
 ```bash
 git clone https://github.com/kwonye/mcpx.git
-cd mcpx/app
+cd mcpx/cli
+bun install
+bun run build
+cd ../app
 bun install
 bun run build
 bunx electron-builder build --win
 ```
 
-This produces an NSIS installer and portable `.exe` in `app/dist/`.
+This produces an NSIS installer and portable `.exe` in `app/dist/`. Build `cli/dist` first, the same way as on Linux. The macOS `desktop-install` script builds the CLI for you.
 
 ### Quick Tour
 
-**Menubar tray & popover** — The tray icon shows gateway status (green = running, red = stopped). Click it to open a quick-status popover:
+**Tray & popover** — On macOS the tray icon is green while the gateway is running and red while it is stopped. Linux and Windows use one tray icon; the tooltip says whether the gateway is running. Click the icon to open a quick-status popover:
 
 ![Popover](docs/images/mcpx-popover.png)
 
@@ -218,19 +224,21 @@ After manual edits, run `mcpx sync` to propagate changes.
 - Stores upstream auth in one shared secret store (an AES-256-GCM file by default, or an opt-in OS keychain) so each MCP auth flow is done once and reused across all synced clients
 - Runs a local MCP gateway daemon (`http://127.0.0.1:<port>/mcp`)
 - Syncs managed gateway entries into supported clients:
-  - Claude / Claude Code
+  - Claude Code
+  - Claude Desktop
   - Codex
   - Cursor
   - Cline
   - OpenCode
   - Kiro
-  - VS Code / VS Code Insiders
-  - Qwen CLI
+  - VS Code
+  - Qwen Code
   - OpenClaw
   - Hermes
+  - Pi
 - Gives each upstream a top-level client entry (`/vercel`, `/next-devtools`, etc.) while routing through one local daemon
 - Uses local gateway-token auth for client → gateway (`x-mcpx-local-token`)
-- Supports secret references for upstream headers. The default file store needs no Keychain prompts; `mcpx secret backend keychain` opts into the OS keychain instead
+- Supports secret references for upstream headers and stdio environment variables. The default file store needs no keychain prompts; `mcpx secret backend keychain` opts into the OS keychain on macOS and Linux
 - Passes upstream OAuth challenges through to compatible clients
 - Proxies OAuth well-known metadata endpoints in single-upstream mode
 
@@ -273,9 +281,12 @@ mcpx auth logout vercel    # clear stored OAuth credentials and the Authorizatio
 ```bash
 mcpx daemon start
 mcpx daemon status
+mcpx daemon restart
 mcpx daemon logs
 mcpx daemon stop
 ```
+
+The gateway listens on `http://127.0.0.1:<port>/mcp`. The configured port defaults to `37373`. If that port is busy, startup tries the next 20 ports, saves the one it binds, and re-syncs clients that already have a sync record. `mcpx daemon logs` prints the last 200 lines (`--lines` changes that). The log file is `daemon.log` in the state directory and rotates at 10 MB, keeping `daemon.log.1` and `daemon.log.2`.
 
 ### Targeted sync
 
@@ -289,7 +300,7 @@ mcpx sync --client claude --client codex
 
 The desktop Control Center and management CLI share the local control service.
 See the [gateway architecture guide](docs/local-gateway.md) for its control
-socket, adoption and recovery behavior.
+endpoint, adoption and recovery behavior.
 
 ```bash
 mcpx tui
@@ -312,6 +323,7 @@ mcpx plugin install owner/my-plugin
 mcpx plugin marketplace list
 mcpx plugin pin my-plugin
 mcpx plugin rollback my-plugin
+```
 
 ### Portable environments
 
@@ -324,24 +336,33 @@ mcpx share export ./shared-environment
 mcpx share import ./shared-environment --dry-run --locked
 mcpx share import ./shared-environment --locked --input server.docs.header.X-Team=team-a
 ```
-```
 
-### Config/data/state path overrides
+### Config, data, and state
 
-- `MCPX_CONFIG_HOME`
-- `MCPX_DATA_HOME`
-- `MCPX_STATE_HOME`
+mcpx uses the same directory layout on every platform, under the user profile. On Windows that is `%USERPROFILE%`, not `%APPDATA%` (some synced clients, such as VS Code, still use their own native paths).
+
+| | Default | Override |
+| --- | --- | --- |
+| Config | `~/.config/mcpx/config.json` | `MCPX_CONFIG_HOME`, else `XDG_CONFIG_HOME` |
+| Data | `~/.local/share/mcpx/` (`secrets.json`, `secrets.key`, managed index) | `MCPX_DATA_HOME`, else `XDG_DATA_HOME` |
+| State | `~/.local/state/mcpx/` (`runtime/daemon.pid`, `logs/daemon.log`) | `MCPX_STATE_HOME`, else `XDG_STATE_HOME` |
+
+Each override replaces the root (`~/.config`, `~/.local/share`, or `~/.local/state`). `mcpx doctor` prints the config path and the active secrets store.
 
 ### Troubleshooting
 
 ```bash
 mcpx doctor
 mcpx status
+mcpx status --no-interactive
+mcpx clients list
 mcpx daemon logs
 mcpx sync --json
 ```
 
-`mcpx status` opens an interactive MCP inventory menu in TTY sessions showing each configured upstream, which clients have it synced, and actions (configure auth, re-authenticate, clear auth, reconnect, disable).
+In a terminal, `mcpx status` opens the same control center as `mcpx tui`. `mcpx status --no-interactive` (or any non-TTY session) prints the gateway URL, daemon state, upstreams, and client sync states. `mcpx status --json` prints that report as JSON. `mcpx clients list` prints each supported client and the config path it detected.
+
+On macOS, startup asks the login shell for `PATH` and continues after two seconds if that shell does not exit. The tray still appears, and the app keeps the `PATH` it already had. Packaged builds load tray icons from the unpacked app resources.
 
 ---
 
@@ -423,15 +444,35 @@ Claude Desktop uses the stdio proxy to reach the local mcpx gateway. Its [remote
 
 ## Secrets
 
-mcpx keeps upstream credentials out of client config files. `MCPX_SECRET_<name>` overrides the stored value for that name on every backend, including CI and other headless sessions where a prompt is impossible.
+mcpx keeps upstream credentials out of client config files. The active backend is `secrets.backend` in `config.json`: `file` (the default) or `keychain`. The CLI and the desktop app share that setting.
 
-The default backend is an AES-256-GCM encrypted file, `secrets.json`, next to `secrets.key` in the data directory (`~/.local/share/mcpx`, or `MCPX_DATA_HOME`). Node's built-in `crypto` does the encryption, so there is no native dependency and no system prompt. The tradeoff is that the encryption key sits on disk beside the ciphertext: any program running as your user can read both files and decrypt the secrets.
+`MCPX_SECRET_<name>` overrides the stored value for that name on every backend, and it is applied before the store is read. That covers CI and other headless sessions, and it still works when the keychain cannot be unlocked.
 
-`mcpx secret backend keychain` opts into the OS keychain and moves the secrets that are already stored. mcpx deletes the encrypted file and its key only after the keychain copy reads back successfully. macOS uses the login Keychain through the built-in `security` command. The secret is written on that process's standard input (`security -i`), not as an argument, so other processes cannot see it in the process list. One interactive command is limited to 4094 bytes; a larger vault is split across several keychain items and joined again on read. Linux uses libsecret through `secret-tool` (`libsecret-tools` on Debian/Ubuntu, `libsecret` on Fedora), which also reads the secret from standard input. Windows and other platforms have no keychain backend and keep the encrypted file. The OS protects the keychain item and may prompt for access. A locked session or a missing secret service cannot unlock it, and a background gateway waits while that prompt is open. `mcpx secret backend file` copies the keychain item back into the encrypted file and then deletes the keychain item.
+### Encrypted file (default)
 
-`mcpx secret ls` and `mcpx auth status` show which backend is active. The desktop app uses the same store; Settings has an OS keychain toggle.
+`secrets.json` and `secrets.key` live in the data directory (`~/.local/share/mcpx` unless `MCPX_DATA_HOME` or `XDG_DATA_HOME` is set). Node's built-in `crypto` encrypts the file with AES-256-GCM, so there is no native dependency and no system prompt. The encryption key sits on disk beside the ciphertext: any program running as your user can read both files and decrypt the secrets.
+
+### OS keychain (opt-in)
+
+```bash
+mcpx secret backend                 # print the active backend and the tradeoff
+mcpx secret backend keychain        # opt in and migrate stored secrets
+mcpx secret backend file            # move secrets back to the encrypted file
+```
+
+Running the command for the backend that is already active changes nothing.
+
+**Platforms.** macOS uses the login Keychain through the built-in `security` command. Linux uses libsecret through `secret-tool`. Install `libsecret-tools` (Debian/Ubuntu) or `libsecret` (Fedora). If that command is missing, the switch fails and the active backend is left unchanged. Windows and every other platform reject `keychain`. Opting in fails and the file backend stays active. A config that is already set to `keychain` cannot be read or switched there; switch back to `file` on macOS or Linux first. `MCPX_SECRET_<name>` still supplies a value without reading the keychain. The desktop Settings toggle calls the same switch; a failed change reverts the toggle and shows the error.
+
+**What is stored.** One item holds the whole secret map. In Keychain Access it is labeled `mcpx secrets` (service `com.kwonye.mcpx`, account `secrets`). Linux uses the same service and account. Values are written on the tool's standard input, not as process arguments, so other processes cannot see them in the process list. On macOS that write is `security -i`. One interactive command is at most 4094 bytes. A larger vault is split across `secrets.1`, `secrets.2`, and so on (at most 256 items) and joined again on read; the `secrets` item then records only how many pieces to join. A vault that still does not fit is rejected. Linux stores a single item and does not split it. An older single-item macOS entry still reads.
+
+**Switching.** The copy you are leaving is merged onto the destination. A name that exists only on the destination is kept. The same name in both stores keeps the value from the source. mcpx reads the new copy back before it records `secrets.backend`, then deletes the previous copy (`secrets.json` and `secrets.key`, or the keychain items). If the write or the read-back fails, the active backend and the source copy stay as they were, and the previous destination copy is restored. If the new backend is already recorded but the old copy cannot be deleted, the command fails and says so; both copies still exist until that delete succeeds.
+
+**Prompts and failures.** The operating system protects the item and may prompt for access. A locked session or a missing secret service cannot unlock it. The process that is reading or writing the keychain waits while that prompt is open. A command that changes secrets waits up to two minutes if another change still holds that prompt, then reports a timeout. An unreadable file vault or keychain payload is not overwritten. Restore the matching `secrets.key`, or the previous keychain item, before retrying.
+
+`mcpx secret ls` prints `backend: file` or `backend: keychain` and the secret names, not the values. `mcpx auth status` prints `Secret backend: …`; `--json` includes `secretBackend`. `mcpx doctor` reports `secrets_store` as `keychain` or `file (<path>)`.
 
 ## Notes
 
 - Client connectivity is HTTP-first; upstreams can be HTTP or stdio
-- Secret storage is described in [Secrets](#secrets). `MCPX_SECRET_<name>` overrides the stored value on every platform
+- Secret storage is described in [Secrets](#secrets). `MCPX_SECRET_<name>` overrides the stored value on every backend

@@ -8,11 +8,13 @@ run behind the shared gateway, and shared skills retain their supporting files.
 ## Entry points and writes
 
 The desktop renderer uses a typed Electron preload bridge. In production,
-management requests go to the local authenticated control socket. The control
-service queues mutations, records operations, and publishes a committed runtime
-snapshot for gateway requests. CLI worker leases serialize command execution
-with desktop and automatic-adoption work. The direct IPC implementations remain
-available for isolated tests and use the same core synchronization transaction.
+management requests go to the local authenticated control service: a Unix
+socket, or a loopback port on Windows. See [local gateway](local-gateway.md).
+The control service queues mutations, records operations, and publishes a
+committed runtime snapshot for gateway requests. CLI worker leases serialize
+command execution with desktop and automatic-adoption work. The direct IPC
+implementations remain available for isolated tests and use the same core
+synchronization transaction.
 
 Application code calls `synchronizeClients` in `cli/src/core/sync.ts`. It reloads
 the canonical config under the cross-process config lock, selects targets, runs
@@ -45,10 +47,19 @@ are marked failed even when their canonical installation was saved successfully.
 
 Upstream API keys and OAuth credentials live in one shared store. The default
 is an AES-256-GCM encrypted file whose key sits next to the ciphertext. An
-opt-in OS keychain backend (macOS Keychain via `security`, Linux libsecret via
-`secret-tool`) is available with `mcpx secret backend keychain`; switching
-backends copies every secret and deletes the previous copy only after the new
-copy verifies. Canonical server definitions contain `secret://` or `oauth://` references.
+opt-in OS keychain backend is `secrets.backend` in the config (`mcpx secret
+backend keychain`, or the desktop Settings toggle). macOS uses the login
+Keychain through `security -i` (stdin, not argv). A vault that does not fit in
+one 4094-byte interactive command is split across up to 256 keychain items and
+joined on read. Linux uses libsecret through `secret-tool` on stdin and stores
+one item. Other platforms reject the opt-in and keep the file backend. A config
+already set to `keychain` cannot be read there. Switching merges the stores:
+the source wins when a name exists in both, and names that exist only on the
+destination are kept. mcpx reads the new copy
+back before it records the backend, then deletes the previous copy. A failed
+write or failed read-back leaves the source in place and restores the previous
+destination copy. The user-facing steps, prompts, and failure cases are in the
+README Secrets section. Canonical server definitions contain `secret://` or `oauth://` references.
 HTTP credentials bind to headers; stdio credentials bind to explicitly named
 environment variables. The gateway resolves references and refreshes upstream
 OAuth credentials for all harnesses using that canonical server.
@@ -71,6 +82,11 @@ mutations, separate config/vault instances, credential isolation, and idempotenc
 The installed-app flow in `app/e2e/adoption-installed.spec.ts` covers stdio auth,
 two-harness sync, native adoption, MCP invocation, and undo. Set
 `MCPX_INSTALLED_APP_PATH` to a packaged app executable to run it.
+
+Pull requests and pushes to `main` run `.github/workflows/ci.yml` on Ubuntu,
+macOS 15, and Windows. That job installs Bun 1.4.0, installs both packages with
+a frozen lockfile, typechecks the desktop app, builds the CLI, and runs the CLI
+and desktop unit tests. It does not package or publish.
 
 The release workflow uses Bun 1.4.0 and frozen dependency installs. Desktop jobs
 run type checking and unit tests on each platform; Linux also runs the full
