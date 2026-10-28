@@ -1800,7 +1800,7 @@ function registerSecretsCommands(program: Command): void {
 
   secret
     .command("backend [kind]")
-    .description("Show or switch the secret backend (file or keychain)")
+    .description("Show or switch the secret backend (file, or keychain on macOS and Linux)")
     .action((kind?: string) => {
       if (kind === undefined) {
         const backend = getSecretBackend();
@@ -1930,7 +1930,7 @@ function registerAuthCommands(program: Command): void {
     .option("--value <value>", "Auth value/token (if omitted, read from stdin)")
     .option("--secret-name <name>", "Override stored secret name")
     .option("--raw", "Do not auto-prefix Authorization values with Bearer")
-    .description("Store auth as an encrypted secret and bind it to an upstream server")
+    .description("Store auth in the active secret backend and bind it to an upstream server")
     .action(async (server: string, options: AuthSetOptions) => {
       const config = loadConfig();
       const spec = getServerSpecOrThrow(config, server);
