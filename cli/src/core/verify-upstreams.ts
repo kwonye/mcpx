@@ -31,7 +31,10 @@ export async function verifyUpstreams(config: McpxConfig, names: string[]): Prom
       if (capabilities?.tools) await client.listTools({}, { signal, timeout: 10000 });
       else if (capabilities?.resources) await client.listResources({}, { signal, timeout: 10000 });
       else if (capabilities?.prompts) await client.listPrompts({}, { signal, timeout: 10000 });
-    } catch { throw new Error(`Could not verify managed upstream "${name}". The native installation was preserved; configure its credentials or connection and scan again.`); }
+    } catch (error) {
+      const cause = error instanceof Error ? error.message : String(error);
+      throw new Error(`Could not verify managed upstream "${name}". The native installation was preserved; configure its credentials or connection and scan again. (${cause})`);
+    }
     finally { await client.close().catch(() => undefined); }
   }
 }

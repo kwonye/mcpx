@@ -28,6 +28,12 @@ export function pluginHostBaseEnv(
   return env;
 }
 
+// libuv resolves `node` → `node.exe` with the parent process PATHEXT, not the
+// env block passed to the child. The MCP client does not forward PATHEXT.
+export function ensureWindowsExecutablePath(parentEnv: NodeJS.ProcessEnv, platform: NodeJS.Platform): void {
+  if (platform === "win32" && !parentEnv.PATHEXT) parentEnv.PATHEXT = DEFAULT_WINDOWS_PATHEXT;
+}
+
 export function runPluginHost(pluginNameOrId: string, serverId: string): void {
   const config = loadConfig();
   const id = resolvePluginId(config, pluginNameOrId);
@@ -101,11 +107,21 @@ export function runPluginHost(pluginNameOrId: string, serverId: string): void {
   env.CLAUDE_PLUGIN_ROOT = pluginRoot;
   env.CLAUDE_PLUGIN_DATA = dataDir;
 
+  ensureWindowsExecutablePath(process.env, process.platform);
+  // 'inherit' does not attach the parent's pipes on Windows, so the MCP client
+  // never sees the plugin process. Forward the streams explicitly.
   const child = spawn(command, args, {
-    stdio: "inherit",
+    stdio: ["pipe", "pipe", "pipe"],
     cwd,
     env: env as Record<string, string>,
+    windowsHide: true,
   });
+  child.stdin?.on("error", () => undefined);
+  child.stdout?.on("error", () => undefined);
+  child.stderr?.on("error", () => undefined);
+  if (child.stdin) process.stdin.pipe(child.stdin);
+  if (child.stdout) child.stdout.pipe(process.stdout);
+  if (child.stderr) child.stderr.pipe(process.stderr);
 
   process.on("SIGINT", () => child.kill("SIGINT"));
   process.on("SIGTERM", () => child.kill("SIGTERM"));

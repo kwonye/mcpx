@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { pluginHostBaseEnv } from "../src/core/plugin-host.js";
+import { ensureWindowsExecutablePath, pluginHostBaseEnv } from "../src/core/plugin-host.js";
 
 describe("plugin host environment", () => {
   it("keeps POSIX launch variables and drops everything else", () => {
@@ -39,6 +39,20 @@ describe("plugin host environment", () => {
     expect(env.USERPROFILE).toBe("C:\\Users\\runner");
     expect(env.PATHEXT).toContain(".EXE");
     expect(env.POSTHOG_API_KEY).toBeUndefined();
+  });
+
+  it("sets PATHEXT on the parent process so Windows can resolve node.exe", () => {
+    const parent: NodeJS.ProcessEnv = { PATH: "C:\\Windows\\system32" };
+    ensureWindowsExecutablePath(parent, "win32");
+    expect(parent.PATHEXT).toContain(".EXE");
+
+    const already: NodeJS.ProcessEnv = { PATHEXT: ".EXE" };
+    ensureWindowsExecutablePath(already, "win32");
+    expect(already.PATHEXT).toBe(".EXE");
+
+    const posix: NodeJS.ProcessEnv = {};
+    ensureWindowsExecutablePath(posix, "linux");
+    expect(posix.PATHEXT).toBeUndefined();
   });
 
   it("preserves a caller-provided PATHEXT", () => {
