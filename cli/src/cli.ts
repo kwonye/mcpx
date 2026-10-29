@@ -2842,7 +2842,7 @@ function registerPluginCommands(program: Command, _cliPath: string): void {
 
 function registerPluginHostCommand(program: Command): void {
   program.command("plugin-host <plugin> <server>").description("Run a managed plugin MCP server")
-    .action(async (plugin, server) => { const { runPluginHost } = await import("./core/plugin-host.js"); runPluginHost(plugin, server); });
+    .action(async (plugin, server) => { const { runPluginHost } = await import("./core/plugin-host.js"); await runPluginHost(plugin, server); });
 }
 
 function registerProxyCommand(program: Command): void {
