@@ -91,18 +91,17 @@ function trackChild(child: ReturnType<typeof spawn>): PluginProcess {
   return { exited, kill: (signal) => child.kill(signal) };
 }
 
-// Node was started with the MCP client's pipes. Copy them in userspace:
-// inheriting fds attaches the console when that parent was created with
-// windowsHide, and the plugin then exits before server/discover.
+// The MCP client starts this host with piped stdin/stdout and windowsHide.
+// Inheriting stdio on Windows attaches the console, and opening fd 0 by path
+// fails, so the plugin sees EOF and exits during server/discover. Copy the
+// Node streams instead. This path runs under node, not Bun.
 function launchWindowsPipes(resolved: string, args: string[], cwd: string, env: Record<string, string>): PluginProcess {
-  const child = spawn(resolved, args, { stdio: ["pipe", "pipe", "pipe"], cwd, env, windowsHide: true });
-  const input = fs.createReadStream("", { fd: 0, autoClose: false });
-  const output = fs.createWriteStream("", { fd: 1, autoClose: false });
-  for (const stream of [child.stdin, child.stdout, child.stderr, input, output]) {
+  const child = spawn(resolved, args, { stdio: ["pipe", "pipe", "pipe"], cwd, env });
+  for (const stream of [child.stdin, child.stdout, child.stderr, process.stdin, process.stdout]) {
     stream?.on("error", () => undefined);
   }
-  if (child.stdin) input.pipe(child.stdin);
-  if (child.stdout) child.stdout.pipe(output);
+  if (child.stdin) process.stdin.pipe(child.stdin);
+  if (child.stdout) child.stdout.pipe(process.stdout);
   if (child.stderr) child.stderr.pipe(process.stderr);
   return trackChild(child);
 }
