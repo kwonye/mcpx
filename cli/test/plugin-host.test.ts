@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { ensureWindowsExecutablePath, pluginHostBaseEnv } from "../src/core/plugin-host.js";
+import { ensureWindowsExecutablePath, pluginHostBaseEnv, resolveSpawnCommand } from "../src/core/plugin-host.js";
 
 describe("plugin host environment", () => {
   it("keeps POSIX launch variables and drops everything else", () => {
@@ -53,6 +53,29 @@ describe("plugin host environment", () => {
     const posix: NodeJS.ProcessEnv = {};
     ensureWindowsExecutablePath(posix, "linux");
     expect(posix.PATHEXT).toBeUndefined();
+  });
+
+  it("resolves extensionless Windows commands to an absolute executable", () => {
+    const env = {
+      PATH: "C:\\Windows\\system32;C:\\Program Files\\nodejs",
+      PATHEXT: ".COM;.EXE"
+    };
+    const seen: string[] = [];
+    const resolved = resolveSpawnCommand("node", env, "win32", (candidate) => {
+      seen.push(candidate);
+      return candidate === "C:\\Program Files\\nodejs\\node.EXE";
+    });
+
+    expect(resolved).toBe("C:\\Program Files\\nodejs\\node.EXE");
+    expect(seen).toContain("C:\\Windows\\system32\\node.COM");
+    expect(seen).toContain("C:\\Program Files\\nodejs\\node.EXE");
+  });
+
+  it("leaves POSIX commands and Windows paths that already have an extension alone", () => {
+    expect(resolveSpawnCommand("node", { PATH: "/usr/bin" }, "linux", () => true)).toBe("node");
+    expect(resolveSpawnCommand("C:\\Program Files\\nodejs\\node.exe", { PATH: "C:\\Windows" }, "win32", () => {
+      throw new Error("exists should not be called");
+    })).toBe("C:\\Program Files\\nodejs\\node.exe");
   });
 
   it("preserves a caller-provided PATHEXT", () => {
