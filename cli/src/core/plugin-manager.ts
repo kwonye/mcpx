@@ -9,7 +9,7 @@ import { parseSource } from "./plugin-source.js";
 import { readManifest, discoverComponents, hasManifest } from "./plugin-parse.js";
 import { loadConfig, saveConfig } from "./config.js";
 import { mutateConfig } from "./config-store.js";
-import { syncAllClients, persistSyncState } from "./sync.js";
+import { synchronizeClients } from "./sync.js";
 import { SecretsManager } from "./secrets.js";
 import type {
   ManagedPlugin, PluginComponent, PluginManifest, PluginSource,
@@ -177,14 +177,8 @@ export class PluginManager {
     // Init data
     this.lifecycle.initData(pluginId);
 
-    // Sync projections — sync (slow I/O) runs outside the lock; persisting
-    // its result is a second locked mutation against a freshly reloaded
-    // config so it can't clobber a concurrent write.
-    const syncConfig = loadConfig(this.configPath);
-    const summary = syncAllClients(syncConfig, this.secrets);
-    await mutateConfig((freshConfig) => {
-      persistSyncState(summary, freshConfig);
-    }, this.configPath);
+    // Synchronize from the canonical config under the shared writer lock.
+    await synchronizeClients({ configPath: this.configPath }, this.secrets);
 
     return plugin;
   }
@@ -257,11 +251,7 @@ export class PluginManager {
     }, this.configPath);
 
     if (sync) {
-      const syncConfig = loadConfig(this.configPath);
-      const summary = syncAllClients(syncConfig, this.secrets);
-      await mutateConfig((freshConfig) => {
-        persistSyncState(summary, freshConfig);
-      }, this.configPath);
+      await synchronizeClients({ configPath: this.configPath }, this.secrets);
     }
 
     return updatedPlugin!;
@@ -286,11 +276,7 @@ export class PluginManager {
       await this.lifecycle.removeData(pluginId);
     }
 
-    const syncConfig = loadConfig(this.configPath);
-    const summary = syncAllClients(syncConfig, this.secrets);
-    await mutateConfig((freshConfig) => {
-      persistSyncState(summary, freshConfig);
-    }, this.configPath);
+    await synchronizeClients({ configPath: this.configPath }, this.secrets);
   }
 
   async enablePlugin(pluginId: string): Promise<void> {
@@ -307,11 +293,7 @@ export class PluginManager {
     }, this.configPath);
 
     // Sync outside the lock (slow I/O)
-    const syncConfig = loadConfig(this.configPath);
-    const summary = syncAllClients(syncConfig, this.secrets);
-    await mutateConfig((freshConfig) => {
-      persistSyncState(summary, freshConfig);
-    }, this.configPath);
+    await synchronizeClients({ configPath: this.configPath }, this.secrets);
   }
 
   async disablePlugin(pluginId: string): Promise<void> {
@@ -328,11 +310,7 @@ export class PluginManager {
     }, this.configPath);
 
     // Sync outside the lock (slow I/O)
-    const syncConfig = loadConfig(this.configPath);
-    const summary = syncAllClients(syncConfig, this.secrets);
-    await mutateConfig((freshConfig) => {
-      persistSyncState(summary, freshConfig);
-    }, this.configPath);
+    await synchronizeClients({ configPath: this.configPath }, this.secrets);
   }
 
   async approveComponent(pluginId: string, component: string): Promise<void> {
@@ -350,11 +328,7 @@ export class PluginManager {
     }, this.configPath);
 
     // Sync outside the lock (slow I/O)
-    const syncConfig = loadConfig(this.configPath);
-    const summary = syncAllClients(syncConfig, this.secrets);
-    await mutateConfig((freshConfig) => {
-      persistSyncState(summary, freshConfig);
-    }, this.configPath);
+    await synchronizeClients({ configPath: this.configPath }, this.secrets);
   }
 
   async getPluginStatus(pluginId: string): Promise<ManagedPlugin | null> {
@@ -495,11 +469,7 @@ export async function setPluginProjectOverride(
   });
 
   const secrets = new SecretsManager();
-  const syncConfig = loadConfig();
-  const summary = syncAllClients(syncConfig, secrets);
-  await mutateConfig((freshConfig) => {
-    persistSyncState(summary, freshConfig);
-  });
+  await synchronizeClients({}, secrets);
 }
 
 export async function resetPluginProjectOverride(nameOrId: string, projectPath: string): Promise<void> {
@@ -519,11 +489,7 @@ export async function resetPluginProjectOverride(nameOrId: string, projectPath: 
   });
 
   const secrets = new SecretsManager();
-  const syncConfig = loadConfig();
-  const summary = syncAllClients(syncConfig, secrets);
-  await mutateConfig((freshConfig) => {
-    persistSyncState(summary, freshConfig);
-  });
+  await synchronizeClients({}, secrets);
 }
 
 export async function approvePluginComponent(nameOrId: string, component: string): Promise<void> {
@@ -591,15 +557,7 @@ export async function pluginConfigSet(nameOrId: string, key: string, value: stri
 }
 
 export async function pluginSync(): Promise<void> {
-  // Load config and compute sync outside the lock (slow I/O)
-  const config = loadConfig();
-  const secrets = new SecretsManager();
-  const summary = syncAllClients(config, secrets);
-
-  // Persist sync state inside the lock with fresh reload
-  await mutateConfig((freshConfig) => {
-    persistSyncState(summary, freshConfig);
-  });
+  await synchronizeClients();
 }
 
 export async function preparePlugin(name: string): Promise<void> {

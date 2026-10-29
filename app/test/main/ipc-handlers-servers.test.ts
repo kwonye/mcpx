@@ -241,7 +241,7 @@ describe("ipc-handlers.ts - servers group", () => {
       startDaemon: vi.fn(async () => ({ started: true })),
       stopDaemon: vi.fn(() => ({ started: false })),
       restartDaemon: vi.fn(async () => ({ started: true })),
-      syncAllClients: syncAllClientsMock,
+      synchronizeClients: syncAllClientsMock,
       persistSyncState: persistSyncStateMock,
       addServer: addServerMock,
       removeServer: removeServerMock,
@@ -253,6 +253,8 @@ describe("ipc-handlers.ts - servers group", () => {
       saveSkill: vi.fn(),
       deleteSkill: vi.fn(),
       SecretsManager: MockSecretsManager,
+      getSecretBackend: vi.fn(() => "file"),
+      switchSecretBackend: vi.fn(() => ({ backend: "file", changed: false, migrated: [], preserved: [], removedFrom: null })),
       buildStatusReport: vi.fn(async () => ({})),
       loadManagedIndex: vi.fn(() => ({ schemaVersion: 1, managed: {} })),
       probeHttpAuthRequirement: probeHttpAuthRequirementMock,
@@ -510,11 +512,10 @@ describe("ipc-handlers.ts - servers group", () => {
 
   // ---------------------------------------------------------------------------
   describe("SYNC_ALL", () => {
-    it("syncs the loaded config, persists sync state through mutateConfig, and returns the summary", async () => {
+    it("delegates to the shared synchronization transaction and returns its summary", async () => {
       const result = await invokeHandler(IPC.SYNC_ALL);
 
-      expect(syncAllClientsMock).toHaveBeenCalledWith(fakeConfig, expect.any(MockSecretsManager));
-      expect(mutateConfigMock).toHaveBeenCalled();
+      expect(syncAllClientsMock).toHaveBeenCalledWith({}, expect.any(MockSecretsManager));
       expect(result).toBe(fakeSyncSummary);
     });
 

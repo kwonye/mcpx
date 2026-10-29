@@ -4,12 +4,32 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import crypto from "node:crypto";
-import { saveOperation, type Operation } from "../src/core/operations.js";
+import { listOperations, saveOperation, type Operation } from "../src/core/operations.js";
 import { setupTempEnv } from "./helpers.js";
-import { startControlServer, controlRequest, controlSocketPath, subscribeControlEvents } from "../src/core/control.js";
+import { coordinate, startControlServer, controlRequest, controlConnectOptions, subscribeControlEvents } from "../src/core/control.js";
 import { loadConfig } from "../src/core/config.js";
+import { mutateConfig } from "../src/core/config-store.js";
+import { runtimeConfig } from "../src/core/runtime-snapshot.js";
 
 describe("local management coordinator", () => {
+  it("reports nested sync failures and publishes committed changes after failed work", async () => {
+    const env = setupTempEnv("control-partial-");
+    const stop = await startControlServer();
+    try {
+      fs.mkdirSync(path.join(env.root, ".pi/agent/mcp.json"), { recursive: true });
+      const result = await controlRequest<any>("server.add", ["echo", { transport: "stdio", command: "node" }]);
+      expect(result.sync.hasErrors).toBe(true);
+      expect(listOperations().find(operation => operation.label === "server.add")?.phase).toBe("failed");
+      const snapshot = await controlRequest<any>("snapshot");
+      expect(snapshot.harnesses.find((h: any) => h.id === "pi").sync.status).toBe("ERROR");
+      await expect(coordinate(async () => {
+        await mutateConfig(config => { config.servers.echo.enabled = false; });
+        throw new Error("projection failed after commit");
+      })).rejects.toThrow("projection failed");
+      expect(runtimeConfig().servers.echo.enabled).toBe(false);
+    } finally { await stop(); env.restore(); }
+  });
+
   it("adopts an integration installed later when its harness enables automatic mode", async () => {
     const env = setupTempEnv("control-automatic-");
     const stop = await startControlServer();
@@ -17,7 +37,7 @@ describe("local management coordinator", () => {
       await controlRequest("harness.mode", ["pi", "automatic"]);
       const native = path.join(process.env.HOME!, ".pi/agent/mcp.json");
       fs.mkdirSync(path.dirname(native), { recursive: true });
-      fs.writeFileSync(native, JSON.stringify({ mcpServers: { echo: { command: process.execPath, args: [fileURLToPath(new URL("./fixtures/mock-stdio-mcp-server.cjs", import.meta.url))] } } }));
+      fs.writeFileSync(native, JSON.stringify({ mcpServers: { echo: { command: "node", args: [fileURLToPath(new URL("./fixtures/mock-stdio-mcp-server.cjs", import.meta.url))] } } }));
       const time = new Date().toISOString();
       const interrupted: Operation = { id: crypto.randomUUID(), label: "Interrupted adoption", phase: "recovery-required", startedAt: time, updatedAt: time, progress: 0 };
       saveOperation(interrupted);
@@ -25,7 +45,7 @@ describe("local management coordinator", () => {
       expect(loadConfig().servers.echo).toBeUndefined();
       interrupted.phase = "rolled-back";
       saveOperation(interrupted);
-      const deadline = Date.now() + 12000;
+      const deadline = Date.now() + 8000;
       while (!loadConfig().servers.echo && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 100));
       expect(loadConfig().servers.echo?.transport).toBe("stdio");
       const projected = JSON.parse(fs.readFileSync(native, "utf8"));
@@ -39,7 +59,7 @@ describe("local management coordinator", () => {
     const stop = await startControlServer();
     let unsubscribe = () => {};
     try {
-      const unauthorized = await new Promise<number>(resolve => { const request = http.get({ socketPath: controlSocketPath(), path: "/v1/events" }, response => { response.resume(); resolve(response.statusCode!); }); request.on("error", () => resolve(0)); });
+      const unauthorized = await new Promise<number>(resolve => { const request = http.get({ ...controlConnectOptions(), path: "/v1/events" }, response => { response.resume(); resolve(response.statusCode!); }); request.on("error", () => resolve(0)); });
       expect(unauthorized).toBe(403);
       const events: string[] = [];
       unsubscribe = subscribeControlEvents(event => { if (event.operation) events.push(event.operation.phase); });

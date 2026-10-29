@@ -17,7 +17,7 @@ import { managedGatewayEntryName } from "../adapters/utils/index.js";
 import { getAdapters } from "../adapters/index.js";
 import { serverSpecsEqual } from "../adapters/utils/index.js";
 import { loadManagedIndex, saveManagedIndex } from "./managed-index.js";
-import { installationAdapters } from "./harnesses.js";
+import { installationAdapters, synchronizationTargets } from "./harnesses.js";
 import { syncProjectPluginSkills } from "./plugin-projections.js";
 import { projectSkillsToDir } from "./skill-projections.js";
 import { skillVisible } from "./served-skills.js";
@@ -29,10 +29,22 @@ import { ensureGatewayToken } from "./registry.js";
 import { SecretsManager } from "./secrets.js";
 import { listSkills } from "./skills.js";
 import { withManagedIndexLock } from "./managed-index-lock.js";
+import { mutateConfig } from "./config-store.js";
 
 export interface SyncOptions {
   targetClients?: ClientId[];
   importScan?: boolean;
+  configPath?: string;
+}
+
+/** Canonical sync transaction shared by the CLI, desktop service and plugins. */
+export async function synchronizeClients(options: SyncOptions = {}, secrets = new SecretsManager()): Promise<SyncSummary> {
+  return mutateConfig(config => {
+    const targetClients = synchronizationTargets(config, options.targetClients);
+    const summary = syncAllClients(config, secrets, { ...options, targetClients });
+    persistSyncState(summary, config);
+    return summary;
+  }, options.configPath);
 }
 
 export interface SyncSummary {
@@ -122,6 +134,7 @@ function runImportPhase(
   adapters: ClientAdapter[],
   config: McpxConfig,
   managedIndex: ReturnType<typeof loadManagedIndex>,
+  secrets: SecretsManager,
 ): { imports: SyncImportReport; sourceEntriesToRemove: Map<ClientId, Set<string>>; phaseErrors: SyncSummary["phaseErrors"] } {
   const imports: SyncImportReport = { imported: [], duplicates: [], skipped: [], conflicts: [], errors: [] };
   const sourceEntriesToRemove = new Map<ClientId, Set<string>>();
@@ -146,7 +159,7 @@ function runImportPhase(
 
         const existing = config.servers[candidate.serverName];
         if (!existing) {
-          config.servers[candidate.serverName] = protectServerSecrets(candidate.serverName, candidate.spec);
+          config.servers[candidate.serverName] = protectServerSecrets(candidate.serverName, candidate.spec, secrets);
           imports.imported.push({
             clientId: candidate.clientId,
             configPath: candidate.configPath,
@@ -271,6 +284,7 @@ function runGatewayPhase(
   managedIndexPath: string,
   sourceEntriesToRemove: Map<ClientId, Set<string>>,
   projectScopes: ProjectScope[],
+  secrets: SecretsManager,
 ): { results: SyncResult[]; phaseErrors: SyncSummary["phaseErrors"] } {
   const results: SyncResult[] = [];
   const phaseErrors: SyncSummary["phaseErrors"] = [];
@@ -286,11 +300,13 @@ function runGatewayPhase(
     }
 
     try {
+      const installation = installationAdapters(config).find(item => item.installation.id === adapter.id)!.installation;
+      const token = consumerToken(config, adapter.id, installation.projectPath, secrets);
       const result = adapter.syncGateway(config, {
         managedEntries: managedEntries.filter(entry => {
           const name = entry.name.replace(/ \(mcpx\)$/, "");
           return !config.servers[name]?.scope || adapter.id.endsWith(`@${config.servers[name].scope}`);
-        }).map(entry => ({ ...entry, headers: { Authorization: `Bearer ${consumerToken(config, adapter.id, installationAdapters(config).find(item => item.installation.id === adapter.id)?.installation.projectPath)}` } })),
+        }).map(entry => ({ ...entry, headers: { Authorization: `Bearer ${token}` } })),
         managedIndex,
         managedIndexPath,
         sourceEntriesToRemove: Array.from(sourceEntriesToRemove.get(adapter.id) ?? []),
@@ -333,12 +349,12 @@ export function syncAllClients(
     let imports: SyncImportReport = { imported: [], duplicates: [], skipped: [], conflicts: [], errors: [] };
     let sourceEntriesToRemove = new Map<ClientId, Set<string>>();
     if (opts.importScan) {
-      const importResult = runImportPhase(adapters, config, managedIndex);
+      const importResult = runImportPhase(adapters, config, managedIndex, secrets);
       imports = importResult.imports;
       sourceEntriesToRemove = importResult.sourceEntriesToRemove;
       allPhaseErrors.push(...(importResult.phaseErrors ?? []));
       // Commit canonical ownership before any native registration is retired.
-      if (imports.imported.length) saveConfig(config);
+      if (imports.imported.length) saveConfig(config, opts.configPath);
     }
 
     // Phase 2: Gateway entries
@@ -348,12 +364,12 @@ export function syncAllClients(
       const installation = installationAdapters(config).find(item => item.installation.id === adapter.id)!.installation;
       consumerToken(config, adapter.id, installation.projectPath, secrets);
     }
-    saveConfig(config);
+    saveConfig(config, opts.configPath);
     const managedEntries = buildManagedEntries(config, gatewayUrl, localToken);
 
     const gatewayResult = runGatewayPhase(
       adapters, config, managedEntries, managedIndex, managedIndexPath,
-      sourceEntriesToRemove, buildProjectScopes(config),
+      sourceEntriesToRemove, buildProjectScopes(config), secrets,
     );
     const results = gatewayResult.results;
     allPhaseErrors.push(...(gatewayResult.phaseErrors ?? []));

@@ -22,6 +22,8 @@ export function SettingsPanel() {
   const [telemetry, setTelemetry] = useState<TelemetryStatus | null>(null);
   const [savingTelemetry, setSavingTelemetry] = useState(false);
   const [telemetryMessage, setTelemetryMessage] = useState<string | null>(null);
+  const [secretBackend, setSecretBackend] = useState<"file" | "keychain" | null>(null);
+  const [savingBackend, setSavingBackend] = useState(false);
 
   useEffect(() => {
     Promise.all([window.mcpx.getDesktopSettings(), window.mcpx.getTelemetryStatus?.()])
@@ -32,7 +34,34 @@ export function SettingsPanel() {
       .catch((loadError) => {
         setError(formatError(loadError));
       });
+
+    const backendPromise = window.mcpx.getSecretBackend?.();
+    if (backendPromise) {
+      void backendPromise.then((backend) => {
+        if (backend === "file" || backend === "keychain") setSecretBackend(backend);
+      }).catch((loadError: unknown) => {
+        setError(formatError(loadError));
+      });
+    }
   }, []);
+
+  const onSecretBackendToggle = async (useKeychain: boolean) => {
+    if (!window.mcpx.setSecretBackend) return;
+    const previous = secretBackend;
+    const next = useKeychain ? "keychain" : "file";
+    setSavingBackend(true);
+    setError(null);
+    setSecretBackend(next);
+    try {
+      const result = await window.mcpx.setSecretBackend(next);
+      setSecretBackend(result.backend);
+    } catch (saveError) {
+      setSecretBackend(previous);
+      setError(formatError(saveError));
+    } finally {
+      setSavingBackend(false);
+    }
+  };
 
   const onToggle = async (key: SettingKey, nextValue: boolean) => {
     if (!settings) {
@@ -153,6 +182,26 @@ export function SettingsPanel() {
           />
         </div>
       </div>
+
+      {secretBackend && (
+        <div className="setting-card">
+          <div className="setting-card__item">
+            <div>
+              <span className="setting-card__label">OS keychain</span>
+              <p className="setting-card__description">
+                Store secrets in the macOS Keychain or Linux secret service. The operating system protects them and may prompt for access. Off keeps the encrypted file, whose key sits next to the data and works without prompts.
+              </p>
+            </div>
+            <Toggle
+              id="toggle-secretBackend"
+              checked={secretBackend === "keychain"}
+              onChange={(checked) => void onSecretBackendToggle(checked)}
+              disabled={savingBackend}
+              label="OS keychain"
+            />
+          </div>
+        </div>
+      )}
 
       <div className="setting-card setting-card--grouped">
         <h3 className="setting-card__group-title">Privacy &amp; diagnostics</h3>

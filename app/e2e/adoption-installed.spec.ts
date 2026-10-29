@@ -5,6 +5,63 @@ import { createSandbox, cleanupSandbox, closeApp, openDashboardWindow } from "./
 
 const executablePath = process.env.MCPX_INSTALLED_APP_PATH;
 test.skip(!executablePath, "Set MCPX_INSTALLED_APP_PATH to the installed mcpx-dev executable.");
+test("installed app saves one stdio credential and syncs two harnesses without copying it", async () => {
+  test.setTimeout(60000);
+  const sandbox = createSandbox();
+  const home = sandbox.env.HOME!;
+  const piPath = path.join(home, ".pi/agent/mcp.json");
+  const cursorPath = path.join(home, ".cursor/mcp.json");
+  const upstreamPath = path.join(home, "authenticated-upstream.cjs");
+  fs.writeFileSync(upstreamPath, `if (process.env.API_KEY !== "installed-fixture-private-value") throw new Error("Upstream credential required");\nrequire(${JSON.stringify(path.resolve(__dirname, "../../cli/test/fixtures/mock-stdio-mcp-server.cjs"))});\n`);
+  for (const target of [piPath, cursorPath]) {
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.writeFileSync(target, JSON.stringify({ mcpServers: {} }));
+  }
+  const app = await electron.launch({ executablePath, args: ["--dev", ...sandbox.launchArgs], env: sandbox.env });
+  try {
+    const window = await openDashboardWindow(app);
+    await window.evaluate(() => document.fonts.load('24px "Material Symbols Outlined Variable"'));
+    expect(await window.evaluate(() => document.fonts.check('24px "Material Symbols Outlined Variable"'))).toBe(true);
+    const iconBounds = await window.locator(".nav-button .material-symbols-outlined").first().boundingBox();
+    expect(iconBounds!.width).toBeLessThan(40);
+    await expect(window.locator('link[href*="fonts.googleapis.com"]')).toHaveCount(0);
+    await window.evaluate(async spec => { await window.mcpx.addServer("echo", spec); }, {
+      transport: "stdio", command: process.execPath,
+      args: [upstreamPath]
+    });
+    await window.getByRole("button", { name: /Servers$/ }).click();
+    await expect(window.getByRole("heading", { name: "echo", exact: true })).toBeVisible();
+    await window.evaluate(() => window.mcpx.requestAuth("echo"));
+    await window.getByLabel("Environment variable").fill("API_KEY");
+    await window.getByLabel("Auth value").fill("installed-fixture-private-value");
+    await window.getByRole("button", { name: "Save token" }).click();
+    await expect(window.getByRole("dialog", { name: "Sign in to echo" })).not.toBeVisible();
+    const config = fs.readFileSync(path.join(sandbox.env.MCPX_CONFIG_HOME!, "mcpx/config.json"), "utf8");
+    expect(JSON.parse(config).servers.echo.env.API_KEY).toBe("secret://auth_echo_env_api_key");
+    for (const content of [config, fs.readFileSync(piPath, "utf8"), fs.readFileSync(cursorPath, "utf8")]) {
+      expect(content).not.toContain("installed-fixture-private-value");
+    }
+    const pi = JSON.parse(fs.readFileSync(piPath, "utf8")).mcpServers.echo__mcpx;
+    const cursor = JSON.parse(fs.readFileSync(cursorPath, "utf8")).mcpServers["echo (mcpx)"];
+    expect(pi.headers.Authorization).not.toBe(cursor.headers.Authorization);
+    expect(pi.url).toBe(cursor.url);
+    for (const entry of [pi, cursor]) {
+      const response = await fetch(entry.url, {
+        method: "POST",
+        headers: { ...entry.headers, accept: "application/json, text/event-stream", "content-type": "application/json", "mcp-protocol-version": "2026-07-28", "mcp-method": "tools/call", "mcp-name": "echo" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "echo", arguments: { text: "authorized through the shared gateway" }, _meta: { "io.modelcontextprotocol/protocolVersion": "2026-07-28", "io.modelcontextprotocol/clientInfo": { name: "installed-auth-test", version: "1" }, "io.modelcontextprotocol/clientCapabilities": {} } } })
+      });
+      expect((await response.json() as any).result.content[0].text).toBe("authorized through the shared gateway");
+    }
+    const before = pi.headers.Authorization;
+    await window.evaluate(() => window.mcpx.management.sync());
+    expect(JSON.parse(fs.readFileSync(piPath, "utf8")).mcpServers.echo__mcpx.headers.Authorization).toBe(before);
+    await window.getByRole("button", { name: /Harnesses$/ }).click();
+    await expect(window.getByText("Synchronized", { exact: true })).toHaveCount(2);
+    await window.screenshot({ path: "/tmp/mcpx-shared-credentials.png" });
+  } finally { await closeApp(app); cleanupSandbox(sandbox); }
+});
+
 test("installed app adopts native integrations, serves MCP, and undoes the cutover", async () => {
   test.setTimeout(90000);
   const sandbox = createSandbox();

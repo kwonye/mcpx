@@ -9,13 +9,19 @@ function existingNvmCurrentBin(): string | null {
 }
 
 export function buildEnrichedPath(current = process.env.PATH ?? ""): string {
+  const delimiter = path.delimiter;
+  const extras = process.platform === "win32"
+    ? [path.join(os.homedir(), ".bun", "bin")]
+    : [
+      "/opt/homebrew/bin",
+      "/usr/local/bin",
+      path.join(os.homedir(), ".bun", "bin"),
+      path.join(os.homedir(), ".local", "bin"),
+      existingNvmCurrentBin()
+    ];
   const candidates = [
-    ...current.split(":"),
-    "/opt/homebrew/bin",
-    "/usr/local/bin",
-    path.join(os.homedir(), ".bun", "bin"),
-    path.join(os.homedir(), ".local", "bin"),
-    existingNvmCurrentBin()
+    ...current.split(delimiter),
+    ...extras
   ].filter((entry): entry is string => Boolean(entry));
 
   const seen = new Set<string>();
@@ -28,5 +34,5 @@ export function buildEnrichedPath(current = process.env.PATH ?? ""): string {
     entries.push(candidate);
   }
 
-  return entries.join(":");
+  return entries.join(delimiter);
 }

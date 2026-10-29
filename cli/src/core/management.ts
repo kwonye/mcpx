@@ -3,7 +3,7 @@ import { loadConfig, loadMergedConfig } from "./config.js";
 import { mutateConfig } from "./config-store.js";
 import { SecretsManager } from "./secrets.js";
 import { addServer, updateServer, removeServer, setServerEnabled, setProjectServerEnabled, registerProject, unregisterProject } from "./registry.js";
-import { syncAllClients, persistSyncState } from "./sync.js";
+import { synchronizeClients } from "./sync.js";
 import { listHarnesses } from "./harnesses.js";
 import { planAdoption, applyAdoption, protectServerSecrets, adoptionPlanSchema } from "./adoption.js";
 import { listOperations, rollbackOperation } from "./operations.js";
@@ -16,24 +16,21 @@ import type { UpstreamServerSpec } from "../types.js";
 const string = z.string().min(1);
 const serverSchema = z.discriminatedUnion("transport", [z.object({ transport: z.literal("http"), url: z.url(), headers: z.record(z.string(), z.string()).optional(), enabled: z.boolean().optional(), scope: z.string().optional() }), z.object({ transport: z.literal("stdio"), command: string, args: z.array(z.string()).optional(), env: z.record(z.string(), z.string()).optional(), cwd: string.optional(), enabled: z.boolean().optional(), scope: z.string().optional() })]);
 export async function syncManaged(targets?: string[]) {
-  const config = loadConfig();
-  const detected = listHarnesses(config).filter(h => h.mode !== "observe" && (h.detected || config.harnesses?.[h.id])).map(h => h.id);
-  const summary = syncAllClients(config, new SecretsManager(), { targetClients: targets ?? detected });
-  await mutateConfig(fresh => persistSyncState(summary, fresh));
-  return summary;
+  return synchronizeClients({ targetClients: targets });
 }
 export async function managementCommand(method: string, raw: unknown[]): Promise<unknown> {
   if (method === "status") { const { buildStatusReport } = await import("./status.js"); const { loadManagedIndex } = await import("./managed-index.js"); return buildStatusReport(loadMergedConfig(), loadManagedIndex()); }
   if (method === "auth.configure") {
-    const [input] = z.tuple([z.object({ serverName: string, headerName: string, authValue: string, secretName: string.optional(), raw: z.boolean().optional() })]).parse(raw);
-    const { resolveAuthTarget, maybePrefixBearer, applyAuthReference } = await import("./server-auth.js");
-    const config = loadConfig();
-    const spec = config.servers[input.serverName];
-    if (!spec) throw new Error("Unknown server");
-    const target = resolveAuthTarget(spec, input.headerName);
-    const key = input.secretName ?? `auth_${input.serverName}_${input.headerName}`.replace(/[^A-Za-z0-9._-]/g, "_");
-    new SecretsManager().setSecret(key, maybePrefixBearer(target, input.authValue, input.raw ?? false));
-    await mutateConfig(fresh => applyAuthReference(fresh.servers[input.serverName], target, `secret://${key}`));
+    const [input] = z.tuple([z.object({ serverName: string, headerName: string.optional(), envName: string.optional(), authValue: string, secretName: string.optional(), raw: z.boolean().optional() })]).parse(raw);
+    const { resolveAuthTarget, defaultAuthSecretName, maybePrefixBearer, applyAuthReference } = await import("./server-auth.js");
+    await mutateConfig(config => {
+      const spec = config.servers[input.serverName];
+      if (!spec) throw new Error("Unknown server");
+      const target = resolveAuthTarget(spec, input.headerName, input.envName);
+      const key = input.secretName ?? defaultAuthSecretName(input.serverName, target);
+      new SecretsManager().setSecret(key, maybePrefixBearer(target, input.authValue, input.raw ?? false));
+      applyAuthReference(spec, target, `secret://${key}`);
+    });
     return { configured: true, sync: await syncManaged() };
   }
   if (method === "snapshot") {
@@ -98,8 +95,8 @@ export async function managementCommand(method: string, raw: unknown[]): Promise
       case "rollback": result = skills.rollbackSkill(id); break;
       default: throw new Error("Unknown skill operation");
     }
-    await syncManaged();
-    return result;
+    const sync = await syncManaged();
+    return { ...(result as object), sync };
   }
   if (method.startsWith("plugin.")) {
     const plugins = await import("./plugin-manager.js");

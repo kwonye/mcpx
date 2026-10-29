@@ -32,7 +32,7 @@ export function parseSource(source: string): PluginSource {
     };
   }
 
-  if (source.startsWith("/") || source.startsWith("./") || source.startsWith("../") || source === "." || source === "..") {
+  if (source.startsWith("/") || source.startsWith("./") || source.startsWith("../") || source === "." || source === ".." || source.startsWith("\\\\") || /^[a-zA-Z]:[\\/]/.test(source)) {
     return {
       type: "local",
       original: source,

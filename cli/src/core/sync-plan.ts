@@ -1,13 +1,14 @@
 import { loadConfig } from "./config.js";
 import { loadManagedIndex } from "./managed-index.js";
-import { installationAdapters } from "./harnesses.js";
+import { installationAdapters, synchronizationTargets } from "./harnesses.js";
 import { readNativeDocument, nativeServers } from "./native-document.js";
 import { sha256 } from "../util/fs.js";
 
 /** Read-only synchronization preview; credentials and raw configurations stay local. */
 export function planSynchronization(targets?: string[]) {
   const config = loadConfig(), index = loadManagedIndex();
-  return { revision: config.revision ?? 0, harnesses: installationAdapters(config).filter(({ installation }) => !targets?.length || targets.includes(installation.id)).map(({ installation, adapter }) => {
+  const selected = synchronizationTargets(config, targets);
+  return { revision: config.revision ?? 0, harnesses: installationAdapters(config).filter(({ installation }) => selected.includes(installation.id)).map(({ installation, adapter }) => {
     const changes: Array<{ name: string; action: string }> = [];
     if (installation.mode === "observe") return { id: installation.id, configPath: installation.configPath, changes, message: "Observe only" };
     try {

@@ -2,10 +2,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { ControlCenter } from "../../src/renderer/components/ControlCenter";
 
-const { refresh, snapshot } = vi.hoisted(() => ({ refresh: vi.fn().mockResolvedValue(undefined), snapshot: { revision: 3, capturedAt: "2026-10-17T12:00:00Z", harnesses: [{ id: "pi", harness: "pi", label: "Pi", scope: "global", configPath: "/test/.pi/agent/mcp.json", skillPaths: [], detected: true, mode: "selected", transports: ["http"], components: ["mcp", "skill"], reload: "Reload Pi" }], operations: [{ id: "operation", label: "Adopt native integrations", phase: "complete", undoable: true, startedAt: "2026-10-17T12:00:00Z", updatedAt: "2026-10-17T12:00:00Z", progress: 1 }], servers: [], skills: [], packages: [], plugins: [] } }));
+const { refresh, snapshot } = vi.hoisted(() => ({ refresh: vi.fn().mockResolvedValue(undefined), snapshot: { revision: 3, capturedAt: "2026-10-17T12:00:00Z", harnesses: [{ id: "pi", harness: "pi", label: "Pi", scope: "global", configPath: "/test/.pi/agent/mcp.json", skillPaths: [], detected: true, mode: "selected", transports: ["http"], components: ["mcp", "skill"], reload: "Reload Pi", sync: undefined as { status: "ERROR"; message: string } | undefined }], operations: [{ id: "operation", label: "Adopt native integrations", phase: "complete", undoable: true, startedAt: "2026-10-17T12:00:00Z", updatedAt: "2026-10-17T12:00:00Z", progress: 1 }], servers: [], skills: [], packages: [], plugins: [] } }));
 vi.mock("../../src/renderer/hooks/useManagement", () => ({ useManagement: () => ({ snapshot, error: null, loading: false, refresh }) }));
 const api = { plan: vi.fn(), apply: vi.fn().mockResolvedValue({}), mode: vi.fn().mockResolvedValue({}), rollback: vi.fn().mockResolvedValue({}), sync: vi.fn().mockResolvedValue({ hasErrors: false }) };
 beforeEach(() => {
+  snapshot.harnesses[0].sync = undefined;
   vi.clearAllMocks();
   Object.defineProperty(window, "mcpx", { value: { management: api }, configurable: true });
   HTMLDialogElement.prototype.showModal = function () { this.setAttribute("open", ""); };
@@ -35,4 +36,11 @@ describe("integration control center", () => {
     expect(await screen.findByRole("alert")).toHaveProperty("textContent", "Local edits prevent undo");
     expect(screen.getByRole("button", { name: "Undo operation" })).toBeDefined();
   });
+  it("shows persisted sync failures on the affected harness", () => {
+    snapshot.harnesses[0].sync = { status: "ERROR", message: "skills: Local edits prevent projection" };
+    render(<ControlCenter view="harnesses" />);
+    expect(screen.getByRole("alert").textContent).toContain("Sync needs attention");
+    expect(screen.getByRole("alert").textContent).toContain("Local edits prevent projection");
+  });
+
 });

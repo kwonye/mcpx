@@ -87,13 +87,23 @@ describe("lifecycle handlers", () => {
     });
   });
 
-  it("quits when all windows close on Windows", () => {
+  it("keeps the tray running when all windows close on Windows", () => {
     withPlatform("win32", () => {
       const { handlers, mockApp } = registerHandlers();
 
       handlers["window-all-closed"]?.();
 
-      expect(mockApp.quit).toHaveBeenCalled();
+      expect(mockApp.quit).not.toHaveBeenCalled();
+    });
+  });
+
+  it("keeps the tray running when all windows close on Linux", () => {
+    withPlatform("linux", () => {
+      const { handlers, mockApp } = registerHandlers();
+
+      handlers["window-all-closed"]?.();
+
+      expect(mockApp.quit).not.toHaveBeenCalled();
     });
   });
 

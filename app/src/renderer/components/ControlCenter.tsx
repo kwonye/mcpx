@@ -32,6 +32,10 @@ function HarnessCard({ harness, busy, onScan, onMode }: { harness: HarnessInstal
     <h3>{harness.label}</h3><p className="control-caption">{harness.scope === "project" ? "Project installation" : "Personal installation"}</p>
     <div className="control-path">{harness.configPath}</div>
     <div className="harness-capabilities">{harness.components.map(component => <span key={component}>{component === "mcp" ? "MCP servers" : "Skills"}</span>)}</div>
+    {harness.sync && <div className="control-caption" role={harness.sync.status === "ERROR" ? "alert" : "status"}>
+      {harness.sync.status === "ERROR" ? "Sync needs attention" : harness.sync.status === "SYNCED" ? "Synchronized" : harness.sync.status === "SKIPPED" ? "Sync skipped" : "Transport unavailable"}
+      {harness.sync.message && <p className="control-diagnostic">{harness.sync.message}</p>}
+    </div>}
     <label className="harness-mode">Synchronization<select aria-label={`Sync mode for ${harness.label}`} value={harness.mode} disabled={busy} onChange={event => onMode(event.target.value as HarnessInstallation["mode"])}><option value="observe">Observe only</option><option value="selected">Manage selected</option><option value="automatic">Automatically adopt</option></select></label>
     <button className="control-button harness-scan" disabled={busy || !harness.detected} onClick={onScan}>Review native installations<span aria-hidden="true">↗</span></button>
   </article>;

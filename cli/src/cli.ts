@@ -18,11 +18,12 @@ import { loadConfig, loadMergedConfig, resolveActiveConfig, loadProjectConfig, C
 import { mutateActiveConfig, mutateConfig, mutateProjectConfig } from "./core/config-store.js";
 import { addServer, removeServer, setServerEnabled, registerProject, unregisterProject, rotateGatewayToken } from "./core/registry.js";
 import { listSkills, getSkill, saveSkill, deleteSkill, customizeSkill, installSkillFromSource, pinSkill, unpinSkill, updateSkill, rollbackSkill } from "./core/skills.js";
-import { SecretsManager, readSecretValueFromStdin } from "./core/secrets.js";
+import { SecretsManager, readSecretValueFromStdin, describeSecretBackend, getSecretBackend, switchSecretBackend } from "./core/secrets.js";
+import type { SecretBackendKind } from "./types.js";
 import { probeHttpAuthRequirement } from "./core/auth-probe.js";
 import { fetchRegistryServerDetail, selectBestPackage, extractRequiredInputs, mapRegistryToSpec } from "./core/registry-client.js";
 import type { RequiredInput } from "./core/registry-client.js";
-import { syncAllClients, persistSyncState } from "./core/sync.js";
+import { syncAllClients, synchronizeClients } from "./core/sync.js";
 import { isServerEnabled, type ClientId, type ClientStatus, type HttpServerSpec, type McpxConfig, type StdioServerSpec, type UpstreamServerSpec, type PluginComponent } from "./types.js";
 import { parseCompatibilityArgs } from "./compat/index.js";
 import {
@@ -321,15 +322,8 @@ async function ensureDaemonIfEnabled(cliPath: string, secrets: SecretsManager): 
 async function autoSyncManagedEntries(cliPath: string): Promise<void> {
   const secrets = new SecretsManager();
   await ensureDaemonIfEnabled(cliPath, secrets);
-  // Reload fresh right before syncing (rather than trusting a snapshot the
-  // caller may have loaded before an earlier config mutation completed), and
-  // persist the resulting client-sync state through the config lock so this
-  // never clobbers a concurrent mutation's changes with a stale save.
-  const config = loadMergedConfig();
-  const summary = syncAllClients(config, secrets);
-  await mutateConfig((freshConfig) => {
-    persistSyncState(summary, freshConfig);
-  });
+  // Use the same locked transaction as desktop and plugin operations.
+  const summary = await synchronizeClients({}, secrets);
   printSyncSummary(summary, false);
   ensureExitCodeForSyncFailures(summary.hasErrors);
 }
@@ -477,11 +471,7 @@ async function performOAuthLogout(
 
   let sync: ReturnType<typeof syncAllClients> | undefined;
   if (removedBinding) {
-    const syncSourceConfig = loadConfig();
-    sync = syncAllClients(syncSourceConfig, secrets);
-    await mutateConfig((freshConfig) => {
-      persistSyncState(sync!, freshConfig);
-    });
+    sync = await synchronizeClients({}, secrets);
   }
 
   return { removedSecrets, removedBinding, sync };
@@ -1036,10 +1026,7 @@ async function reconnectGatewayAndSync(cliPath: string): Promise<void> {
   const secrets = new SecretsManager();
   const restart = await restartDaemon(config, cliPath, secrets);
   process.stdout.write(`${restart.message} pid=${restart.pid} port=${restart.port}\n`);
-  const summary = syncAllClients(config, secrets);
-  await mutateConfig((freshConfig) => {
-    persistSyncState(summary, freshConfig);
-  });
+  const summary = await synchronizeClients({}, secrets);
   printSyncSummary(summary, false);
 }
 
@@ -1077,7 +1064,7 @@ async function setServerEnabledInteractively(
 
           if (handled) {
             process.stdout.write(`${enabled ? "Enabled" : "Disabled"} server: ${serverName}\n`);
-            process.stdout.write("Auto-syncing managed gateway entries across all supported clients...\n");
+            process.stdout.write("Syncing managed integrations to detected and selected harnesses...\n");
             await autoSyncManagedEntries(cliPath);
             return true;
           }
@@ -1090,7 +1077,7 @@ async function setServerEnabledInteractively(
     setServerEnabled(freshConfig, serverName, enabled);
   });
   process.stdout.write(`${enabled ? "Enabled" : "Disabled"} server: ${serverName}\n`);
-  process.stdout.write("Auto-syncing managed gateway entries across all supported clients...\n");
+  process.stdout.write("Syncing managed integrations to detected and selected harnesses...\n");
   await autoSyncManagedEntries(cliPath);
   return true;
 }
@@ -1303,7 +1290,7 @@ function registerEnabledCommand(parent: Command, enabled: boolean, cliPath: stri
 
       process.stdout.write(`${enabled ? "Enabled" : "Disabled"} server: ${name} (${type} config)\n`);
       capture(enabled ? "server_enabled" : "server_disabled", { scope: type });
-      process.stdout.write("Auto-syncing managed gateway entries across all supported clients...\n");
+      process.stdout.write("Syncing managed integrations to detected and selected harnesses...\n");
       await autoSyncManagedEntries(cliPath);
       captureTelemetryEvent({
         name: "operation_completed",
@@ -1425,7 +1412,7 @@ function registerAddCommand(parent: Command, cliPath: string): void {
         }
       }
 
-      process.stdout.write("Auto-syncing managed gateway entries across all supported clients...\n");
+      process.stdout.write("Syncing managed integrations to detected and selected harnesses...\n");
       await autoSyncManagedEntries(cliPath);
       markTelemetryMilestone("first_server_added");
       captureTelemetryEvent({
@@ -1458,7 +1445,7 @@ function registerRemoveCommand(parent: Command, cliPath: string): void {
 
       process.stdout.write(`Removed server: ${name} ${type === "project" ? `from project: ${projectPath}` : "globally"}\n`);
       capture("server_removed", { scope: type });
-      process.stdout.write("Auto-syncing managed gateway entries across all supported clients...\n");
+      process.stdout.write("Syncing managed integrations to detected and selected harnesses...\n");
       await autoSyncManagedEntries(cliPath);
       captureTelemetryEvent({
         name: "operation_completed",
@@ -1556,7 +1543,6 @@ function registerSyncCommand(program: Command, cliPath: string): void {
     .description("Sync gateway configuration to supported clients (e.g. `mcpx sync claude`)")
     .action(async (clients: string[], options: { client: string[]; json?: boolean; import?: boolean; dryRun?: boolean }) => {
       const startedAt = Date.now();
-      let config = loadConfig();
       const targetClients = parseClientList([...(clients ?? []), ...(options.client ?? [])]);
       if (options.dryRun) { process.stdout.write(JSON.stringify(planSynchronization(targetClients), null, 2) + "\n"); return; }
       const secrets = new SecretsManager();
@@ -1564,12 +1550,8 @@ function registerSyncCommand(program: Command, cliPath: string): void {
       if (options.import && process.env.MCPX_CONTROL_CHILD === "1") {
         const plan = planAdoption(targetClients);
         if (plan.items.some(item => ["import", "reuse"].includes(item.action))) await applyAdoption(plan);
-        config = loadConfig();
       }
-      const summary = syncAllClients(config, secrets, { targetClients, importScan: options.import && process.env.MCPX_CONTROL_CHILD !== "1" });
-      await mutateConfig((freshConfig) => {
-        persistSyncState(summary, freshConfig);
-      });
+      const summary = await synchronizeClients({ targetClients, importScan: options.import && process.env.MCPX_CONTROL_CHILD !== "1" }, secrets);
       printSyncSummary(summary, options.json ?? false);
       ensureExitCodeForSyncFailures(summary.hasErrors);
       if (!summary.hasErrors) markTelemetryMilestone("first_sync_succeeded");
@@ -1631,12 +1613,21 @@ function registerDoctorCommand(program: Command): void {
         details: getManagedIndexPath()
       });
 
-      // Check encrypted secrets store
+      // Check the active secret backend (encrypted file by default, OS keychain when opted in).
       try {
-        new SecretsManager().listSecretNames();
-        checks.push({ check: "secrets_store", status: "ok", details: getSecretsStorePath() });
-      } catch {
-        checks.push({ check: "secrets_store", status: "warn", details: "encrypted secrets store unavailable" });
+        const secrets = new SecretsManager();
+        secrets.listSecretNames();
+        checks.push({
+          check: "secrets_store",
+          status: "ok",
+          details: secrets.backend === "keychain" ? "keychain" : `file (${getSecretsStorePath()})`
+        });
+      } catch (err) {
+        checks.push({
+          check: "secrets_store",
+          status: "warn",
+          details: err instanceof Error ? err.message : "secrets store unavailable"
+        });
       }
 
       const daemon = getDaemonStatus(config);
@@ -1745,13 +1736,37 @@ function registerDaemonCommands(program: Command): void {
     });
 }
 
+function printSecretBackendSwitch(result: ReturnType<typeof switchSecretBackend>): void {
+  if (!result.changed) {
+    process.stdout.write(`Secret backend already ${result.backend}.\n`);
+    return;
+  }
+  process.stdout.write(`Secret backend: ${result.backend}\n`);
+  if (result.migrated.length === 0) {
+    process.stdout.write("No stored secrets to migrate.\n");
+  } else {
+    process.stdout.write(`Migrated ${result.migrated.length} secret(s): ${result.migrated.join(", ")}\n`);
+  }
+  if (result.preserved.length > 0) {
+    const where = result.backend === "keychain" ? "keychain" : "file store";
+    process.stdout.write(`Kept ${result.preserved.length} secret(s) already in the ${where}: ${result.preserved.join(", ")}\n`);
+  }
+  if (result.removedFrom && result.migrated.length > 0) {
+    process.stdout.write(
+      result.removedFrom === "file"
+        ? "Removed secrets from the file store.\n"
+        : "Removed secrets from the keychain.\n"
+    );
+  }
+}
+
 function registerSecretsCommands(program: Command): void {
-  const secret = program.command("secret").description("Manage encrypted secrets");
+  const secret = program.command("secret").description("Manage stored secrets");
 
   secret
     .command("set <name>")
     .option("--value <value>", "Secret value")
-    .description("Set an encrypted secret")
+    .description("Set a stored secret")
     .action((name: string, options: { value?: string }) => {
       const value = options.value ?? readSecretValueFromStdin();
       new SecretsManager().setSecret(name, value);
@@ -1760,7 +1775,7 @@ function registerSecretsCommands(program: Command): void {
 
   secret
     .command("rm <name>")
-    .description("Remove an encrypted secret")
+    .description("Remove a stored secret")
     .action((name: string) => {
       new SecretsManager().removeSecret(name);
       process.stdout.write(`Secret removed: ${name}\n`);
@@ -1768,9 +1783,11 @@ function registerSecretsCommands(program: Command): void {
 
   secret
     .command("ls")
-    .description("List secret names tracked by mcpx")
+    .description("List secret names tracked by mcpx and the active backend")
     .action(() => {
-      const names = new SecretsManager().listSecretNames();
+      const secrets = new SecretsManager();
+      process.stdout.write(`backend: ${secrets.backend}\n`);
+      const names = secrets.listSecretNames();
       if (names.length === 0) {
         process.stdout.write("No tracked secrets.\n");
         return;
@@ -1779,6 +1796,22 @@ function registerSecretsCommands(program: Command): void {
       for (const name of names) {
         process.stdout.write(`${name}\n`);
       }
+    });
+
+  secret
+    .command("backend [kind]")
+    .description("Show or switch the secret backend (file, or keychain on macOS and Linux)")
+    .action((kind?: string) => {
+      if (kind === undefined) {
+        const backend = getSecretBackend();
+        process.stdout.write(`Secret backend: ${backend}\n`);
+        process.stdout.write(`${describeSecretBackend(backend)}\n`);
+        return;
+      }
+      if (kind !== "file" && kind !== "keychain") {
+        throw new Error(`Unknown secret backend "${kind}". Use "file" or "keychain".`);
+      }
+      printSecretBackendSwitch(switchSecretBackend(kind as SecretBackendKind));
     });
 }
 
@@ -1897,7 +1930,7 @@ function registerAuthCommands(program: Command): void {
     .option("--value <value>", "Auth value/token (if omitted, read from stdin)")
     .option("--secret-name <name>", "Override stored secret name")
     .option("--raw", "Do not auto-prefix Authorization values with Bearer")
-    .description("Store auth as an encrypted secret and bind it to an upstream server")
+    .description("Store auth in the active secret backend and bind it to an upstream server")
     .action(async (server: string, options: AuthSetOptions) => {
       const config = loadConfig();
       const spec = getServerSpecOrThrow(config, server);
@@ -2028,9 +2061,11 @@ function registerAuthCommands(program: Command): void {
       });
 
       if (options.json) {
-        process.stdout.write(`${JSON.stringify({ servers: entries }, null, 2)}\n`);
+        process.stdout.write(`${JSON.stringify({ secretBackend: secrets.backend, servers: entries }, null, 2)}\n`);
         return;
       }
+
+      process.stdout.write(`Secret backend: ${secrets.backend}\n`);
 
       if (entries.length === 0) {
         process.stdout.write("No upstream servers configured.\n");
@@ -2121,8 +2156,8 @@ function registerSkillsCommands(program: Command): void {
         return;
       }
       saveSkill(id, `---\nname: ${id}\ndescription: Instructions for using ${id}.\n---\n\nAdd your instructions here.`);
-      const summary = syncAllClients(loadConfig(), new SecretsManager());
-      await mutateConfig((config) => persistSyncState(summary, config));
+      const summary = await synchronizeClients();
+      ensureExitCodeForSyncFailures(summary.hasErrors);
       process.stdout.write(`Skill "${id}" created.\n`);
       captureTelemetryEvent({
         name: "operation_completed",
@@ -2142,8 +2177,8 @@ function registerSkillsCommands(program: Command): void {
         return;
       }
       deleteSkill(id);
-      const summary = syncAllClients(loadConfig(), new SecretsManager());
-      await mutateConfig((config) => persistSyncState(summary, config));
+      const summary = await synchronizeClients();
+      ensureExitCodeForSyncFailures(summary.hasErrors);
       process.stdout.write(`Skill "${id}" removed.\n`);
       captureTelemetryEvent({
         name: "operation_completed",
@@ -2167,8 +2202,8 @@ function registerSkillsCommands(program: Command): void {
     .action(async (source: string, options: { skill?: string }) => {
       try {
         const installed = await installSkillFromSource(source, options.skill);
-        const summary = syncAllClients(loadConfig(), new SecretsManager());
-        await mutateConfig((freshConfig) => persistSyncState(summary, freshConfig));
+        const summary = await synchronizeClients();
+        ensureExitCodeForSyncFailures(summary.hasErrors);
         process.stdout.write(`Skill installed: ${installed.id}\n`);
       } catch (error) {
         process.stderr.write(`Error: ${error instanceof Error ? error.message : String(error)}\n`);
@@ -2178,8 +2213,8 @@ function registerSkillsCommands(program: Command): void {
 
   skill.command("pin <id>").description("Pin an installed skill at its current revision").action((id: string) => { pinSkill(id); process.stdout.write(`Skill pinned: ${id}\n`); });
   skill.command("unpin <id>").description("Allow an installed skill to update").action((id: string) => { unpinSkill(id); process.stdout.write(`Skill unpinned: ${id}\n`); });
-  skill.command("update <id>").description("Update an installed skill from its source").action(async (id: string) => { const skill = await updateSkill(id); const summary = syncAllClients(loadConfig(), new SecretsManager()); await mutateConfig((freshConfig) => persistSyncState(summary, freshConfig)); process.stdout.write(`Skill updated: ${skill.id}\n`); });
-  skill.command("rollback <id>").description("Restore the previous installed skill revision").action(async (id: string) => { const skill = rollbackSkill(id); const summary = syncAllClients(loadConfig(), new SecretsManager()); await mutateConfig((freshConfig) => persistSyncState(summary, freshConfig)); process.stdout.write(`Skill rolled back: ${skill.id}\n`); });
+  skill.command("update <id>").description("Update an installed skill from its source").action(async (id: string) => { const skill = await updateSkill(id); const summary = await synchronizeClients(); ensureExitCodeForSyncFailures(summary.hasErrors); process.stdout.write(`Skill updated: ${skill.id}\n`); });
+  skill.command("rollback <id>").description("Restore the previous installed skill revision").action(async (id: string) => { const skill = rollbackSkill(id); const summary = await synchronizeClients(); ensureExitCodeForSyncFailures(summary.hasErrors); process.stdout.write(`Skill rolled back: ${skill.id}\n`); });
 }
 
 function registerShareCommands(program: Command): void {
@@ -2212,8 +2247,8 @@ function registerShareCommands(program: Command): void {
         const result = await importEnvironment(directory, { dryRun: options.dryRun, locked: options.locked, inputs: options.input });
         process.stdout.write(JSON.stringify(result, null, 2) + "\n");
         if (!options.dryRun) {
-          const summary = syncAllClients(loadConfig(), new SecretsManager());
-          await mutateConfig((freshConfig) => persistSyncState(summary, freshConfig));
+          const summary = await synchronizeClients();
+          ensureExitCodeForSyncFailures(summary.hasErrors);
         }
       } catch (error) {
         process.stderr.write(`Error: ${error instanceof Error ? error.message : String(error)}\n`);
@@ -2433,7 +2468,7 @@ function registerProjectCommands(program: Command, cliPath: string): void {
       });
       process.stdout.write(`Unregistered project "${entry.name}" (${resolvedPath}) from the global configuration.\n`);
       
-      process.stdout.write("Auto-syncing managed gateway entries across all supported clients...\n");
+      process.stdout.write("Syncing managed integrations to detected and selected harnesses...\n");
       await autoSyncManagedEntries(cliPath);
       captureTelemetryEvent({
         name: "operation_completed",

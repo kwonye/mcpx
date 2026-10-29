@@ -10,8 +10,7 @@ import {
   startDaemon,
   stopDaemon,
   restartDaemon,
-  syncAllClients,
-  persistSyncState,
+  synchronizeClients,
   addServer,
   removeServer,
   setServerEnabled,
@@ -29,6 +28,8 @@ import {
   exportEnvironment,
   importEnvironment,
   SecretsManager,
+  getSecretBackend,
+  switchSecretBackend,
   buildStatusReport,
   loadManagedIndex,
   probeHttpAuthRequirement,
@@ -37,6 +38,7 @@ import {
   resolveAuthTarget,
   toSecretRef,
   maybePrefixBearer,
+  defaultAuthSecretName,
   parseCliAddCommand,
   tokenizeCommandLine,
   runOAuthLogin,
@@ -338,6 +340,13 @@ export function registerIpcHandlers(options: { controlService?: boolean } = {}):
     return loadDesktopSettings();
   });
 
+  registerHandler(IPC.GET_SECRET_BACKEND, () => getSecretBackend());
+
+  registerHandler(IPC.SET_SECRET_BACKEND, (_event, backend: unknown) => {
+    const parsed = z.enum(["file", "keychain"]).parse(backend);
+    return switchSecretBackend(parsed);
+  });
+
   registerHandler(IPC.GET_TELEMETRY_STATUS, () => getTelemetryStatus());
 
   registerHandler(IPC.ACKNOWLEDGE_TELEMETRY_NOTICE, async () => {
@@ -401,11 +410,7 @@ export function registerIpcHandlers(options: { controlService?: boolean } = {}):
       addServer(config, name, spec, true);
     });
     const secrets = new SecretsManager();
-    const config = loadConfig();
-    const summary = syncAllClients(config, secrets);
-    await mutateConfig((freshConfig) => {
-      persistSyncState(summary, freshConfig);
-    });
+    const summary = await synchronizeClients({}, secrets);
     queueTokenCountRefresh();
 
     const result: { added: string; sync: typeof summary; authRequired?: boolean; authStatus?: number; oauthLikely?: boolean; oauthSupport?: string } = { added: name, sync: summary };
@@ -425,9 +430,10 @@ export function registerIpcHandlers(options: { controlService?: boolean } = {}):
     return result;
   });
 
-  registerTelemetryHandler(IPC.CONFIGURE_AUTH, "auth_login", async (_event, { serverName, headerName, authValue, secretName, raw }: { serverName: string; headerName: string; authValue: string; secretName?: string; raw?: boolean }) => {
+  registerTelemetryHandler(IPC.CONFIGURE_AUTH, "auth_login", async (_event, { serverName, headerName, envName, authValue, secretName, raw }: { serverName: string; headerName?: string; envName?: string; authValue: string; secretName?: string; raw?: boolean }) => {
     serverNameSchema.parse(serverName);
-    headerNameSchema.parse(headerName);
+    if (headerName !== undefined) headerNameSchema.parse(headerName);
+    if (envName !== undefined) z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/).parse(envName);
     authValueSchema.parse(authValue);
     if (secretName !== undefined) z.string().min(1).parse(secretName);
     const config = loadConfig();
@@ -435,8 +441,8 @@ export function registerIpcHandlers(options: { controlService?: boolean } = {}):
     if (!spec) throw new Error(`Server "${serverName}" not found`);
 
     const secrets = new SecretsManager();
-    const resolvedSecretName = secretName ?? `auth_${serverName.toLowerCase().replace(/[^a-z0-9._-]/g, "_")}_header_${headerName.toLowerCase().replace(/[^a-z0-9._-]/g, "_")}`;
-    const target = resolveAuthTarget(spec, headerName);
+    const target = resolveAuthTarget(spec, headerName, envName);
+    const resolvedSecretName = secretName ?? defaultAuthSecretName(serverName, target);
     const finalValue = maybePrefixBearer(target, authValue, raw ?? false);
     secrets.setSecret(resolvedSecretName, finalValue);
 
@@ -446,11 +452,7 @@ export function registerIpcHandlers(options: { controlService?: boolean } = {}):
       applyAuthReference(freshSpec, target, toSecretRef(resolvedSecretName));
     });
 
-    const syncSourceConfig = loadConfig();
-    const summary = syncAllClients(syncSourceConfig, secrets);
-    await mutateConfig((freshConfig) => {
-      persistSyncState(summary, freshConfig);
-    });
+    const summary = await synchronizeClients({}, secrets);
     queueTokenCountRefresh();
 
     dismissPendingAuth(serverName);
@@ -576,11 +578,7 @@ export function registerIpcHandlers(options: { controlService?: boolean } = {}):
     // Otherwise a later same-named re-add would silently reuse stale OAuth
     // tokens/client registration left behind by the removed server.
     clearOAuthCredentials(name, secrets);
-    const config = loadConfig();
-    const summary = syncAllClients(config, secrets);
-    await mutateConfig((freshConfig) => {
-      persistSyncState(summary, freshConfig);
-    });
+    const summary = await synchronizeClients({}, secrets);
     queueTokenCountRefresh();
     return { removed: name, sync: summary };
   });
@@ -592,11 +590,7 @@ export function registerIpcHandlers(options: { controlService?: boolean } = {}):
       setServerEnabled(config, name, enabled);
     });
     const secrets = new SecretsManager();
-    const config = loadConfig();
-    const summary = syncAllClients(config, secrets);
-    await mutateConfig((freshConfig) => {
-      persistSyncState(summary, freshConfig);
-    });
+    const summary = await synchronizeClients({}, secrets);
     queueTokenCountRefresh();
     return { updated: name, enabled, sync: summary };
   });
@@ -606,11 +600,7 @@ export function registerIpcHandlers(options: { controlService?: boolean } = {}):
       return setProjectServerEnabled(config, projectPath, serverName, enabled);
     });
     const secrets = new SecretsManager();
-    const config = loadConfig();
-    const summary = syncAllClients(config, secrets);
-    await mutateConfig((freshConfig) => {
-      persistSyncState(summary, freshConfig);
-    });
+    const summary = await synchronizeClients({}, secrets);
     queueTokenCountRefresh();
     return { updated: serverName, projectPath, enabled, sync: summary, effective: result.effective, reason: result.reason };
   });
@@ -660,22 +650,14 @@ export function registerIpcHandlers(options: { controlService?: boolean } = {}):
     await mutateConfig((config) => {
       updateServer(config, name, spec);
     });
-    const config = loadConfig();
-    const summary = syncAllClients(config, secrets);
-    await mutateConfig((freshConfig) => {
-      persistSyncState(summary, freshConfig);
-    });
+    const summary = await synchronizeClients({}, secrets);
     queueTokenCountRefresh();
     return { updated: name, sync: summary };
   });
 
   registerTelemetryHandler(IPC.SYNC_ALL, "client_sync", async () => {
-    const config = loadConfig();
     const secrets = new SecretsManager();
-    const summary = syncAllClients(config, secrets);
-    await mutateConfig((freshConfig) => {
-      persistSyncState(summary, freshConfig);
-    });
+    const summary = await synchronizeClients({}, secrets);
     queueTokenCountRefresh();
     if (!summary.hasErrors) safeMarkTelemetryMilestone("first_sync_succeeded");
     return summary;
@@ -687,11 +669,7 @@ export function registerIpcHandlers(options: { controlService?: boolean } = {}):
     });
 
     const secrets = new SecretsManager();
-    const config = loadConfig();
-    const summary = syncAllClients(config, secrets);
-    await mutateConfig((freshConfig) => {
-      persistSyncState(summary, freshConfig);
-    });
+    const summary = await synchronizeClients({}, secrets);
     queueTokenCountRefresh();
     return { success: true, sync: summary };
   });
@@ -702,11 +680,7 @@ export function registerIpcHandlers(options: { controlService?: boolean } = {}):
     });
 
     const secrets = new SecretsManager();
-    const config = loadConfig();
-    const summary = syncAllClients(config, secrets);
-    await mutateConfig((freshConfig) => {
-      persistSyncState(summary, freshConfig);
-    });
+    const summary = await synchronizeClients({}, secrets);
     queueTokenCountRefresh();
     return { success: true, sync: summary };
   });
@@ -767,11 +741,7 @@ export function registerIpcHandlers(options: { controlService?: boolean } = {}):
       addServer(config, name, spec, true);
     });
     const secrets = new SecretsManager();
-    const config = loadConfig();
-    const summary = syncAllClients(config, secrets);
-    await mutateConfig((freshConfig) => {
-      persistSyncState(summary, freshConfig);
-    });
+    const summary = await synchronizeClients({}, secrets);
     queueTokenCountRefresh();
 
     const result: { added: string; sync: typeof summary; authRequired?: boolean; authStatus?: number; oauthLikely?: boolean; oauthSupport?: string } = { added: name, sync: summary };
@@ -802,31 +772,25 @@ export function registerIpcHandlers(options: { controlService?: boolean } = {}):
 
   registerTelemetryHandler(IPC.SAVE_SKILL, "skill_add", async (_event, id: string, content: string) => {
     saveSkill(id, content);
-    const config = loadConfig();
-    const summary = syncAllClients(config, new SecretsManager());
-    await mutateConfig((freshConfig) => persistSyncState(summary, freshConfig));
+    await synchronizeClients();
     return { id, success: true };
   });
 
   registerTelemetryHandler(IPC.DELETE_SKILL, "skill_remove", async (_event, id: string) => {
     deleteSkill(id);
-    const config = loadConfig();
-    const summary = syncAllClients(config, new SecretsManager());
-    await mutateConfig((freshConfig) => persistSyncState(summary, freshConfig));
+    await synchronizeClients();
     return { id, success: true };
   });
 
   registerHandler(IPC.INSTALL_SKILL, async (_event, source: string, skill?: string) => {
     const installed = await installSkillFromSource(source, skill);
-    const summary = syncAllClients(loadConfig(), new SecretsManager());
-    await mutateConfig((freshConfig) => persistSyncState(summary, freshConfig));
+    await synchronizeClients();
     return installed;
   });
 
   registerHandler(IPC.CUSTOMIZE_SKILL, async (_event, id: string, name?: string) => {
     const customized = customizeSkill(id, name);
-    const summary = syncAllClients(loadConfig(), new SecretsManager());
-    await mutateConfig((freshConfig) => persistSyncState(summary, freshConfig));
+    await synchronizeClients();
     return customized;
   });
 
@@ -834,14 +798,12 @@ export function registerIpcHandlers(options: { controlService?: boolean } = {}):
   registerHandler(IPC.UNPIN_SKILL, (_event, id: string) => { unpinSkill(id); return { id, success: true }; });
   registerHandler(IPC.UPDATE_SKILL, async (_event, id: string) => {
     const result = await updateSkill(id);
-    const summary = syncAllClients(loadConfig(), new SecretsManager());
-    await mutateConfig((freshConfig) => persistSyncState(summary, freshConfig));
+    await synchronizeClients();
     return result;
   });
   registerHandler(IPC.ROLLBACK_SKILL, async (_event, id: string) => {
     const result = rollbackSkill(id);
-    const summary = syncAllClients(loadConfig(), new SecretsManager());
-    await mutateConfig((freshConfig) => persistSyncState(summary, freshConfig));
+    await synchronizeClients();
     return result;
   });
 
@@ -852,8 +814,7 @@ export function registerIpcHandlers(options: { controlService?: boolean } = {}):
   registerHandler(IPC.SHARE_IMPORT, async (_event, directory: string, options?: { locked?: boolean; dryRun?: boolean; inputs?: Record<string, string> }) => {
     const result = await importEnvironment(directory, options);
     if (!options?.dryRun) {
-      const summary = syncAllClients(loadConfig(), new SecretsManager());
-      await mutateConfig((freshConfig) => persistSyncState(summary, freshConfig));
+      await synchronizeClients();
     }
     return result;
   });

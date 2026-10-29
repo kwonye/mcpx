@@ -1,5 +1,10 @@
 // @vitest-environment node
+import { join } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+
+function trayIconFragment(): string {
+  return process.platform === "darwin" ? "trayIconTemplate-" : join("linux", "tray-icon.png");
+}
 
 describe("tray click behavior", () => {
   const togglePopoverMock = vi.fn();
@@ -7,6 +12,7 @@ describe("tray click behavior", () => {
   const quitAppMock = vi.fn();
   const trayInstances: MockTray[] = [];
   const createFromPathMock = vi.fn(() => ({ path: "icon", setTemplateImage: vi.fn() }));
+  let appIsPackaged = false;
 
   class MockTray {
     handlers: Record<string, () => void> = {};
@@ -36,6 +42,7 @@ describe("tray click behavior", () => {
     vi.resetModules();
     vi.clearAllMocks();
     trayInstances.length = 0;
+    appIsPackaged = false;
 
     vi.doMock("electron", () => ({
       Tray: TrayMock,
@@ -45,7 +52,11 @@ describe("tray click behavior", () => {
       Menu: {
         buildFromTemplate: vi.fn((template) => ({ template }))
       },
-      app: {}
+      app: {
+        get isPackaged() {
+          return appIsPackaged;
+        }
+      }
     }));
 
     vi.doMock("../../src/main/popover", () => ({
@@ -71,7 +82,8 @@ describe("tray click behavior", () => {
     tray.handlers["right-click"]();
     expect(hidePopoverMock).toHaveBeenCalledTimes(1);
     expect(tray.popUpContextMenu).toHaveBeenCalledTimes(1);
-    expect(createFromPathMock).toHaveBeenCalledWith(expect.stringContaining("trayIconTemplate-"));
+    expect(createFromPathMock).toHaveBeenCalledWith(expect.stringContaining(trayIconFragment()));
+    expect(createFromPathMock.mock.calls.every((call) => !String(call[0]).includes("app.asar.unpacked"))).toBe(true);
 
     const menu = tray.popUpContextMenu.mock.calls[0][0] as { template: Array<{ label: string; click?: () => void }> };
     menu.template.find((item) => item.label === "Quit")?.click?.();
@@ -87,5 +99,26 @@ describe("tray click behavior", () => {
 
     expect(trayInstances[0]?.setImage).toHaveBeenCalledTimes(2);
     expect(trayInstances[0]?.setToolTip).toHaveBeenCalledTimes(3);
+  });
+
+  it("loads packaged tray icons from the unpacked asar", async () => {
+    appIsPackaged = true;
+    const previousResourcesPath = Reflect.get(process, "resourcesPath");
+    Reflect.set(process, "resourcesPath", "/Applications/mcpx.app/Contents/Resources");
+
+    try {
+      const { createTray } = await import("../../src/main/tray");
+      createTray();
+
+      expect(createFromPathMock).toHaveBeenCalled();
+      expect(createFromPathMock.mock.calls.every((call) => String(call[0]).includes("app.asar.unpacked"))).toBe(true);
+      expect(createFromPathMock).toHaveBeenCalledWith(expect.stringContaining(trayIconFragment()));
+    } finally {
+      if (previousResourcesPath === undefined) {
+        Reflect.deleteProperty(process, "resourcesPath");
+      } else {
+        Reflect.set(process, "resourcesPath", previousResourcesPath);
+      }
+    }
   });
 });

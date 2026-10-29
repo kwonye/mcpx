@@ -29,6 +29,9 @@ export interface GatewayConfig {
   autoStart: boolean;
 }
 
+/** Where stored secrets live. `file` is the default encrypted file; `keychain` is opt-in. */
+export type SecretBackendKind = "file" | "keychain";
+
 export type ClientStatus = "SYNCED" | "UNSUPPORTED_HTTP" | "ERROR" | "SKIPPED";
 
 export interface ClientSyncState {
@@ -63,6 +66,9 @@ export interface McpxConfig {
   projects?: Record<string, ProjectConfig>;
   plugins?: Record<string, ManagedPlugin>;
   marketplaces?: Record<string, ManagedMarketplace>;
+  secrets?: {
+    backend: SecretBackendKind;
+  };
 }
 
 export interface ManagedEntry {

@@ -122,6 +122,12 @@ jobs:
         run: bun install --frozen-lockfile
         working-directory: cli
 
+      - name: Set release versions
+        run: |
+          bun -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync('package.json','utf8'));p.version='${{ needs.orchestrate.outputs.version }}';fs.writeFileSync('package.json',JSON.stringify(p,null,2)+'\n')"
+          bun run sync-version
+        working-directory: cli
+
       - name: Build
         run: bun run build
         working-directory: cli
@@ -145,14 +151,20 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-      - name: Set release versions
-        run: |
-          bun -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync('package.json','utf8'));p.version='${{ needs.orchestrate.outputs.version }}';fs.writeFileSync('package.json',JSON.stringify(p,null,2)+'\n')"
-          bun run sync-version
-        working-directory: cli
-
       - name: Pack CLI tarball
         run: npm pack
+        working-directory: cli
+
+      - name: Verify packed CLI version
+        env:
+          RELEASE_VERSION: ${{ needs.orchestrate.outputs.version }}
+          MCPX_TELEMETRY_DISABLED: '1'
+          MCPX_NO_UPDATE: '1'
+          MCPX_SKIP_DAEMON_AUTOSTART: '1'
+        run: |
+          PACKAGE_DIR=$(mktemp -d)
+          tar -xzf "kwonye-mcpx-${RELEASE_VERSION}.tgz" -C "$PACKAGE_DIR"
+          test "$(node "$PACKAGE_DIR/package/dist/cli.js" --version)" = "$RELEASE_VERSION"
         working-directory: cli
 
       - name: Upload CLI artifacts
@@ -193,6 +205,10 @@ jobs:
         run: bun install --frozen-lockfile
         working-directory: cli
 
+      - name: Set CLI version for desktop daemon
+        run: bun -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync('package.json','utf8'));p.version='${{ needs.orchestrate.outputs.version }}';fs.writeFileSync('package.json',JSON.stringify(p,null,2)+'\n')"
+        working-directory: cli
+
       - name: Build CLI for desktop daemon
         run: bun run build
         working-directory: cli
@@ -213,6 +229,14 @@ jobs:
 
       - name: Set desktop version for build
         run: bun -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync('package.json','utf8'));p.version='${{ needs.orchestrate.outputs.version }}';fs.writeFileSync('package.json',JSON.stringify(p,null,2)+'\n')"
+        working-directory: app
+
+      - name: Typecheck desktop
+        run: bun run typecheck
+        working-directory: app
+
+      - name: Test desktop
+        run: bun run test
         working-directory: app
 
       - name: Build desktop bundle
@@ -310,6 +334,10 @@ jobs:
         run: bun install --frozen-lockfile
         working-directory: cli
 
+      - name: Set CLI version for desktop daemon
+        run: bun -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync('package.json','utf8'));p.version='${{ needs.orchestrate.outputs.version }}';fs.writeFileSync('package.json',JSON.stringify(p,null,2)+'\n')"
+        working-directory: cli
+
       - name: Build CLI for desktop daemon
         run: bun run build
         working-directory: cli
@@ -332,6 +360,14 @@ jobs:
         run: bun -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync('package.json','utf8'));p.version='${{ needs.orchestrate.outputs.version }}';fs.writeFileSync('package.json',JSON.stringify(p,null,2)+'\n')"
         working-directory: app
 
+      - name: Typecheck desktop
+        run: bun run typecheck
+        working-directory: app
+
+      - name: Test desktop
+        run: bun run test
+        working-directory: app
+
       - name: Build desktop bundle
         run: bun run build
         working-directory: app
@@ -351,6 +387,18 @@ jobs:
         working-directory: app
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install desktop test dependencies
+        run: |
+          bunx playwright install-deps chromium
+          sudo apt-get install -y libgtk-3-0t64
+        working-directory: app
+
+      - name: Test desktop end-to-end including packaged app
+        run: xvfb-run --auto-servernum bun run e2e
+        working-directory: app
+        env:
+          MCPX_INSTALLED_APP_PATH: ${{ github.workspace }}/app/dist/linux-unpacked/mcpx-desktop
 
       - name: Upload Linux desktop artifacts
         uses: actions/upload-artifact@v6
@@ -386,6 +434,10 @@ jobs:
         run: bun install --frozen-lockfile
         working-directory: cli
 
+      - name: Set CLI version for desktop daemon
+        run: bun -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync('package.json','utf8'));p.version='${{ needs.orchestrate.outputs.version }}';fs.writeFileSync('package.json',JSON.stringify(p,null,2)+'\n')"
+        working-directory: cli
+
       - name: Build CLI for desktop daemon
         run: bun run build
         working-directory: cli
@@ -406,6 +458,14 @@ jobs:
 
       - name: Set desktop version for build
         run: bun -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync('package.json','utf8'));p.version='${{ needs.orchestrate.outputs.version }}';fs.writeFileSync('package.json',JSON.stringify(p,null,2)+'\n')"
+        working-directory: app
+
+      - name: Typecheck desktop
+        run: bun run typecheck
+        working-directory: app
+
+      - name: Test desktop
+        run: bun run test
         working-directory: app
 
       - name: Build desktop bundle

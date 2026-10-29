@@ -29,7 +29,10 @@ function createSandbox(): Sandbox {
   writeFileSync(join(configDir, "config.json"), JSON.stringify({ gateway: { port: 38773, autoStart: false } }));
 
   return {
-    launchArgs: [`--user-data-dir=${join(home, "electron-data")}`],
+    launchArgs: [
+      `--user-data-dir=${join(home, "electron-data")}`,
+      ...(process.platform === "linux" && process.getuid?.() === 0 ? ["--no-sandbox"] : [])
+    ],
     env: {
       ...process.env,
       HOME: home,

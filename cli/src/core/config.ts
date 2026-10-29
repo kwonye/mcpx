@@ -158,7 +158,10 @@ const configSchema = z.object({
   clients: z.record(z.string(), clientStateSchema).default({}),
   projects: z.record(z.string(), projectEntrySchema).default({}),
   plugins: z.record(z.string(), managedPluginSchema).default({}),
-  marketplaces: z.record(z.string(), managedMarketplaceSchema).default({})
+  marketplaces: z.record(z.string(), managedMarketplaceSchema).default({}),
+  secrets: z.object({
+    backend: z.enum(["file", "keychain"]).default("file")
+  }).default({ backend: "file" })
 });
 
 export interface ProjectLocalConfig {
@@ -183,7 +186,8 @@ export function defaultConfig(): McpxConfig {
     clients: {},
     projects: {},
     plugins: {},
-    marketplaces: ensureDefaultMarketplaces(undefined)
+    marketplaces: ensureDefaultMarketplaces(undefined),
+    secrets: { backend: "file" }
   };
 }
 
@@ -246,7 +250,8 @@ export function loadConfig(configPath = getConfigPath()): McpxConfig {
     clients: clientEntries,
     projects: parsed.data.projects,
     plugins: parsed.data.plugins,
-    marketplaces: ensureDefaultMarketplaces(parsed.data.marketplaces)
+    marketplaces: ensureDefaultMarketplaces(parsed.data.marketplaces),
+    secrets: parsed.data.secrets
   });
 }
 
