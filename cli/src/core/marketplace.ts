@@ -26,8 +26,9 @@ import { capture } from "./analytics.js";
 
 const CLAUDE_MANIFEST = ".claude-plugin/marketplace.json";
 const CODEX_MANIFEST = ".agents/plugins/marketplace.json";
-const SUPPORTED = new Set(["skills", "commands", "agents", "hooks", "mcpServers"]);
-const UNSUPPORTED = new Set(["apps", "lspServers", "settings", "outputStyles", "dependencies"]);
+const CURSOR_MANIFEST = ".cursor-plugin/marketplace.json";
+const SUPPORTED = new Set(["skills", "mcpServers"]);
+const UNSUPPORTED = new Set(["rules", "commands", "agents", "hooks", "apps", "lspServers", "settings", "outputStyles", "dependencies"]);
 
 const authorSchema = z.object({
   name: z.string(),
@@ -60,7 +61,7 @@ const claudeEntrySchema = z.object({
 
 const claudeCatalogSchema = z.object({
   name: z.string().min(1),
-  owner: authorSchema,
+  owner: authorSchema.optional(),
   plugins: z.array(claudeEntrySchema),
 }).passthrough();
 
@@ -125,20 +126,22 @@ function hashPath(target: string): string {
 }
 
 function parseGitSource(source: string): { remote: string; ref: string } | null {
+  const shorthand = source.match(/^([\w.-]+\/[\w.-]+)(?:@(.+))?$/);
+  if (shorthand) return { remote: `https://github.com/${shorthand[1]}.git`, ref: shorthand[2] ?? "HEAD" };
   const hashIndex = source.lastIndexOf("#");
   const withoutRef = hashIndex > source.indexOf("//") ? source.slice(0, hashIndex) : source;
   const ref = hashIndex > source.indexOf("//") ? source.slice(hashIndex + 1) : "HEAD";
   if (/^[\w.-]+\/[\w.-]+$/.test(withoutRef)) {
     return { remote: `https://github.com/${withoutRef}.git`, ref };
   }
-  if (/^(?:https?:\/\/|ssh:\/\/|git@).+/.test(withoutRef) && !withoutRef.endsWith(".json")) {
+  if (/^(?:https?:\/\/|ssh:\/\/|git@).+/.test(withoutRef) && !/\.json(?:[?#].*)?$/.test(withoutRef)) {
     return { remote: withoutRef, ref };
   }
   return null;
 }
 
 function marketplaceSourceType(source: string): ManagedMarketplace["sourceType"] {
-  if (/^[\w.-]+\/[\w.-]+(?:#.+)?$/.test(source)) return "github";
+  if (/^[\w.-]+\/[\w.-]+(?:[#@].+)?$/.test(source)) return "github";
   if (/^https?:\/\/.+\.json(?:[?#].*)?$/.test(source)) return "hosted-json";
   if (/^(?:https?:\/\/|ssh:\/\/|git@)/.test(source)) return "git";
   return "local";
@@ -170,7 +173,7 @@ async function acquireSource(source: string): Promise<{ root: string; revision: 
   }
 
   if (/^https?:\/\//.test(source)) {
-    const response = await fetch(source);
+    const response = await fetch(source, { signal: AbortSignal.timeout(20_000) });
     if (!response.ok) throw new Error(`Marketplace request failed (${response.status})`);
     const body = await response.text();
     const revision = crypto.createHash("sha256").update(body).digest("hex");
@@ -185,7 +188,7 @@ async function acquireSource(source: string): Promise<{ root: string; revision: 
   const resolved = path.resolve(source);
   if (!fs.existsSync(resolved)) throw new Error(`Marketplace path not found: ${resolved}`);
   const sourceRoot = fs.statSync(resolved).isDirectory() ? resolved : path.dirname(resolved);
-  const revision = hashPath(resolved);
+  const revision = hashPath(sourceRoot);
   const destination = snapshotRoot(source, revision);
   if (!fs.existsSync(destination)) {
     ensureDir(path.dirname(destination));
@@ -197,21 +200,22 @@ async function acquireSource(source: string): Promise<{ root: string; revision: 
 function locateManifest(root: string, requested?: string): string {
   const candidates = requested
     ? [requested]
-    : [CLAUDE_MANIFEST, CODEX_MANIFEST, "marketplace.json"];
+    : [CLAUDE_MANIFEST, CODEX_MANIFEST, CURSOR_MANIFEST, "marketplace.json"];
   for (const candidate of candidates) {
     const resolved = path.resolve(root, candidate);
     if ((resolved === root || resolved.startsWith(path.resolve(root) + path.sep)) && fs.existsSync(resolved)) {
-      return resolved;
+      return resolveContained(root, candidate);
     }
   }
   throw new Error(`Marketplace manifest not found. Expected ${candidates.join(" or ")}.`);
 }
 
 function loadCatalog(root: string, requested?: string, expectedFormat?: MarketplaceFormat): LoadedCatalog {
+  root = fs.realpathSync(root);
   const manifest = locateManifest(root, requested);
   const raw = JSON.parse(fs.readFileSync(manifest, "utf8"));
   const format: MarketplaceFormat = expectedFormat
-    ?? (manifest.includes(`${path.sep}.agents${path.sep}`) || raw.interface ? "codex" : "claude");
+    ?? (manifest.includes(`${path.sep}.cursor-plugin${path.sep}`) ? "cursor" : manifest.includes(`${path.sep}.agents${path.sep}`) || raw.interface ? "codex" : "claude");
   if (format === "codex") {
     const parsed = codexCatalogSchema.parse(raw);
     return {
@@ -248,7 +252,7 @@ function resolveContained(root: string, relative: string): string {
 export function resolveMarketplacePluginSource(catalog: LoadedCatalog, entry: RawEntry): PluginSource {
   const value = entry.source;
   if (typeof value === "string") {
-    if (!value.startsWith("./")) throw new Error(`Unsupported marketplace plugin source: ${value}`);
+    if (!value.startsWith("./") && catalog.format !== "cursor") throw new Error(`Unsupported marketplace plugin source: ${value}`);
     return { type: "local", original: resolveContained(catalog.root, value) };
   }
   const source = z.object({
@@ -290,7 +294,7 @@ function findPluginRoot(root: string): string {
   return root;
 }
 
-function capabilities(root: string | null, entry: RawEntry): { supported: string[]; unsupported: string[] } {
+function capabilities(root: string | null, entry: RawEntry): { supported: string[]; unsupported: string[]; error?: string } {
   const supported = new Set<string>();
   const unsupported = new Set<string>();
   for (const key of [...SUPPORTED, ...UNSUPPORTED]) {
@@ -298,9 +302,12 @@ function capabilities(root: string | null, entry: RawEntry): { supported: string
   }
   const sourceObject = typeof entry.source === "object" && entry.source ? entry.source as Record<string, unknown> : null;
   if (sourceObject?.source === "npm") unsupported.add("npm");
-  if (root) {
+  let error: string | undefined;
+  if (root) try {
+    supported.clear();
     const manifest = readManifest(root);
-    for (const key of manifest?.declaredCapabilities ?? []) (SUPPORTED.has(key) ? supported : unsupported).add(key);
+    for (const key of manifest?.declaredCapabilities ?? []) if (!SUPPORTED.has(key)) unsupported.add(key);
+    for (const key of ["rules", "commands", "agents", "hooks"]) if (fs.existsSync(path.join(root, key))) unsupported.add(key);
     const discovered = discoverComponents(root);
     if (discovered.skills.length) supported.add("skills");
     if (discovered.commands.length) supported.add("commands");
@@ -308,7 +315,8 @@ function capabilities(root: string | null, entry: RawEntry): { supported: string
     if (discovered.hooks.length) supported.add("hooks");
     if (discovered.mcpServers.length) supported.add("mcpServers");
   }
-  return { supported: [...supported].sort(), unsupported: [...unsupported].sort() };
+  catch (failure) { supported.clear(); unsupported.add("invalid package"); error = failure instanceof z.ZodError ? `Invalid plugin metadata: ${failure.issues[0]?.path.join(".")}: ${failure.issues[0]?.message}` : failure instanceof Error ? failure.message : String(failure); }
+  return { supported: [...supported].sort(), unsupported: [...unsupported].sort(), error };
 }
 
 function relativePluginRoot(catalog: LoadedCatalog, entry: RawEntry): string | null {
@@ -343,6 +351,7 @@ function listingFromEntry(config: McpxConfig, marketplace: ManagedMarketplace, c
     compatible: installationAvailable && (caps.supported.length > 0 || (!root && caps.unsupported.length === 0)),
     installed: Object.values(config.plugins ?? {}).some((plugin) => plugin.marketplace?.name === marketplace.name && plugin.marketplace.pluginName === entry.name),
     authentication: raw.policy?.authentication,
+    compatibilityError: caps.error,
   };
 }
 
@@ -367,8 +376,10 @@ export async function listMarketplaces(): Promise<ManagedMarketplace[]> {
 }
 
 export async function addMarketplace(source: string, manifestPath?: string): Promise<ManagedMarketplace> {
+  source = marketplaceSourceType(source) === "local" ? path.resolve(source) : source;
   const acquired = await acquireSource(source);
-  const catalog = loadCatalog(acquired.root, manifestPath);
+  const requested = manifestPath ?? (marketplaceSourceType(source) === "local" && fs.statSync(source).isFile() ? path.basename(source) : undefined);
+  const catalog = loadCatalog(acquired.root, requested);
   const config = loadConfig();
   const existing = config.marketplaces?.[catalog.name];
   if (existing?.builtIn) throw new Error(`Built-in marketplace ${catalog.name} cannot be replaced`);
@@ -448,7 +459,7 @@ export async function removeMarketplace(name: string): Promise<void> {
   const marketplace = config.marketplaces?.[name];
   if (!marketplace) throw new Error(`Marketplace ${name} not found`);
   if (marketplace.builtIn) throw new Error(`Built-in marketplace ${name} cannot be removed`);
-  const installed = Object.values(config.plugins ?? {}).filter((plugin) => plugin.marketplace?.name === name);
+  const installed = Object.values(config.plugins ?? {}).filter((plugin) => plugin.marketplace?.name === name && !plugin.pinned);
   for (const plugin of installed) await uninstallPlugin(plugin.id, true);
   await mutateConfig((fresh) => { delete fresh.marketplaces?.[name]; });
   capture("marketplace_removed", { source_type: marketplace.sourceType, installed_plugin_count: installed.length });
@@ -456,7 +467,7 @@ export async function removeMarketplace(name: string): Promise<void> {
 
 export async function listMarketplacePlugins(query?: string): Promise<MarketplaceListing[]> {
   const initial = await listMarketplaces();
-  for (const marketplace of initial) await ensureReady(marketplace);
+  await Promise.all(initial.map(marketplace => ensureReady(marketplace)));
   const config = loadConfig();
   const needle = query?.trim().toLowerCase();
   const listings: MarketplaceListing[] = [];
@@ -504,7 +515,7 @@ export async function inspectMarketplacePlugin(id: string): Promise<MarketplaceP
     version: base.version ?? manifest?.version,
     supportedCapabilities: caps.supported,
     unsupportedCapabilities: caps.unsupported,
-    compatible: caps.supported.length > 0,
+    compatible: base.compatible && caps.supported.length > 0,
     manifest,
     discovered,
     resolvedSource: source.original,
@@ -512,7 +523,7 @@ export async function inspectMarketplacePlugin(id: string): Promise<MarketplaceP
   };
 }
 
-export async function installMarketplacePlugin(id: string): Promise<import("../types.js").ManagedPlugin> {
+export async function installMarketplacePlugin(id: string, options: { enabled?: boolean; name?: string } = {}): Promise<import("../types.js").ManagedPlugin> {
   const detail = await inspectMarketplacePlugin(id);
   if (!detail.compatible || !detail.sourceFingerprint) throw new Error(`Plugin ${id} has no mcpx-compatible capabilities`);
   const { marketplaceName, pluginName } = parseQualified(id);
@@ -527,7 +538,8 @@ export async function installMarketplacePlugin(id: string): Promise<import("../t
   }
   const manager = new PluginManager();
   const installed = await manager.installResolvedPlugin(source, {
-    name: pluginName,
+    name: options.name ?? pluginName,
+    enabled: options.enabled,
     approvals,
     marketplace: { name: marketplaceName, pluginName, sourceFingerprint: detail.sourceFingerprint },
   });
@@ -564,7 +576,7 @@ export async function updateMarketplaceInstalledPlugin(pluginId: string, sync = 
 
 export async function refreshMarketplaceWithPlugins(name: string): Promise<{ marketplace: ManagedMarketplace; updated: string[]; errors: string[] }> {
   const marketplace = await refreshMarketplace(name);
-  const plugins = Object.values(loadConfig().plugins ?? {}).filter((plugin) => plugin.marketplace?.name === name);
+  const plugins = Object.values(loadConfig().plugins ?? {}).filter((plugin) => plugin.marketplace?.name === name && !plugin.pinned);
   const updated: string[] = [];
   const errors: string[] = [];
   for (const plugin of plugins) {

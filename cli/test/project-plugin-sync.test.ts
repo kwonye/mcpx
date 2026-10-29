@@ -19,7 +19,7 @@ describe("project-scoped plugin projections", () => {
 
     const projectPath = path.join(env.root, "project");
     const pluginRoot = path.join(env.root, "plugin");
-    const skillPath = path.join(pluginRoot, "skills", "start", "SKILL.md");
+    const skillPath = path.join(pluginRoot, "skills", "Guide", "start", "SKILL.md");
     fs.mkdirSync(path.dirname(skillPath), { recursive: true });
     fs.writeFileSync(skillPath, "---\nname: start\ndescription: Project plugin skill\n---\n# Start\n");
 
@@ -52,8 +52,8 @@ describe("project-scoped plugin projections", () => {
     };
 
     const projectSkills = path.join(projectPath, ".pi", "skills");
-    const projectSkill = path.join(projectSkills, "Guide__start", "SKILL.md");
-    const globalSkill = path.join(env.root, ".pi", "agent", "skills", "Guide__start", "SKILL.md");
+    const projectSkill = path.join(projectSkills, "Guide", "start", "SKILL.md");
+    const globalSkill = path.join(env.root, ".pi", "agent", "skills", "Guide", "start", "SKILL.md");
     const localProjectFile = path.join(projectSkills, "local", "SKILL.md");
     fs.mkdirSync(path.dirname(localProjectFile), { recursive: true });
     fs.writeFileSync(localProjectFile, "local project skill");

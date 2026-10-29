@@ -1,19 +1,18 @@
 import fs from "node:fs";
 import path from "node:path";
 import { z } from "zod";
-import type { PluginManifest, DiscoveredComponents, DiscoveredComponent, DiscoveredMcpServer, PluginComponent } from "../types.js";
+import { parseAgentSkill, validateAgentSkillDirectory } from "./agent-skills.js";
+import type { PluginManifest, DiscoveredComponents, DiscoveredComponent, DiscoveredMcpServer } from "../types.js";
 
 const CLAUDE_PLUGIN_JSON_REL = path.join(".claude-plugin", "plugin.json");
+const CURSOR_PLUGIN_JSON_REL = path.join(".cursor-plugin", "plugin.json");
 const CODEX_PLUGIN_JSON_REL = path.join(".codex-plugin", "plugin.json");
 const AGENT_PLUGIN_JSON_REL = "plugin.json";
 const MCP_JSON_RELS = ["mcp.json", ".mcp.json"];
-const HOOKS_JSON_REL = path.join("hooks", "hooks.json");
-const SKILLS_DIR = "skills";
-const COMMANDS_DIR = "commands";
-const AGENTS_DIR = "agents";
 
 const manifestSchema = z.object({
   name: z.string().optional(),
+  displayName: z.string().optional(),
   version: z.string().optional(),
   description: z.string().optional(),
   source: z.string().optional(),
@@ -46,9 +45,9 @@ const manifestSchema = z.object({
 type RawManifest = z.infer<typeof manifestSchema>;
 
 function manifestPath(pluginRoot: string): string | null {
-  for (const rel of [AGENT_PLUGIN_JSON_REL, CLAUDE_PLUGIN_JSON_REL, CODEX_PLUGIN_JSON_REL]) {
+  for (const rel of [AGENT_PLUGIN_JSON_REL, CLAUDE_PLUGIN_JSON_REL, CODEX_PLUGIN_JSON_REL, CURSOR_PLUGIN_JSON_REL]) {
     const candidate = path.join(pluginRoot, rel);
-    if (fs.existsSync(candidate)) return candidate;
+    if (fs.existsSync(candidate)) return resolveWithinRoot(pluginRoot, rel);
   }
   return null;
 }
@@ -56,22 +55,13 @@ function manifestPath(pluginRoot: string): string | null {
 function readRawManifest(pluginRoot: string): RawManifest | null {
   const filePath = manifestPath(pluginRoot);
   if (!filePath) return null;
-  try {
-    return manifestSchema.parse(JSON.parse(fs.readFileSync(filePath, "utf8")));
-  } catch {
-    return null;
-  }
-}
-
-function sanitizeComponentId(id: string): string {
-  const stripped = id.replace(/[\/\\]/g, "_").replace(/^\.+/, "");
-  return stripped.length > 0 ? stripped : "unnamed";
+  return manifestSchema.parse(JSON.parse(fs.readFileSync(filePath, "utf8")));
 }
 
 export function readManifest(pluginRoot: string): PluginManifest | null {
   const raw = readRawManifest(pluginRoot);
   if (!raw) return null;
-  const declaredCapabilities = ["skills", "commands", "agents", "hooks", "mcpServers", "lspServers", "apps", "settings", "outputStyles", "dependencies"]
+  const declaredCapabilities = ["skills", "commands", "agents", "hooks", "mcpServers", "lspServers", "apps", "settings", "outputStyles", "dependencies", "rules"]
     .filter((key) => raw[key as keyof RawManifest] !== undefined);
   return {
     name: raw.name ?? path.basename(pluginRoot),
@@ -86,213 +76,63 @@ export function readManifest(pluginRoot: string): PluginManifest | null {
     repository: raw.repository,
     license: raw.license,
     keywords: raw.keywords,
-    displayName: raw.interface?.displayName,
+    displayName: raw.displayName ?? raw.interface?.displayName,
     category: raw.category ?? raw.interface?.category,
     declaredCapabilities,
   };
 }
 
-function declaredPaths(raw: RawManifest | null, key: "skills" | "commands" | "agents", fallback: string): string[] {
-  const value = raw?.[key];
-  if (typeof value === "string") return [value];
-  if (Array.isArray(value)) return value;
-  return [fallback];
-}
-
-function resolveWithinRoot(pluginRoot: string, declared: string): string | null {
-  const resolved = path.resolve(pluginRoot, declared);
-  const root = path.resolve(pluginRoot);
-  return resolved === root || resolved.startsWith(root + path.sep) ? resolved : null;
-}
-
-interface Frontmatter {
-  name?: string;
-  description?: string;
-}
-
-function parseFrontmatter(content: string): { frontmatter: Frontmatter; body: string } {
-  const trimmed = content.trimStart();
-  if (!trimmed.startsWith("---")) {
-    return { frontmatter: {}, body: content };
+function resolveWithinRoot(root: string, relative: string): string {
+  const base = fs.realpathSync(root);
+  const target = path.resolve(root, relative);
+  if (target !== path.resolve(root) && !target.startsWith(path.resolve(root) + path.sep)) throw new Error(`Plugin path escapes its root: ${relative}`);
+  if (fs.existsSync(target)) {
+    const real = fs.realpathSync(target);
+    if (real !== base && !real.startsWith(base + path.sep)) throw new Error(`Plugin link escapes its root: ${relative}`);
   }
-  const end = trimmed.indexOf("---", 3);
-  if (end === -1) {
-    return { frontmatter: {}, body: content };
-  }
-  const raw = trimmed.slice(3, end).trim();
-  const body = trimmed.slice(end + 3).trimStart();
-  const frontmatter: Frontmatter = {};
-  for (const line of raw.split("\n")) {
-    const sep = line.indexOf(":");
-    if (sep !== -1) {
-      const key = line.slice(0, sep).trim();
-      const val = line.slice(sep + 1).trim();
-      if (key === "name") frontmatter.name = val;
-      if (key === "description") frontmatter.description = val;
-    }
-  }
-  return { frontmatter, body };
+  return target;
 }
 
-function discoverSkills(pluginRoot: string, raw: RawManifest | null): DiscoveredComponent[] {
-  const results: DiscoveredComponent[] = [];
-  for (const declared of declaredPaths(raw, "skills", SKILLS_DIR)) try {
-    const skillsDir = resolveWithinRoot(pluginRoot, declared);
-    if (!skillsDir || !fs.existsSync(skillsDir)) continue;
-    const entries = fs.readdirSync(skillsDir, { withFileTypes: true });
-    for (const entry of entries) {
-      if (!entry.isDirectory()) {
-        // Flat .md files at skills/*.md
-        if (entry.name.endsWith(".md")) {
-          const skillPath = path.join(skillsDir, entry.name);
-          const content = fs.readFileSync(skillPath, "utf8");
-          const { frontmatter } = parseFrontmatter(content);
-          results.push({
-            id: sanitizeComponentId(frontmatter.name ?? path.basename(entry.name, ".md")),
-            type: "skills",
-            path: skillPath,
-            description: frontmatter.description,
-          });
-        }
-        continue;
-      }
-      // skills/<name>/SKILL.md
-      const skillMdPath = path.join(skillsDir, entry.name, "SKILL.md");
-      if (fs.existsSync(skillMdPath)) {
-        const content = fs.readFileSync(skillMdPath, "utf8");
-        const { frontmatter } = parseFrontmatter(content);
-        results.push({
-          id: sanitizeComponentId(frontmatter.name ?? entry.name),
-          type: "skills",
-          path: skillMdPath,
-          description: frontmatter.description,
-        });
-      }
-    }
-  } catch {
-    // ignore
-  }
-  return results;
-}
-
-function discoverCommands(pluginRoot: string, raw: RawManifest | null): DiscoveredComponent[] {
-  const results: DiscoveredComponent[] = [];
-  for (const declared of declaredPaths(raw, "commands", COMMANDS_DIR)) try {
-    const commandsDir = resolveWithinRoot(pluginRoot, declared);
-    if (!commandsDir || !fs.existsSync(commandsDir)) continue;
-    const entries = fs.readdirSync(commandsDir, { withFileTypes: true });
-    for (const entry of entries) {
-      if (entry.isFile() && entry.name.endsWith(".md")) {
-        const cmdPath = path.join(commandsDir, entry.name);
-        const content = fs.readFileSync(cmdPath, "utf8");
-        const { frontmatter } = parseFrontmatter(content);
-        results.push({
-          id: sanitizeComponentId(frontmatter.name ?? path.basename(entry.name, ".md")),
-          type: "commands",
-          path: cmdPath,
-          description: frontmatter.description,
-        });
-      }
-    }
-  } catch {
-    // ignore
-  }
-  return results;
-}
-
-function discoverAgents(pluginRoot: string, raw: RawManifest | null): DiscoveredComponent[] {
-  const results: DiscoveredComponent[] = [];
-  for (const declared of declaredPaths(raw, "agents", AGENTS_DIR)) try {
-    const agentsDir = resolveWithinRoot(pluginRoot, declared);
-    if (!agentsDir || !fs.existsSync(agentsDir)) continue;
-    const entries = fs.readdirSync(agentsDir, { withFileTypes: true });
-    for (const entry of entries) {
-      if (entry.isFile() && entry.name.endsWith(".md")) {
-        const agentPath = path.join(agentsDir, entry.name);
-        const content = fs.readFileSync(agentPath, "utf8");
-        const { frontmatter } = parseFrontmatter(content);
-        results.push({
-          id: sanitizeComponentId(frontmatter.name ?? path.basename(entry.name, ".md")),
-          type: "agents",
-          path: agentPath,
-          description: frontmatter.description,
-        });
-      }
-    }
-  } catch {
-    // ignore
-  }
-  return results;
-}
-
-function discoverHooks(pluginRoot: string, raw: RawManifest | null): DiscoveredComponent[] {
-  const declared = typeof raw?.hooks === "string" ? raw.hooks : undefined;
-  const hooksPath = declared
-    ? resolveWithinRoot(pluginRoot, declared)
-    : [path.join(pluginRoot, HOOKS_JSON_REL), path.join(pluginRoot, "hooks.json")].find(fs.existsSync) ?? null;
-  if (!hooksPath || !fs.existsSync(hooksPath)) return [];
-  try {
-    const raw = JSON.parse(fs.readFileSync(hooksPath, "utf8"));
-    const hooks = Array.isArray(raw) ? raw : raw.hooks ?? [];
-    return hooks.map((h: Record<string, string>, i: number) => ({
-      id: h.id ?? `hook-${i}`,
-      type: "hooks" as PluginComponent,
-      path: hooksPath,
-      description: h.description,
-    }));
-  } catch {
-    return [];
-  }
-}
-
-function discoverMcpServers(pluginRoot: string, raw: RawManifest | null): DiscoveredMcpServer[] {
-  const declared = typeof raw?.mcpServers === "string" ? raw.mcpServers : undefined;
-  const mcpPath = declared
-    ? resolveWithinRoot(pluginRoot, declared)
-    : MCP_JSON_RELS.map((rel) => path.join(pluginRoot, rel)).find(fs.existsSync) ?? null;
-  if (!mcpPath || !fs.existsSync(mcpPath)) return [];
-  try {
-    const raw = JSON.parse(fs.readFileSync(mcpPath, "utf8"));
-    const servers = raw.mcpServers ?? {};
-    return Object.entries(servers).map(([id, s]: [string, any]) => {
-      const isHttp = s.type === "http" || typeof s.url === "string";
-      return {
-        id,
-        transport: isHttp ? "http" as const : "stdio" as const,
-        command: s.command ?? "",
-        args: s.args,
-        env: s.env,
-        cwd: s.cwd,
-        url: isHttp ? s.url : undefined,
-        oauthResource: s.oauth_resource,
-      };
-    });
-  } catch {
-    return [];
-  }
-}
-
-export function discoverComponents(pluginRoot: string): DiscoveredComponents {
-  const raw = readRawManifest(pluginRoot);
-  return {
-    skills: discoverSkills(pluginRoot, raw),
-    commands: discoverCommands(pluginRoot, raw),
-    agents: discoverAgents(pluginRoot, raw),
-    hooks: discoverHooks(pluginRoot, raw),
-    mcpServers: discoverMcpServers(pluginRoot, raw),
+export function discoverComponents(root: string): DiscoveredComponents {
+  const raw = readRawManifest(root);
+  const skills: DiscoveredComponent[] = [];
+  const add = (directory: string) => {
+    const file = path.join(directory, "SKILL.md");
+    if (!fs.existsSync(file)) return;
+    const metadata = parseAgentSkill(fs.readFileSync(file, "utf8"), path.basename(directory));
+    validateAgentSkillDirectory(directory, metadata.name);
+    if (!skills.some(skill => skill.path === file)) skills.push({ id: metadata.name, type: "skills", path: file, description: metadata.description });
   };
+  if (fs.existsSync(path.join(root, "SKILL.md"))) add(root);
+  const declared = typeof raw?.skills === "string" ? [raw.skills] : raw?.skills ?? ["skills"];
+  for (const relative of declared) {
+    const directory = resolveWithinRoot(root, relative);
+    if (!fs.existsSync(directory)) continue;
+    if (path.basename(directory) === "SKILL.md") { add(path.dirname(directory)); continue; }
+    if (fs.existsSync(path.join(directory, "SKILL.md"))) { add(directory); continue; }
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) if (entry.isDirectory()) add(resolveWithinRoot(root, path.relative(root, path.join(directory, entry.name))));
+  }
+  const mcpServers: DiscoveredMcpServer[] = [];
+  const declaredMcp = typeof raw?.mcpServers === "object" && raw.mcpServers !== null ? raw.mcpServers : undefined;
+  const mcpFile = typeof raw?.mcpServers === "string" ? resolveWithinRoot(root, raw.mcpServers) : MCP_JSON_RELS.map(relative => resolveWithinRoot(root, relative)).find(fs.existsSync);
+  const document = declaredMcp ?? (mcpFile && fs.existsSync(mcpFile) ? JSON.parse(fs.readFileSync(mcpFile, "utf8")) : undefined);
+  if (document) {
+    const data = z.record(z.string(), z.unknown()).parse(document);
+    const entries = z.record(z.string(), z.unknown()).parse(data.mcpServers ?? data);
+    const schema = z.object({ type: z.enum(["http", "streamable-http", "stdio"]).optional(), url: z.url().optional(), command: z.string().min(1).optional(), args: z.array(z.string()).optional(), env: z.record(z.string(), z.string()).optional(), headers: z.record(z.string(), z.string()).optional(), cwd: z.string().optional() }).passthrough();
+    for (const [id, value] of Object.entries(entries)) {
+      const entry = schema.parse(value);
+      if (Boolean(entry.url) === Boolean(entry.command)) throw new Error(`MCP server ${id} requires exactly one of url or command`);
+      if (entry.url && entry.type === "stdio" || entry.command && ["http", "streamable-http"].includes(entry.type ?? "")) throw new Error(`MCP transport does not match server ${id}`);
+      mcpServers.push({ id, transport: entry.url ? "http" : "stdio", command: entry.command ?? "", args: entry.args, env: entry.env, headers: entry.headers, cwd: entry.cwd, url: entry.url });
+    }
+  }
+  return { skills, mcpServers, commands: [], agents: [], hooks: [] };
 }
 
-export function hasManifest(pluginRoot: string): boolean {
-  return manifestPath(pluginRoot) !== null;
-}
+export function hasManifest(root: string): boolean { return manifestPath(root) !== null || fs.existsSync(path.join(root, "SKILL.md")) || fs.existsSync(path.join(root, "skills")); }
 
 export function resolvePluginVars(value: string, pluginRoot: string, dataDir: string): string {
-  return value
-    .replace(/\$\{CLAUDE_PLUGIN_ROOT\}/g, pluginRoot)
-    .replace(/\$\{CLAUDE_PLUGIN_DATA\}/g, dataDir)
-    .replace(/\$\{MCPX_PLUGIN_ROOT\}/g, pluginRoot)
-    .replace(/\$\{MCPX_PLUGIN_DATA\}/g, dataDir)
-    .replace(/\$\{DATA\}/g, dataDir)
-    .replace(/\$\{CLAUDE_PROJECT_DIR\}/g, pluginRoot);
+  return value.replace(/\$\{(?:CLAUDE_PLUGIN_ROOT|CURSOR_PLUGIN_ROOT|MCPX_PLUGIN_ROOT)\}/g, pluginRoot)
+    .replace(/\$\{(?:CLAUDE_PLUGIN_DATA|MCPX_PLUGIN_DATA|DATA)\}/g, dataDir);
 }

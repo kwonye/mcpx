@@ -33,71 +33,17 @@ function setupTempEnv(prefix: string) {
   };
 }
 
-describe("PLUG-02: Skill ID sanitization", () => {
-  let env: ReturnType<typeof setupTempEnv>;
-
-  beforeEach(() => {
-    env = setupTempEnv("mcpx-plug02-");
-  });
-
-  afterEach(() => {
-    env.restore();
-  });
-
-  it("sanitizes skill IDs containing path traversal sequences", () => {
-    const pluginRoot = path.join(env.root, "evil-plugin");
-    fs.mkdirSync(path.join(pluginRoot, "skills", "malicious"), { recursive: true });
-    fs.writeFileSync(
-      path.join(pluginRoot, "skills", "malicious", "SKILL.md"),
-      "---\nname: ../../../etc/evil\ndescription: Malicious skill\n---\n# Evil"
-    );
-
-    const components = discoverComponents(pluginRoot);
-    expect(components.skills).toHaveLength(1);
-    // Path separators are replaced with underscores, preventing traversal
-    expect(components.skills[0].id).not.toContain("/");
-    expect(components.skills[0].id).not.toContain("\\");
-    // The sanitized ID should be safe for use as a directory name
-    expect(components.skills[0].id).toBe("_.._.._etc_evil");
-  });
-
-  it("sanitizes skill IDs with backslashes", () => {
-    const pluginRoot = path.join(env.root, "evil-plugin");
-    fs.mkdirSync(path.join(pluginRoot, "skills", "malicious"), { recursive: true });
-    fs.writeFileSync(
-      path.join(pluginRoot, "skills", "malicious", "SKILL.md"),
-      "---\nname: ..\\..\\windows\\evil\ndescription: Malicious\n---\n# Evil"
-    );
-
-    const components = discoverComponents(pluginRoot);
-    expect(components.skills[0].id).not.toContain("\\");
-    expect(components.skills[0].id).not.toContain("/");
-    // Backslashes are replaced with underscores
-    expect(components.skills[0].id).toBe("_.._windows_evil");
-  });
-
-  it("sanitizes skill IDs with leading dots", () => {
-    const pluginRoot = path.join(env.root, "evil-plugin");
-    fs.mkdirSync(path.join(pluginRoot, "skills", "malicious"), { recursive: true });
-    fs.writeFileSync(
-      path.join(pluginRoot, "skills", "malicious", "SKILL.md"),
-      "---\nname: ....hidden\ndescription: Hidden\n---\n# Hidden"
-    );
-
-    const components = discoverComponents(pluginRoot);
-    expect(components.skills[0].id).not.toMatch(/^\./);
-  });
-
-  it("preserves legitimate skill IDs", () => {
-    const pluginRoot = path.join(env.root, "good-plugin");
-    fs.mkdirSync(path.join(pluginRoot, "skills", "normal"), { recursive: true });
-    fs.writeFileSync(
-      path.join(pluginRoot, "skills", "normal", "SKILL.md"),
-      "---\nname: my-awesome-skill\ndescription: Normal skill\n---\n# Normal"
-    );
-
-    const components = discoverComponents(pluginRoot);
-    expect(components.skills[0].id).toBe("my-awesome-skill");
+describe("PLUG-02: Invalid skill names", () => {
+  it("rejects traversal names rather than silently rewriting metadata", () => {
+    const env = setupTempEnv("invalid-skill-");
+    try {
+      const directory = path.join(env.root, "skills/review");
+      fs.mkdirSync(directory, { recursive: true });
+      for (const name of ["../../../etc/evil", "....hidden", "a--b"]) {
+        fs.writeFileSync(path.join(directory, "SKILL.md"), `---\nname: ${name}\ndescription: Review\n---\n`);
+        expect(() => discoverComponents(env.root)).toThrow();
+      }
+    } finally { env.restore(); }
   });
 });
 
@@ -616,16 +562,13 @@ describe("PLUG-04: Plugin project overrides", () => {
   });
 });
 
-describe("PLUG-03: Path traversal guard", () => {
-  it("uses path.resolve before checking containment", async () => {
-    // This test verifies the fix is in place by checking the source code
-    const pluginHostPath = path.join(process.cwd(), "src/core/plugin-host.ts");
-    const source = fs.readFileSync(pluginHostPath, "utf8");
-    
-    // Should use path.resolve on the path
-    expect(source).toContain("path.resolve");
-    
-    // Should check with path.sep suffix to prevent prefix attacks
-    expect(source).toContain("path.sep");
+describe("PLUG-03: Managed plugin host", () => {
+  it("rejects an unknown plugin before executing a subprocess", async () => {
+    const env = setupTempEnv("plugin-host-unknown-");
+    try {
+      const proc = Bun.spawn(["node", path.join(process.cwd(), "dist/cli.js"), "plugin-host", "missing", "server"], { env: process.env, stdout: "pipe", stderr: "pipe" });
+      expect(await proc.exited).toBe(1);
+      expect(await new Response(proc.stderr).text()).toContain("not found");
+    } finally { env.restore(); }
   });
 });

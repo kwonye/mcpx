@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "bun:test";
 import { createGatewayServer } from "../src/gateway/server.js";
 import { defaultConfig, saveConfig } from "../src/core/config.js";
+import { saveSkill } from "../src/core/skills.js";
 import { consumerToken } from "../src/core/consumers.js";
 import { SecretsManager } from "../src/core/secrets.js";
 import { setupTempEnv } from "./helpers.js";
@@ -119,6 +120,7 @@ async function setupProxyFixture(
   cleanups.push(() => closeServer(upstream.server));
 
   const serverName = "proxied_upstream";
+  saveSkill("review", "---\nname: review\ndescription: Review code\n---\nReview instructions");
   const config = defaultConfig();
   config.servers[serverName] = {
     transport: "http",
@@ -291,6 +293,15 @@ describe("stdio proxy (mcpx proxy <name>)", () => {
     expect(response.id).toBe(1);
     expect(response.error).toBeUndefined();
     expect(response.result.supportedVersions).toContain("2026-07-28");
+    expect(response.result.capabilities.extensions["io.modelcontextprotocol/ui"]).toBeDefined();
+    expect(response.result.capabilities.extensions["io.modelcontextprotocol/skills"]).toBeDefined();
+    const meta = { "io.modelcontextprotocol/protocolVersion": "2026-07-28", "io.modelcontextprotocol/clientCapabilities": {} };
+    proxy.writeMessage({ jsonrpc: "2.0", id: 2, method: "skills/list", params: { _meta: meta } });
+    const skills = await proxy.readMessage();
+    expect(skills.error).toBeUndefined();
+    expect(skills.result.skills[0].frontmatter.name).toBe("review");
+    proxy.writeMessage({ jsonrpc: "2.0", id: 3, method: "skills/get", params: { uri: skills.result.skills[0].uri, _meta: meta } });
+    expect((await proxy.readMessage()).result.skill.uri).toBe(skills.result.skills[0].uri);
   }, 15_000);
 
   it("uses the per-consumer token supplied by a Claude Desktop proxy entry", async () => {

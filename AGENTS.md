@@ -74,9 +74,9 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 ```text
 cli/                    # CLI package
   src/cli.ts            # CLI entry point and command registration
-  src/core/             # Core business logic (config, daemon, sync, secrets, plugin-host, etc.)
+  src/core/             # Core business logic (config, daemon, sync, secrets, standard skills, etc.)
   src/core/skill-projections.ts # Ownership-managed skill projection (flat/dir layouts)
-  src/core/plugin-host.ts       # Policy-enforcing stdio wrapper for plugin MCP servers
+  src/core/agent-skills.ts      # Agent Skills validation and metadata parsing
   src/core/index.ts     # Barrel export for core modules (consumed by app)
   src/gateway/          # HTTP gateway server (JSON-RPC proxy)
   src/adapters/         # Client-specific sync adapters (Claude, Cursor, VS Code, OpenClaw, Hermes, etc.)
@@ -89,7 +89,7 @@ app/                    # Desktop app
   src/main/daemon-child.ts # Dedicated mode for running the daemon as a child process
   src/preload/          # Context bridge (exposes mcpx API to renderer)
   src/renderer/         # React UI (Dashboard, Plugins Tab, Skills Tab, Settings)
-  src/renderer/components/PluginsTab.tsx  # Plugin management UI with embedded SkillsTab
+  src/renderer/components/PluginsTab.tsx  # Standards-only Library backed by SkillsTab
   src/shared/           # Shared types and IPC channel constants
   test/                 # Unit/Component tests (Vitest + RTL)
   e2e/                  # E2E tests (Playwright)
@@ -171,6 +171,8 @@ bash scripts/desktop-install.sh --flavor dev --dev --remote-debugging-port 9222
 Then use `agent-browser --cdp 9222 ...` commands as described below.
 
 ## Development Mandates & Conventions
+
+- **AI standards:** Agent-facing workflows use [Agent Skills](https://agentskills.io/specification), project instructions use [AGENTS.md](https://agents.md/), and gateway traffic uses MCP revision `2026-07-28` through SDK 2.x. Support the official Skills over MCP and MCP Apps extensions. Claude, Codex, Cursor, and custom marketplace catalogs and plugin manifests are supported distribution metadata. Only standard Agent Skills and MCP servers are installed; report hooks, commands, subagents, and other nonportable components as unsupported. Do not reintroduce native package loaders or flat skill projections. Client connectors may configure MCP endpoints and standard skill directories. See `docs/standards.md` for the compatibility boundary.
 
 These rules are foundational for any agent working on this project:
 

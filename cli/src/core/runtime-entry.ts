@@ -7,5 +7,9 @@ export function localCliCommand(args: string[]): { command: string; args: string
   const candidates = [process.env.MCPX_CLI_ENTRY, path.join(here, "..", "cli.js"), path.join(here, "cli.js"), path.join(here, "..", "cli.ts")].filter((p): p is string => Boolean(p));
   const entry = candidates.find(p => fs.existsSync(p));
   if (!entry) throw new Error("Cannot locate the installed mcpx CLI runtime. Reinstall mcpx.");
-  return { command: process.execPath, args: [entry, ...args], ...(process.versions.electron ? { env: { ELECTRON_RUN_AS_NODE: "1" } } : {}) };
+  const env: Record<string, string> = process.versions.electron ? { ELECTRON_RUN_AS_NODE: "1" } : {};
+  for (const key of ["MCPX_CONFIG_HOME", "MCPX_DATA_HOME", "MCPX_STATE_HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME"]) {
+    if (process.env[key]) env[key] = process.env[key]!;
+  }
+  return { command: process.execPath, args: [entry, ...args], ...(Object.keys(env).length ? { env } : {}) };
 }

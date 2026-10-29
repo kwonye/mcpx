@@ -113,9 +113,8 @@ This produces an NSIS installer and portable `.exe` in `app/dist/`.
 ![Skills](docs/images/mcpx-skills.png)
 
 Skills are stored as complete Agent Skill directories (`SKILL.md`, optional
-`scripts/`, `references/`, and `assets/`). Directory-based clients receive a
-link to the managed source when supported; flat clients receive a Markdown
-projection. Installed skills are immutable until copied with `mcpx skill
+`scripts/`, `references/`, and `assets/`). Clients receive complete directory projections, linked to the managed source when
+supported. Installed skills are immutable until copied with `mcpx skill
 customize`.
 
 **Settings tab** — App configuration:
@@ -232,7 +231,7 @@ After manual edits, run `mcpx sync` to propagate changes.
 
 mcpx supports MCP v2 only, pinned to protocol revision `2026-07-28`. The local
 `/mcp` endpoint accepts modern MCP v2 envelopes and rejects legacy initialize,
-session, batch, and SSE-transport traffic. Client configuration adapters remain available
+session, batch, and legacy HTTP+SSE transport traffic. Client configuration adapters remain available
 for projecting the v2 gateway into supported client config formats; they do not
 add legacy protocol support.
 
@@ -293,16 +292,57 @@ mcpx package list
 mcpx undo <operation-id>
 ```
 
-### Agent Plugins
+### Open AI development standards
 
-`mcpx plugin` installs Claude, Codex, and [Agent Plugins v1](https://agent-plugins.org/) packages from a local directory, Git URL, or GitHub shorthand. Agent Plugins v1 packages use a root `plugin.json`, optional `skills/`, and optional `mcp.json`; `stdio` and streamable HTTP MCP entries are managed through the normal gateway and client projection flow.
+mcpx exclusively uses [Agent Skills](https://agentskills.io/specification),
+[MCP revision 2026-07-28](https://modelcontextprotocol.io/specification/2026-07-28),
+[AGENTS.md](https://agents.md/), and the official
+[MCP Apps](https://apps.extensions.modelcontextprotocol.io/api/) and
+[Skills over MCP](https://modelcontextprotocol.io/extensions/skills/overview) extensions.
+Claude, Codex, Cursor, and custom marketplace catalogs distribute plugins containing
+standard Agent Skills and MCP servers. Hooks, slash commands, subagent definitions,
+and native package loaders remain unsupported; plugin inspection identifies those components.
 
 ```bash
-mcpx plugin inspect ./my-plugin
-mcpx plugin install owner/my-plugin
+mcpx skill install ./review
+mcpx skill install owner/skills --skill review
+mcpx project instructions ./cli/src --root .
+```
+
+Skills must contain valid YAML frontmatter with a name matching the skill directory.
+All supporting files are preserved. AGENTS.md files are read from the project root
+to the target directory; the nearest file takes precedence where instructions conflict.
+See [standards and migration](docs/standards.md) for compatibility details.
+
+### Plugin marketplaces and management
+
+The Library includes Discover, Installed, Marketplaces, and Shared Skills views.
+Claude official (`anthropics/claude-plugins-official`), Codex official (`openai/plugins`),
+and Cursor official (`cursor/plugins`) are configured by default. Add custom catalogs
+from a local directory or JSON file, Git repository, GitHub shorthand, or hosted JSON URL.
+
+```bash
 mcpx plugin marketplace list
-mcpx plugin pin my-plugin
-mcpx plugin rollback my-plugin
+mcpx plugin marketplace add team/plugins
+mcpx plugin marketplace add ./team-catalog --manifest catalogs/team.json
+mcpx plugin browse --marketplace team-tools
+mcpx plugin details reviewer@team-tools
+mcpx plugin install reviewer@team-tools --yes
+mcpx plugin disable reviewer
+mcpx plugin enable reviewer
+mcpx plugin pin reviewer
+mcpx plugin unpin reviewer
+mcpx plugin marketplace update team-tools
+mcpx plugin rollback reviewer
+mcpx plugin uninstall reviewer --keep-data
+mcpx plugin marketplace remove team-tools --yes
+```
+
+Inspect a plugin's supported and unsupported components before installation. Updates
+can be requested individually or by refreshing its marketplace. Pinning holds the
+installed revision; rollback restores the previous cached revision. Automatic updates
+are opt-in for new marketplaces. Custom marketplace removal uninstalls its plugins
+while retaining plugin data. Default marketplaces cannot be replaced or removed.
 
 ### Portable environments
 
@@ -369,7 +409,7 @@ This is a monorepo containing:
 
 The desktop app imports the CLI's core logic directly via a `@mcpx/core` TypeScript alias, so both packages share identical configuration parsing, sync logic, and secret management.
 
-The target architecture consolidates MCP traffic and harness-native skills and plugins through one local service:
+The target architecture consolidates MCP traffic and standard Agent Skills through one local service:
 
 ```mermaid
 flowchart TB
@@ -381,7 +421,7 @@ flowchart TB
 
     Claude & Codex & Others --> HTTP["MCP over HTTP"]
     Claude & Codex & Others --> Stdio["MCP over stdio"]
-    Claude & Codex & Others -.-> Native["Native configuration,<br/>skills and plugins"]
+    Claude & Codex & Others -.-> Native["Native configuration,<br/>Agent Skills"]
 
     HTTP --> Gateway
     Stdio --> Proxy
@@ -395,7 +435,7 @@ flowchart TB
         Runtime --> Secrets["Encrypted credentials"]
 
         Adapters["Harness adapters"] --> Sync["Sync and ownership engine"]
-        Sync --> Catalog["MCP · Skill · Plugin catalog"]
+        Sync --> Catalog["MCP · Agent Skills catalog"]
         Sync --> Recovery["Operation journal and recovery"]
 
         Control["Management API"] --> Catalog

@@ -43,11 +43,7 @@ export async function managementCommand(method: string, raw: unknown[]): Promise
   if (method === "adoption.plan") return planAdoption(z.tuple([z.array(string).optional()]).parse(raw)[0]);
   if (method === "adoption.apply") { const [plan, selected] = z.tuple([adoptionPlanSchema, z.array(string).optional()]).parse(raw); return applyAdoption(plan, selected); }
   if (method === "operation.rollback") return rollbackOperation(z.tuple([z.uuid()]).parse(raw)[0]);
-  if (method === "package.pin") {
-    const [id, pinned] = z.tuple([string, z.boolean()]).parse(raw);
-    await mutateConfig(config => { if (!config.packages?.[id]) throw new Error("Unknown native package"); config.packages[id].pinned = pinned; });
-    return { id, pinned };
-  }
+  if (method.startsWith("package.")) throw new Error("Vendor native packages are no longer supported");
   if (method === "harness.mode") {
     const [id, mode] = z.tuple([string, z.enum(["observe", "selected", "automatic"])]).parse(raw);
     if (!listHarnesses(loadConfig()).some(h => h.id === id)) throw new Error("Unknown harness installation");

@@ -63,7 +63,7 @@ export class PluginManager {
     parsed.resolvedSha = sha;
     const cached = await this.cache.fetch(parsed, "");
 
-    // The plugin root might be a subdirectory — look for .claude-plugin
+    // Find a standard skill collection or a single Agent Skill.
     let pluginRoot = cached.root;
     if (!hasManifest(pluginRoot)) {
       // Try subdirectories
@@ -81,6 +81,7 @@ export class PluginManager {
 
     const manifest = readManifest(pluginRoot);
     const components = discoverComponents(pluginRoot);
+    if (!components.skills.length && !components.mcpServers.length) throw new Error("No supported Agent Skills or MCP servers found in this plugin.");
     return { manifest, components, root: pluginRoot, source: sourceLabel, sha: cached.sha };
   }
 
@@ -93,7 +94,7 @@ export class PluginManager {
 
   async installResolvedPlugin(source: PluginSource, options?: InstallPluginOptions, sourceLabel = source.original): Promise<ManagedPlugin> {
     const info = await this.inspectResolvedSource(source, sourceLabel);
-    const pluginName = normalizePluginName(options?.name || info.manifest?.name || path.basename(info.root));
+    const pluginName = normalizePluginName(options?.name || info.manifest?.name || path.basename(source.type === "local" ? path.resolve(source.original) : source.original).replace(/\.git$/, ""));
     const pluginId = `${pluginName}@${info.sha.slice(0, 8)}`;
 
     const dataDir = path.join(getPluginDataRoot(), pluginId);
@@ -116,9 +117,9 @@ export class PluginManager {
       components: {
         mcpServers: options?.components?.mcpServers ?? discovered.mcpServers.length > 0,
         skills: options?.components?.skills ?? discovered.skills.length > 0,
-        hooks: options?.components?.hooks ?? discovered.hooks.length > 0,
-        agents: options?.components?.agents ?? discovered.agents.length > 0,
-        commands: options?.components?.commands ?? discovered.commands.length > 0,
+        hooks: false,
+        agents: false,
+        commands: false,
       },
       discovered,
       enabled,
@@ -137,6 +138,9 @@ export class PluginManager {
       if (config.plugins[pluginId]) {
         throw new Error(`Plugin ${pluginId} is already installed`);
       }
+
+      if (Object.values(config.plugins).some(existing => existing.name === pluginName)) throw new Error(`Plugin ${pluginName} is already installed; update it instead`);
+      if (options?.marketplace && Object.values(config.plugins).some(existing => existing.marketplace?.name === options.marketplace!.name && existing.marketplace.pluginName === options.marketplace!.pluginName)) throw new Error("This marketplace plugin is already installed; update it instead");
 
       // Name collision check: ensure no existing plugin has the same server names
       for (const existing of Object.values(config.plugins)) {
@@ -161,7 +165,7 @@ export class PluginManager {
         const nsName = `${pluginName}__${mcp.id}`;
         const approved = plugin.approvals?.mcpServers !== false;
         config.servers[nsName] = mcp.transport === "http" && mcp.url
-          ? { transport: "http", url: new URL(mcp.url).toString(), enabled: enabled && approved }
+          ? { transport: "http", url: new URL(mcp.url).toString(), headers: mcp.headers, enabled: enabled && approved }
           : {
               transport: "stdio",
               ...localCliCommand(["plugin-host", pluginId, mcp.id]),
@@ -206,7 +210,7 @@ export class PluginManager {
   ): Promise<ManagedPlugin> {
     const currentSnapshot = loadConfig(this.configPath).plugins?.[pluginId];
     if (!currentSnapshot) throw new Error(`Plugin ${pluginId} not found`);
-    const pluginName = normalizePluginName(info.manifest?.name || currentSnapshot.name);
+    const pluginName = currentSnapshot.name;
 
     // Now update with freshly-read config inside the lock
     let updatedPlugin: ManagedPlugin | undefined;
@@ -221,7 +225,8 @@ export class PluginManager {
       }
 
       // Update plugin record
-      current.previous = { version: current.version, resolvedSha: current.resolvedSha, root: current.root };
+      current.previous = { version: current.version, resolvedSha: current.resolvedSha, root: current.root, source: current.source, sourceFingerprint: current.marketplace?.sourceFingerprint };
+      current.source = info.source;
       current.version = info.manifest?.version || current.version;
       current.resolvedSha = info.sha;
       current.root = info.root;
@@ -234,7 +239,7 @@ export class PluginManager {
       for (const mcp of info.components.mcpServers) {
         const nsName = `${pluginName}__${mcp.id}`;
         config.servers[nsName] = mcp.transport === "http" && mcp.url
-          ? { transport: "http", url: new URL(mcp.url).toString(), enabled: current.enabled && approved }
+          ? { transport: "http", url: new URL(mcp.url).toString(), headers: mcp.headers, enabled: current.enabled && approved }
           : {
               transport: "stdio",
               ...localCliCommand(["plugin-host", pluginId, mcp.id]),
@@ -331,6 +336,7 @@ export class PluginManager {
   }
 
   async approveComponent(pluginId: string, component: string): Promise<void> {
+    if (!["skills", "mcpServers"].includes(component)) throw new Error("Only Agent Skills and MCP servers can be approved");
     // Existence check and approval inside the lock
     await mutateConfig((config) => {
       if (!config.plugins) throw new Error(`Plugin ${pluginId} not found`);
@@ -339,15 +345,8 @@ export class PluginManager {
 
       if (!plugin.approvals) plugin.approvals = {};
       plugin.approvals[component as PluginComponent] = true;
+      if (component === "mcpServers") for (const name of plugin.serverNames) if (config.servers[name]) config.servers[name].enabled = plugin.enabled;
 
-      // If approving mcpServers, enable the servers
-      if (component === "mcpServers") {
-        for (const name of plugin.serverNames) {
-          if (config.servers[name]) {
-            (config.servers[name] as any).enabled = plugin.enabled;
-          }
-        }
-      }
     }, this.configPath);
 
     // Sync outside the lock (slow I/O)
@@ -446,10 +445,10 @@ export async function rollbackPlugin(nameOrId: string): Promise<ManagedPlugin> {
   const id = resolvePluginId(config, nameOrId);
   const current = config.plugins?.[id];
   if (!current?.previous) throw new Error(`Plugin ${nameOrId} has no previous revision`);
-  const source = parseSource(current.source);
-  source.resolvedSha = current.previous.resolvedSha;
-  const info = await manager.inspectResolvedSource(source, current.source);
-  return manager["applyPluginUpdate"](id, info, undefined, true);
+  const previous = current.previous;
+  if (!fs.existsSync(previous.root)) throw new Error("The previous plugin revision is no longer cached");
+  const info = { manifest: readManifest(previous.root), components: discoverComponents(previous.root), root: previous.root, source: previous.source ?? current.source, sha: previous.resolvedSha };
+  return manager.applyPluginUpdate(id, info, previous.sourceFingerprint ?? `rollback:${previous.resolvedSha}`, true);
 }
 
 export async function uninstallPlugin(nameOrId: string, keepData?: boolean): Promise<void> {

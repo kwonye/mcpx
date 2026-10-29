@@ -1562,6 +1562,10 @@ select {
     grid-template-columns: minmax(260px, 1fr) auto;
 }
 
+.marketplace-add-form {
+    grid-template-columns: minmax(260px, 2fr) minmax(180px, 1fr) auto;
+}
+
 .plugin-discovery-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(285px, 1fr));
@@ -1759,6 +1763,12 @@ select {
 }
 
 @media (max-width: 980px) {
+    .marketplace-add-form {
+        grid-template-columns: 1fr auto;
+    }
+    .marketplace-add-form .plugin-install-input {
+        grid-column: 1 / -1;
+    }
     .plugin-browser-controls {
         grid-template-columns: 1fr 1fr;
     }

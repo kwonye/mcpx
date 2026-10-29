@@ -2350,6 +2350,16 @@ function registerProjectCommands(program: Command, cliPath: string): void {
     .command("project")
     .description("Manage project-based MCP configurations");
 
+  projectCmd.command("instructions [target]")
+    .description("Read applicable AGENTS.md files, from project root to nearest scope")
+    .option("--root <directory>", "Project root", process.cwd())
+    .action(async (target: string | undefined, options: { root: string }) => {
+      const { readAgentInstructions } = await import("./core/agent-instructions.js");
+      for (const instruction of readAgentInstructions(options.root, target ?? options.root)) {
+        process.stdout.write(`# ${instruction.path}\n\n${instruction.content}\n`);
+      }
+    });
+
   projectCmd
     .command("init [name]")
     .description("Initialize a local .mcpx.json configuration in the current directory")
@@ -2432,7 +2442,7 @@ function registerProjectCommands(program: Command, cliPath: string): void {
     });
 }
 
-const PLUGIN_COMPONENTS = ["mcpServers", "skills", "hooks", "agents", "commands"] as const;
+const PLUGIN_COMPONENTS = ["skills", "mcpServers"] as const;
 
 function registerPluginCommands(program: Command, _cliPath: string): void {
   const plugin = program.command("plugin").description("Manage plugins");
@@ -2483,7 +2493,7 @@ function registerPluginCommands(program: Command, _cliPath: string): void {
               rl.close();
             }
           }
-          p = await installMarketplacePlugin(source);
+          p = await installMarketplacePlugin(source, { enabled: options.enable !== false, name: options.name });
         } else {
           const { installPlugin } = await import("./core/plugin-manager.js");
           p = await installPlugin(source, { name: options.name, enabled: options.enable !== false });
@@ -2513,7 +2523,7 @@ function registerPluginCommands(program: Command, _cliPath: string): void {
   marketplace
     .command("add <source>")
     .option("--manifest <path>", "Marketplace manifest path inside the source")
-    .description("Add a Claude or Codex plugin marketplace")
+    .description("Add a Claude, Codex, or Cursor plugin marketplace")
     .action(async (source: string, options: { manifest?: string }) => {
       const startedAt = Date.now();
       try {
@@ -2543,6 +2553,7 @@ function registerPluginCommands(program: Command, _cliPath: string): void {
           const result = await refreshMarketplaceWithPlugins(marketplaceName);
           process.stdout.write(`Marketplace updated: ${marketplaceName} (${result.updated.length} plugin update(s))\n`);
           for (const error of result.errors) process.stderr.write(`Warning: ${error}\n`);
+          if (result.errors.length) process.exitCode = 1;
         }
         captureTelemetryEvent({
           name: "operation_completed",
@@ -2588,6 +2599,7 @@ function registerPluginCommands(program: Command, _cliPath: string): void {
 
   plugin
     .command("discover [query]")
+    .alias("browse")
     .option("--marketplace <name>", "Filter by marketplace")
     .option("--category <category>", "Filter by category")
     .description("Browse available marketplace plugins")
@@ -2794,13 +2806,8 @@ function registerPluginCommands(program: Command, _cliPath: string): void {
 }
 
 function registerPluginHostCommand(program: Command): void {
-  program
-    .command("plugin-host <plugin> <server>")
-    .description("Run a plugin MCP server under mcpx policy enforcement")
-    .action(async (plugin: string, server: string) => {
-      const { runPluginHost } = await import("./core/plugin-host.js");
-      runPluginHost(plugin, server);
-    });
+  program.command("plugin-host <plugin> <server>").description("Run a managed plugin MCP server")
+    .action(async (plugin, server) => { const { runPluginHost } = await import("./core/plugin-host.js"); runPluginHost(plugin, server); });
 }
 
 function registerProxyCommand(program: Command): void {
@@ -3109,21 +3116,7 @@ export async function runCli(argv = process.argv): Promise<void> {
     process.stdout.write(options.json ? JSON.stringify(snapshot.operations, null, 2) + "\n" : snapshot.operations.map((op: any) => `${op.id}  ${op.phase}  ${op.label}`).join("\n") + "\n");
   });
   program.command("undo <id>").description("Undo an operation using its encrypted receipt").action(async id => { await ensureControlService(cliPath); process.stdout.write(JSON.stringify(await controlRequest("operation.rollback", [id]), null, 2) + "\n"); });
-  const nativePackage = program.command("package").description("Manage adopted native package revisions");
-  nativePackage.command("list").action(async () => { await ensureControlService(cliPath); const state = await controlRequest<any>("snapshot"); process.stdout.write(JSON.stringify(state.packages, null, 2) + "\n"); });
-  for (const pinned of [true, false]) nativePackage.command(`${pinned ? "pin" : "unpin"} <id>`).action(async id => { await ensureControlService(cliPath); await controlRequest("package.pin", [id, pinned]); });
-  nativePackage.command("update <id>").description("Review and adopt a changed native source revision").action(async id => {
-    await ensureControlService(cliPath);
-    const state = await controlRequest<any>("snapshot");
-    const pkg = state.packages.find((pkg: any) => pkg.id === id);
-    if (!pkg) throw new Error("Unknown native package");
-    const plan = await controlRequest<AdoptionPlan>("adoption.plan", [[pkg.harness]]);
-    const items = plan.items.filter(item => item.kind === "package" && item.canonicalId === id);
-    if (items.some(item => item.action === "conflict")) throw new Error(items.find(item => item.action === "conflict")!.reason);
-    const updates = items.filter(item => item.action === "import");
-    if (!updates.length) { process.stdout.write("No native source update was discovered.\n"); return; }
-    process.stdout.write(JSON.stringify(await controlRequest("adoption.apply", [plan, updates.map(item => item.id)]), null, 2) + "\n");
-  });
+
   program.command("harness-mode <id> <mode>").description("Set observe, selected, or automatic synchronization").action(async (id, mode) => { await ensureControlService(cliPath); await controlRequest("harness.mode", [id, mode]); });
 
   let lease: string | undefined;

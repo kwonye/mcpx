@@ -115,7 +115,7 @@ const api = {
     pin: (name: string) => invokeIpc(IPC.PLUGIN_PIN, name),
     unpin: (name: string) => invokeIpc(IPC.PLUGIN_UNPIN, name),
     rollback: (name: string) => invokeIpc(IPC.PLUGIN_ROLLBACK, name),
-    uninstall: (name: string, options?: unknown) => invokeIpc(IPC.PLUGIN_UNINSTALL, name, options),
+    uninstall: (name: string, options?: { keepData?: boolean }) => invokeIpc(IPC.PLUGIN_UNINSTALL, name, options),
     enable: (name: string) => invokeIpc(IPC.PLUGIN_ENABLE, name),
     disable: (name: string) => invokeIpc(IPC.PLUGIN_DISABLE, name),
     setProjectOverride: (name: string, projectPath: string, override: { enabled?: boolean; components?: Partial<Record<string, boolean>> }) =>
@@ -131,7 +131,7 @@ const api = {
     marketplaces: {
       list: () => invokeIpc<ManagedMarketplace[]>(IPC.MARKETPLACE_LIST),
       add: (source: string, manifestPath?: string) => invokeIpc(IPC.MARKETPLACE_ADD, source, manifestPath),
-      refresh: (name: string) => invokeIpc(IPC.MARKETPLACE_REFRESH, name),
+      refresh: (name: string) => invokeIpc<{ marketplace: ManagedMarketplace; updated: string[]; errors: string[] }>(IPC.MARKETPLACE_REFRESH, name),
       remove: (name: string) => invokeIpc(IPC.MARKETPLACE_REMOVE, name),
       setAutoUpdate: (name: string, enabled: boolean) => invokeIpc(IPC.MARKETPLACE_SET_AUTO_UPDATE, name, enabled),
        browse: (query?: string) => invokeIpc<MarketplaceListing[]>(IPC.MARKETPLACE_BROWSE, query),

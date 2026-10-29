@@ -10,7 +10,7 @@ import { installSkillFromSource, getSkill, customizeSkill, rollbackSkill } from 
 describe("portable environments", () => {
   it("installs complete skill directories and supports customization", async () => {
     const env = setupTempEnv("skill-package-");
-    const source = path.join(env.root, "source-skill");
+    const source = path.join(env.root, "packaged");
     fs.mkdirSync(path.join(source, "references"), { recursive: true });
     fs.writeFileSync(path.join(source, "SKILL.md"), "---\nname: packaged\ndescription: Packaged\n---\nBody\n");
     fs.writeFileSync(path.join(source, "references", "guide.md"), "Guide");
@@ -19,6 +19,8 @@ describe("portable environments", () => {
     expect(fs.existsSync(path.join(installed.root!, "references", "guide.md"))).toBe(true);
     const authored = customizeSkill("packaged", "packaged-authored");
     expect(authored.readOnly).not.toBe(true);
+    expect(fs.readFileSync(path.join(authored.root!, "references/guide.md"), "utf8")).toBe("Guide");
+    expect(authored.content).toContain("name: packaged-authored");
     expect(getSkill("packaged-authored")?.content).toContain("Packaged");
     env.restore();
   });

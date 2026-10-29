@@ -71,6 +71,7 @@ const discoveredMcpServerSchema = z.object({
   cwd: z.string().optional(),
   url: z.string().optional(),
   oauthResource: z.string().optional(),
+  headers: z.record(z.string(), z.string()).optional(),
 });
 
 const discoveredComponentsSchema = z.object({
@@ -112,7 +113,7 @@ const managedPluginSchema = z.object({
   }).optional(),
   updateError: z.string().optional(),
   pinned: z.boolean().default(false),
-  previous: z.object({ version: z.string(), resolvedSha: z.string(), root: z.string() }).optional(),
+  previous: z.object({ version: z.string(), resolvedSha: z.string(), root: z.string(), source: z.string().optional(), sourceFingerprint: z.string().optional() }).optional(),
   projectOverrides: z.record(z.string(), z.object({
     enabled: z.boolean().optional(),
     components: z.partialRecord(pluginComponentSchema, z.boolean()).optional(),
@@ -126,7 +127,7 @@ const managedMarketplaceSchema = z.object({
   source: z.string(),
   sourceType: z.enum(["github", "git", "local", "hosted-json"]).default("github"),
   manifestPath: z.string().optional(),
-  format: z.enum(["claude", "codex"]).optional(),
+  format: z.enum(["claude", "codex", "cursor"]).optional(),
   builtIn: z.boolean().default(false),
   autoUpdate: z.boolean().default(false),
   addedAt: z.string(),

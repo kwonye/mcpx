@@ -1,8 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
-import YAML from "yaml";
-import { z } from "zod";
+import { parseAgentSkill, agentSkillFrontmatterSchema } from "./agent-skills.js";
+import type { z } from "zod";
 import { listSkills } from "./skills.js";
 import type { McpxConfig, Skill } from "../types.js";
 
@@ -10,8 +10,7 @@ export function skillVisible(config: McpxConfig, id: string, projectPath?: strin
   const origins = Object.values(config.origins ?? {}).filter(origin => origin.kind === "skill" && origin.id === id);
   return !origins.length || origins.some(origin => !origin.harness.includes("@") || origin.harness.slice(origin.harness.indexOf("@") + 1) === projectPath);
 }
-const frontmatterSchema = z.object({ name: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/).max(64), description: z.string().min(1).max(1024) }).passthrough();
-interface ServedSkill { uri: string; frontmatter: z.infer<typeof frontmatterSchema>; resources: Array<{ uri: string; digest: string; size: number }>; files: Map<string, Buffer> }
+interface ServedSkill { uri: string; frontmatter: z.infer<typeof agentSkillFrontmatterSchema>; resources: Array<{ uri: string; digest: string; size: number }>; files: Map<string, Buffer> }
 export function servedSkills(config: McpxConfig, projectPath?: string): ServedSkill[] {
   const skills: Skill[] = listSkills().filter(skill => (!skill.scope || skill.scope === projectPath) && skillVisible(config, skill.id, projectPath));
   for (const plugin of Object.values(config.plugins ?? {})) if (plugin.enabled && plugin.components.skills && plugin.approvals?.skills !== false) {
@@ -24,9 +23,7 @@ export function servedSkills(config: McpxConfig, projectPath?: string): ServedSk
   }
   return skills.flatMap(skill => {
     try {
-      const match = skill.content.match(/^---\s*\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/);
-      if (!match) return [];
-      const frontmatter = frontmatterSchema.parse(YAML.parse(match[1]));
+      const frontmatter = parseAgentSkill(skill.content, skill.root ? path.basename(skill.root) : undefined);
       const base = `skill://mcpx/${encodeURIComponent(skill.id)}/${frontmatter.name}`;
       const files = new Map<string, Buffer>();
       let total = 0;
@@ -74,5 +71,5 @@ export function readServedSkill(config: McpxConfig, uri: string, projectPath?: s
   if (!content) throw new Error("Unknown skill resource");
   const text = /\.(md|txt|json|ya?ml|csv|ts|js|py|sh|html|css)$/i.test(uri);
   const mimeType = uri.endsWith(".md") ? "text/markdown" : text ? "text/plain" : "application/octet-stream";
-  return { contents: [{ uri, mimeType, ...(text ? { text: content.toString("utf8") } : { blob: content.toString("base64") }) }], ttlMs: 0, cacheScope: "private" };
+  return { resultType: "complete", contents: [{ uri, mimeType, ...(text ? { text: content.toString("utf8") } : { blob: content.toString("base64") }) }], ttlMs: 0, cacheScope: "private" };
 }

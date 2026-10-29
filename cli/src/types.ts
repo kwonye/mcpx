@@ -289,6 +289,7 @@ export interface DiscoveredMcpServer {
   cwd?: string;
   url?: string;
   oauthResource?: string;
+  headers?: Record<string, string>;
 }
 
 export interface DiscoveredComponents {
@@ -317,7 +318,7 @@ export interface PluginManifest {
   declaredCapabilities?: string[];
 }
 
-export type MarketplaceFormat = "claude" | "codex";
+export type MarketplaceFormat = "claude" | "codex" | "cursor";
 export type MarketplaceSourceType = "github" | "git" | "local" | "hosted-json";
 
 export interface ManagedMarketplace {
@@ -354,6 +355,7 @@ export interface MarketplaceListing {
   compatible: boolean;
   installed: boolean;
   authentication?: string;
+  compatibilityError?: string;
 }
 
 export interface MarketplacePluginDetail extends MarketplaceListing {
@@ -389,7 +391,7 @@ export interface ManagedPlugin {
   };
   updateError?: string;
   pinned?: boolean;
-  previous?: { version: string; resolvedSha: string; root: string };
+  previous?: { version: string; resolvedSha: string; root: string; source?: string; sourceFingerprint?: string };
   projectOverrides?: Record<string, {
     enabled?: boolean;
     components?: Partial<Record<PluginComponent, boolean>>;

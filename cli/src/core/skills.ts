@@ -1,5 +1,4 @@
 import fs from "node:fs";
-import { loadConfig } from "./config.js";
 import path from "node:path";
 import { getSkillsDir, getSkillPackagesRoot, getSkillStatePath, ensureDir } from "./paths.js";
 import type { Skill } from "../types.js";
@@ -7,6 +6,8 @@ import { validateSkillId } from "./identifiers.js";
 import { parseSource } from "./plugin-source.js";
 import { PluginCache } from "./plugin-cache.js";
 import { z } from "zod";
+import YAML from "yaml";
+import { parseAgentSkill, agentSkillNameSchema, validateAgentSkillDirectory } from "./agent-skills.js";
 
 const skillStateSchema = z.record(z.string(), z.object({ source: z.string(), skillName: z.string().optional(), pinned: z.boolean().default(false), previousPath: z.string().optional() }));
 type SkillState = z.infer<typeof skillStateSchema>;
@@ -25,11 +26,7 @@ function writeSkillState(state: SkillState): void {
 export function validateSkillPackage(root: string): void {
   const skillPath = path.join(root, "SKILL.md");
   if (!fs.existsSync(skillPath)) throw new Error(`Agent Skill is missing SKILL.md: ${root}`);
-  const content = fs.readFileSync(skillPath, "utf8");
-  const match = content.match(/^---\s*[\s\S]*?^name:\s*([^\r\n]+)[\s\S]*?^description:\s*([^\r\n]+)[\s\S]*?^---/m);
-  if (!match || !/^[a-z0-9][a-z0-9-]{0,63}$/.test(match[1].trim()) || !match[2].trim()) {
-    throw new Error(`Invalid Agent Skill frontmatter in ${skillPath}; name and description are required`);
-  }
+  validateAgentSkillDirectory(root);
 }
 
 function installedSkills(): Skill[] {
@@ -40,7 +37,11 @@ function installedSkills(): Skill[] {
     const packageRoot = path.join(root, entry.name);
     const skillFile = path.join(packageRoot, "SKILL.md");
     if (!fs.existsSync(skillFile)) return [];
-    return [{ id: entry.name, content: fs.readFileSync(skillFile, "utf8"), root: packageRoot, source: "installed" as const, readOnly: true }];
+    try {
+      const content = fs.readFileSync(skillFile, "utf8");
+      parseAgentSkill(content, entry.name);
+      return [{ id: entry.name, content, root: packageRoot, source: "installed" as const, readOnly: true }];
+    } catch { return []; }
   });
 }
 
@@ -48,15 +49,15 @@ export function listSkills(): Skill[] {
   const skillsDir = getSkillsDir();
   const skills: Skill[] = [];
   const files = fs.existsSync(skillsDir) ? fs.readdirSync(skillsDir, { withFileTypes: true }) : [];
-  const authoredDirectories = new Set(files.filter((file) => file.isDirectory()).map((file) => file.name));
   for (const file of files) {
-    const id = file.isDirectory() ? file.name : file.name.endsWith(".md") ? path.basename(file.name, ".md") : null;
-    if (id && (file.isDirectory() || !authoredDirectories.has(id))) {
+    const id = file.isDirectory() ? file.name : null;
+    if (id) {
       try {
         const root = file.isDirectory() ? path.join(skillsDir, id) : skillsDir;
         const filePath = file.isDirectory() ? path.join(root, "SKILL.md") : path.join(skillsDir, file.name);
         if (!fs.existsSync(filePath)) continue;
         const content = fs.readFileSync(filePath, "utf-8");
+        parseAgentSkill(content, id);
         skills.push({ id, content, root: file.isDirectory() ? root : undefined, source: "authored" });
       } catch {
         console.error(`[mcpx] Warning: could not read skill ${file.name}`);
@@ -65,14 +66,7 @@ export function listSkills(): Skill[] {
   }
 
   const authoredIds = new Set(skills.map((skill) => skill.id));
-  const native: Skill[] = [];
-  for (const pkg of Object.values(loadConfig().packages ?? {})) for (const skill of pkg.skills ?? []) {
-    const root = path.resolve(pkg.root, skill.path);
-    if (!root.startsWith(path.resolve(pkg.root) + path.sep)) continue;
-    const file = path.join(root, "SKILL.md");
-    if (fs.existsSync(file)) native.push({ id: skill.id, root, content: fs.readFileSync(file, "utf8"), projectionPath: skill.projectionPath, scope: pkg.scope, ownerHarness: pkg.harness, source: "installed", readOnly: true });
-  }
-  return [...skills, ...installedSkills().filter((skill) => !authoredIds.has(skill.id)), ...native];
+  return [...skills, ...installedSkills().filter((skill) => !authoredIds.has(skill.id))];
 }
 
 export function getSkill(id: string): Skill | null {
@@ -80,8 +74,7 @@ export function getSkill(id: string): Skill | null {
   const skillsDir = getSkillsDir();
   const directory = path.join(skillsDir, id);
   const packagePath = path.join(directory, "SKILL.md");
-  const legacyPath = path.join(skillsDir, `${id}.md`);
-  const filePath = fs.existsSync(packagePath) ? packagePath : legacyPath;
+  const filePath = packagePath;
   if (!fs.existsSync(filePath)) {
     const installedPath = path.join(getSkillPackagesRoot(), id, "SKILL.md");
     if (!fs.existsSync(installedPath)) return listSkills().find(skill => skill.id === id) ?? null;
@@ -95,6 +88,7 @@ export function getSkill(id: string): Skill | null {
 
 export function saveSkill(id: string, content: string): void {
   validateSkillId(id);
+  parseAgentSkill(content, id);
   const skillsDir = getSkillsDir();
   ensureDir(skillsDir);
 
@@ -132,27 +126,39 @@ export function deleteSkill(id: string): void {
 export function customizeSkill(id: string, targetId = id): Skill {
   validateSkillId(id);
   validateSkillId(targetId);
+  agentSkillNameSchema.parse(targetId);
   const existing = getSkill(id);
   if (!existing) throw new Error(`Skill "${id}" not found`);
-  saveSkill(targetId, existing.content);
+  const frontmatter = parseAgentSkill(existing.content);
+  const body = existing.content.replace(/^---[ \t]*\r?\n[\s\S]*?\r?\n---[ \t]*(?:\r?\n|$)/, "");
+  const content = `---\n${YAML.stringify({ ...frontmatter, name: targetId })}---\n${body}`;
+  const destination = path.join(getSkillsDir(), targetId);
+  if (targetId !== id && getSkill(targetId)) throw new Error(`Skill "${targetId}" already exists`);
+  if (existing.root && path.resolve(existing.root) !== path.resolve(destination)) {
+    validateAgentSkillDirectory(existing.root, frontmatter.name);
+    ensureDir(path.dirname(destination));
+    fs.cpSync(existing.root, destination, { recursive: true, dereference: true });
+  }
+  saveSkill(targetId, content);
   return getSkill(targetId)!;
 }
 
 export async function installSkillFromSource(source: string, skillName?: string): Promise<Skill> {
   const parsed = parseSource(source);
+  if (parsed.type === "local" && fs.existsSync(path.join(source, "SKILL.md"))) validateSkillPackage(source);
   const cache = new PluginCache();
   const cached = await cache.fetch(parsed, skillName ?? "skill");
   const candidates: Array<{ id: string; root: string }> = [];
   const declaredName = (root: string): string | undefined => {
     try {
       const content = fs.readFileSync(path.join(root, "SKILL.md"), "utf8");
-      const frontmatter = content.match(/^---\s*[\s\S]*?^name:\s*([^\r\n]+)[\s\S]*?^---/m)?.[1]?.trim();
-      return frontmatter && /^[a-z0-9][a-z0-9-]*$/.test(frontmatter) ? frontmatter : undefined;
+      return parseAgentSkill(content).name;
     } catch { return undefined; }
   };
   const addCandidate = (root: string, id = path.basename(root)) => {
     if (fs.existsSync(path.join(root, "SKILL.md"))) {
-      validateSkillPackage(root);
+      const metadata = parseAgentSkill(fs.readFileSync(path.join(root, "SKILL.md"), "utf8"), root === cached.root ? undefined : path.basename(root));
+      validateAgentSkillDirectory(root, metadata.name);
       candidates.push({ id: declaredName(root) ?? id, root });
     }
   };

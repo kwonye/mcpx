@@ -14,8 +14,8 @@ describe("adapter syncSkills methods", () => {
     const env = setupTempEnv("codex-skill-locations-");
     try {
       const adapter = new CodexAdapter();
-      adapter.syncSkills([{ id: "review", content: "# Review" }]);
-      expect(fs.readFileSync(path.join(env.root, ".agents/skills/review/SKILL.md"), "utf8")).toBe("# Review");
+      adapter.syncSkills([{ id: "review", content: "---\nname: review\ndescription: Test workflow\n---\n# Review" }]);
+      expect(fs.readFileSync(path.join(env.root, ".agents/skills/review/SKILL.md"), "utf8")).toBe("---\nname: review\ndescription: Test workflow\n---\n# Review");
       expect(adapter.additionalSkillDirectories()).toContain(path.join(env.root, ".codex/skills"));
       const config = defaultConfig();
       const project = path.join(env.root, "project");
@@ -40,7 +40,7 @@ describe("adapter syncSkills methods", () => {
     const adapter = new ClaudeDesktopAdapter();
 
     const skills: Skill[] = [
-      { id: "test-skill", content: "# Test Skill\nContent here" },
+      { id: "test-skill", content: "---\nname: test-skill\ndescription: Test workflow\n---\n# Test Skill\nContent here" },
     ];
 
     adapter.syncSkills(skills);
@@ -53,7 +53,7 @@ describe("adapter syncSkills methods", () => {
       const skillsDir = path.join(path.dirname(configPath), "skills");
       const skillFile = path.join(skillsDir, "test-skill", "SKILL.md");
       expect(fs.existsSync(skillFile)).toBe(true);
-      expect(fs.readFileSync(skillFile, "utf8")).toBe("# Test Skill\nContent here");
+      expect(fs.readFileSync(skillFile, "utf8")).toBe("---\nname: test-skill\ndescription: Test workflow\n---\n# Test Skill\nContent here");
     }
 
     env.restore();
@@ -68,7 +68,7 @@ describe("adapter syncSkills methods", () => {
     adapter.detectConfigPath = () => null;
 
     const skills: Skill[] = [
-      { id: "test-skill", content: "# Test Skill" },
+      { id: "test-skill", content: "---\nname: test-skill\ndescription: Test workflow\n---\n# Test Skill" },
     ];
 
     // Should not throw
@@ -84,7 +84,7 @@ describe("adapter syncSkills methods", () => {
     const adapter = new OpenCodeAdapter();
 
     const skills: Skill[] = [
-      { id: "my-skill", content: "# My Skill\nTest content" },
+      { id: "my-skill", content: "---\nname: my-skill\ndescription: Test workflow\n---\n# My Skill\nTest content" },
     ];
 
     adapter.syncSkills(skills);
@@ -97,7 +97,7 @@ describe("adapter syncSkills methods", () => {
       const skillsDir = path.join(path.dirname(configPath), "skills");
       const skillFile = path.join(skillsDir, "my-skill", "SKILL.md");
       expect(fs.existsSync(skillFile)).toBe(true);
-      expect(fs.readFileSync(skillFile, "utf8")).toBe("# My Skill\nTest content");
+      expect(fs.readFileSync(skillFile, "utf8")).toBe("---\nname: my-skill\ndescription: Test workflow\n---\n# My Skill\nTest content");
     }
 
     env.restore();
@@ -112,7 +112,7 @@ describe("adapter syncSkills methods", () => {
     adapter.detectConfigPath = () => null;
 
     const skills: Skill[] = [
-      { id: "test-skill", content: "# Test" },
+      { id: "test-skill", content: "---\nname: test-skill\ndescription: Test workflow\n---\n# Test" },
     ];
 
     // Should not throw
@@ -128,8 +128,8 @@ describe("adapter syncSkills methods", () => {
     const adapter = new OpenCodeAdapter();
 
     const skills: Skill[] = [
-      { id: "skill-one", content: "# Skill One" },
-      { id: "skill-two", content: "# Skill Two" },
+      { id: "skill-one", content: "---\nname: skill-one\ndescription: Test workflow\n---\n# Skill One" },
+      { id: "skill-two", content: "---\nname: skill-two\ndescription: Test workflow\n---\n# Skill Two" },
     ];
 
     adapter.syncSkills(skills);
@@ -140,8 +140,8 @@ describe("adapter syncSkills methods", () => {
       const skillsDir = path.join(path.dirname(configPath), "skills");
       expect(fs.existsSync(path.join(skillsDir, "skill-one", "SKILL.md"))).toBe(true);
       expect(fs.existsSync(path.join(skillsDir, "skill-two", "SKILL.md"))).toBe(true);
-      expect(fs.readFileSync(path.join(skillsDir, "skill-one", "SKILL.md"), "utf8")).toBe("# Skill One");
-      expect(fs.readFileSync(path.join(skillsDir, "skill-two", "SKILL.md"), "utf8")).toBe("# Skill Two");
+      expect(fs.readFileSync(path.join(skillsDir, "skill-one", "SKILL.md"), "utf8")).toBe("---\nname: skill-one\ndescription: Test workflow\n---\n# Skill One");
+      expect(fs.readFileSync(path.join(skillsDir, "skill-two", "SKILL.md"), "utf8")).toBe("---\nname: skill-two\ndescription: Test workflow\n---\n# Skill Two");
     }
 
     env.restore();

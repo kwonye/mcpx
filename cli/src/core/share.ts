@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { z } from "zod";
+import { parseAgentSkill } from "./agent-skills.js";
 import { loadConfig } from "./config.js";
 import { mutateConfig } from "./config-store.js";
 import { listSkills, validateSkillPackage } from "./skills.js";
@@ -124,6 +125,7 @@ function replaceInputs(value: unknown, inputs: Record<string, string>): unknown 
 }
 
 export function exportEnvironment(destination: string, options: { skills?: string[]; plugins?: string[] } = {}): { environment: ShareEnvironment; lock: ShareLock } {
+  if (options.plugins?.length) throw new Error("Plugin bundle export is no longer supported. Export standard skills instead.");
   const root = path.resolve(destination);
   ensureDir(root);
   const config = loadConfig();
@@ -145,12 +147,7 @@ export function exportEnvironment(destination: string, options: { skills?: strin
     }
     return { id: skill.id, kind: "skill" as const, path: `packages/skills/${skill.id}`, source: skill.source ?? "authored" };
   });
-  const selectedPlugins = Object.values(config.plugins ?? {}).filter((plugin) => !options.plugins || options.plugins.includes(plugin.id) || options.plugins.includes(plugin.name));
-  const plugins = selectedPlugins.map((plugin) => {
-    const packagePath = path.join(packagesDir, "plugins", plugin.name);
-    copyDirectory(plugin.root, packagePath);
-    return { id: plugin.name, kind: "plugin" as const, path: `packages/plugins/${plugin.name}`, source: plugin.source };
-  });
+  const plugins: ShareEnvironment["plugins"] = [];
   const environment = environmentSchema.parse({ version: 1, generatedBy: "mcpx", servers, skills, plugins, clients: Object.keys(config.clients ?? {}), inputs });
   const manifestPath = path.join(root, ENVIRONMENT_FILE);
   fs.writeFileSync(manifestPath, JSON.stringify(environment, null, 2) + "\n", "utf8");
@@ -160,10 +157,6 @@ export function exportEnvironment(destination: string, options: { skills?: strin
     manifestSha256: sha256File(manifestPath),
     packages: Object.fromEntries([
       ...skills.map((entry) => [`${entry.kind}:${entry.id}`, { sha256: sha256Tree(path.join(root, entry.path)) }] as const),
-      ...plugins.map((entry) => {
-        const plugin = selectedPlugins.find((candidate) => candidate.name === entry.id);
-        return [`${entry.kind}:${entry.id}`, { sha256: sha256Tree(path.join(root, entry.path)), revision: plugin?.resolvedSha }] as const;
-      }),
     ])
   };
   fs.writeFileSync(path.join(root, LOCK_FILE), JSON.stringify(lock, null, 2) + "\n", "utf8");
@@ -177,11 +170,13 @@ export async function importEnvironment(sourceDirectory: string, options: { lock
   const environment = environmentSchema.parse(JSON.parse(fs.readFileSync(manifestPath, "utf8")));
   const lock = lockSchema.parse(JSON.parse(fs.readFileSync(lockPath, "utf8")));
   if (options.locked && lock.manifestSha256 !== sha256File(manifestPath)) throw new Error("Environment manifest does not match its lockfile");
-  const allEntries = [...environment.skills, ...environment.plugins];
+  if (environment.plugins.length) throw new Error("Plugin bundle import is no longer supported. Import standard skills instead.");
+  const allEntries = environment.skills;
   for (const entry of allEntries) {
     const packagePath = resolveSharePath(root, entry.path);
     if (!fs.existsSync(packagePath)) throw new Error(`Missing package content: ${entry.path}`);
-    if (entry.kind === "skill") validateSkillPackage(packagePath);
+    validateSkillPackage(packagePath);
+    parseAgentSkill(fs.readFileSync(path.join(packagePath, "SKILL.md"), "utf8"), entry.id);
     const expected = lock.packages[`${entry.kind}:${entry.id}`]?.sha256;
     if (options.locked && expected && expected !== sha256Tree(packagePath)) throw new Error(`Package integrity check failed: ${entry.id}`);
   }
@@ -197,9 +192,6 @@ export async function importEnvironment(sourceDirectory: string, options: { lock
   for (const [name, raw] of Object.entries(environment.servers)) {
     if (currentConfig.servers[name] && JSON.stringify(currentConfig.servers[name]) !== JSON.stringify(replaceInputs(raw, inputs))) throw new Error(`Server already exists with different configuration: ${name}`);
   }
-  for (const entry of environment.plugins) {
-    if (Object.values(currentConfig.plugins ?? {}).some((plugin) => plugin.name === entry.id)) throw new Error(`Plugin already exists: ${entry.id}`);
-  }
   const targetSkills = getSkillsDir();
   for (const entry of environment.skills) {
     validateSkillId(entry.id);
@@ -211,12 +203,6 @@ export async function importEnvironment(sourceDirectory: string, options: { lock
     copyDirectory(resolveSharePath(root, entry.path), target);
   }
   const importedPlugins: string[] = [];
-  for (const entry of environment.plugins) {
-    const packagePath = resolveSharePath(root, entry.path);
-    const { installPlugin } = await import("./plugin-manager.js");
-    await installPlugin(packagePath, { name: entry.id, enabled: true });
-    importedPlugins.push(entry.id);
-  }
   const importedServers: string[] = [];
   await mutateConfig((fresh) => {
     for (const [name, raw] of Object.entries(environment.servers)) {

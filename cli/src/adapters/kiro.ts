@@ -183,6 +183,6 @@ export class KiroAdapter implements ClientAdapter {
   }
 
   syncSkills(skills: Skill[]): void {
-    projectSkillsToDir(path.join(homeDir(), ".kiro", "skills"), skills, "flat");
+    projectSkillsToDir(path.join(homeDir(), ".kiro", "skills"), skills, "dir");
   }
 }

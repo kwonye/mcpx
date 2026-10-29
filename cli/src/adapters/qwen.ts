@@ -185,6 +185,6 @@ export class QwenAdapter implements ClientAdapter {
   }
 
   syncSkills(skills: Skill[]): void {
-    projectSkillsToDir(path.join(homeDir(), ".qwen", "skills"), skills, "flat");
+    projectSkillsToDir(path.join(homeDir(), ".qwen", "skills"), skills, "dir");
   }
 }

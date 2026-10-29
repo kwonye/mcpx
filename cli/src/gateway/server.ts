@@ -15,7 +15,7 @@ import {
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { createMcpHandler, ProtocolError, Server } from "@modelcontextprotocol/server";
 import { toWebRequest } from "@modelcontextprotocol/node";
-import { MCP_V2_PROTOCOL_VERSION } from "../core/mcp-v2.js";
+import { MCP_V2_PROTOCOL_VERSION, forwardedMcpParams } from "../core/mcp-v2.js";
 import { runtimeConfig as loadMergedConfig } from "../core/runtime-snapshot.js";
 import { buildEnrichedPath } from "../core/spawn-env.js";
 import { getOAuthAccessToken, isOAuthReference, oauthReferenceServerName, oauthSecretNames } from "../core/oauth.js";
@@ -35,7 +35,7 @@ import type {
 import { isServerEnabled } from "../types.js";
 import { captureException } from "../core/analytics.js";
 
-const requestScope = new AsyncLocalStorage<{ signal?: AbortSignal; identity?: string }>();
+const requestScope = new AsyncLocalStorage<{ signal?: AbortSignal; identity?: string; meta?: Record<string, unknown> }>();
 function diagnosticKey(name: string) { const identity = requestScope.getStore()?.identity; return identity ? `${name}:${identity}` : name; }
 const SERVER_VERSION = APP_VERSION;
 const DEFAULT_UPSTREAM_TIMEOUT_MS = 60_000;
@@ -297,6 +297,7 @@ function splitNamespacedName(value: string): { serverName: string; upstreamName:
 }
 
 function parseNamespacedUri(uri: string): { serverName: string; upstreamUri: string } | null {
+  if (uri.startsWith("ui://mcpx/")) uri = `mcpx://${uri.slice("ui://mcpx/".length)}`;
   if (uri.startsWith("mcpx://")) {
     const rest = uri.slice("mcpx://".length);
     const slashIndex = rest.indexOf("/");
@@ -316,6 +317,7 @@ function parseNamespacedUri(uri: string): { serverName: string; upstreamUri: str
     }
   }
 
+  if (/^[a-z][a-z0-9+.-]*:/i.test(uri)) return null;
   const nameSplit = splitNamespacedName(uri);
   if (!nameSplit) {
     return null;
@@ -325,6 +327,19 @@ function parseNamespacedUri(uri: string): { serverName: string; upstreamUri: str
     serverName: nameSplit.serverName,
     upstreamUri: nameSplit.upstreamName
   };
+}
+
+function gatewayResourceUri(serverName: string, uri: string): string {
+  return uri.startsWith("ui://")
+    ? `ui://mcpx/${serverName}/${encodeURIComponent(uri)}`
+    : `mcpx://${serverName}/${encodeURIComponent(uri)}`;
+}
+
+function gatewayUiMetadata(meta: unknown, serverName: string, flatten: boolean): unknown {
+  if (flatten || !meta || typeof meta !== "object") return meta;
+  const parsed = z.object({ ui: z.object({ resourceUri: z.string().optional() }).passthrough().optional() }).passthrough().safeParse(meta);
+  if (!parsed.success || !parsed.data.ui?.resourceUri) return meta;
+  return { ...parsed.data, ui: { ...parsed.data.ui, resourceUri: gatewayResourceUri(serverName, parsed.data.ui.resourceUri) } };
 }
 
 async function callUpstream(
@@ -717,7 +732,8 @@ async function callUpstreamOnce(
     const timeoutMs = getConfiguredTimeoutMs();
     const timeoutMessage = `Upstream ${upstream.name} timed out after ${timeoutMs}ms for method ${method}.${method === "tools/call" ? " Outcome unknown; the operation was not replayed." : ""}`;
     const signal = requestScope.getStore()?.signal;
-    const callOptions = { signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs), timeout: timeoutMs };
+    const callOptions = { signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs), timeout: timeoutMs, cacheMode: "bypass" as const, allowInputRequired: true };
+    params = { ...(params as Record<string, unknown> ?? {}), _meta: { ...requestScope.getStore()?.meta, ...(params as { _meta?: Record<string, unknown> })?._meta } };
 
 
     return await connection.limiter.run(callOptions.signal, async () => {
@@ -833,6 +849,7 @@ async function handleListTools(
         const name = typeof tool.name === "string" ? tool.name : "tool";
         tools.push({
           ...tool,
+          ...(tool._meta ? { _meta: gatewayUiMetadata(tool._meta, upstream.name, flattenNames) } : {}),
           name: flattenNames ? name : `${upstream.name}.${name}`
         });
       }
@@ -851,6 +868,7 @@ async function handleListTools(
     .map((u) => ({ name: u.name, ...runtime.upstreamErrors!.get(diagnosticKey(u.name))! }));
 
   return {
+    resultType: "complete", ttlMs: 0, cacheScope: "private",
     tools,
     ...(failedUpstreams.length > 0 ? { _meta: { mcpxUpstreamErrors: failedUpstreams } } : {})
   };
@@ -897,7 +915,7 @@ async function handleListResources(
         resources.push({
           ...resource,
           name: flattenNames ? originalName : `${upstream.name}.${originalName}`,
-          uri: flattenNames ? originalUri : `mcpx://${upstream.name}/${encodeURIComponent(originalUri)}`
+          uri: flattenNames ? originalUri : gatewayResourceUri(upstream.name, originalUri)
         });
       }
     } catch (error) {
@@ -915,6 +933,7 @@ async function handleListResources(
     .map((u) => ({ name: u.name, ...runtime.upstreamErrors!.get(diagnosticKey(u.name))! }));
 
   return {
+    resultType: "complete", ttlMs: 0, cacheScope: "private",
     resources,
     ...(failedUpstreams.length > 0 ? { _meta: { mcpxUpstreamErrors: failedUpstreams } } : {})
   };
@@ -977,6 +996,7 @@ async function handleListPrompts(
     .map((u) => ({ name: u.name, ...runtime.upstreamErrors!.get(diagnosticKey(u.name))! }));
 
   return {
+    resultType: "complete", ttlMs: 0, cacheScope: "private",
     prompts,
     ...(failedUpstreams.length > 0 ? { _meta: { mcpxUpstreamErrors: failedUpstreams } } : {})
   };
@@ -1100,7 +1120,11 @@ async function routeNamespacedCall(
   };
 
   try {
-    const result = await callUpstream(upstream, method, upstreamParams, id, secrets, runtime, clientAuthorizationHeader);
+    let result = await callUpstream(upstream, method, upstreamParams, id, secrets, runtime, clientAuthorizationHeader);
+    if (!flattenedUpstream && result && typeof result === "object" && "contents" in result) {
+      const resourceResult = result as { contents: Array<Record<string, unknown>> };
+      result = { ...resourceResult, contents: resourceResult.contents.map(content => ({ ...content, ...(typeof content.uri === "string" ? { uri: gatewayResourceUri(upstream.name, content.uri) } : {}) })) };
+    }
     runtime.upstreamErrors?.delete(diagnosticKey(upstream.name));
     return makeResult(id, result);
   } catch (error) {
@@ -1208,15 +1232,15 @@ function createGatewayMcpHandler(
             tools: {},
             resources: {},
             prompts: {},
-            extensions: { "io.modelcontextprotocol/skills": {} }
+            extensions: { "io.modelcontextprotocol/skills": {}, "io.modelcontextprotocol/ui": { mimeTypes: ["text/html;profile=mcp-app"] } }
           },
           supportedProtocolVersions: [MCP_V2_PROTOCOL_VERSION]
         }
       );
 
-      const recordSuccessOrFailure = async <T>(method: string, work: () => Promise<T>): Promise<T> => {
+      const recordSuccessOrFailure = async <T>(method: string, meta: Record<string, unknown> | undefined, work: () => Promise<T>): Promise<T> => {
         try {
-          const result = await requestScope.run({ signal: request?.signal, identity: clientAuthorizationHeader ? passthroughCacheSuffix(clientAuthorizationHeader) : undefined }, work);
+          const result = await requestScope.run({ signal: request?.signal, meta, identity: clientAuthorizationHeader ? passthroughCacheSuffix(clientAuthorizationHeader) : undefined }, work);
           recordGatewayCall(runtime, method, null);
           return result;
         } catch (error) {
@@ -1240,43 +1264,43 @@ function createGatewayMcpHandler(
         catch { throw new ProtocolError(-32602, "Unknown skill URI"); }
       });
       server.setRequestHandler("tools/list", async (_request, _context) => {
-        return recordSuccessOrFailure("tools/list", async () => {
+        return recordSuccessOrFailure("tools/list", { ..._context.mcpReq._meta, ..._context.mcpReq.envelope }, async () => {
           const { config } = await prepareGatewayRequest(request, options.expectedToken, runtime, options.secrets, upstreamFilter);
           return handleListTools(config, options.secrets, runtime, upstreamFilter, clientAuthorizationHeader);
         }) as Promise<any>;
       });
       server.setRequestHandler("resources/list", async (_request, _context) => {
-        return recordSuccessOrFailure("resources/list", async () => {
+        return recordSuccessOrFailure("resources/list", { ..._context.mcpReq._meta, ..._context.mcpReq.envelope }, async () => {
           const { config } = await prepareGatewayRequest(request, options.expectedToken, runtime, options.secrets, upstreamFilter);
           return handleListResources(config, options.secrets, runtime, upstreamFilter, clientAuthorizationHeader);
         }) as Promise<any>;
       });
       server.setRequestHandler("prompts/list", async (_request, _context) => {
-        return recordSuccessOrFailure("prompts/list", async () => {
+        return recordSuccessOrFailure("prompts/list", { ..._context.mcpReq._meta, ..._context.mcpReq.envelope }, async () => {
           const { config } = await prepareGatewayRequest(request, options.expectedToken, runtime, options.secrets, upstreamFilter);
           return handleListPrompts(config, options.secrets, runtime, upstreamFilter, clientAuthorizationHeader);
         }) as Promise<any>;
       });
       server.setRequestHandler("tools/call", async (request, context) => {
-        return recordSuccessOrFailure("tools/call", async () => {
+        return recordSuccessOrFailure("tools/call", { ...context.mcpReq._meta, ...context.mcpReq.envelope }, async () => {
           const { config } = await prepareGatewayRequest(context.http?.req, options.expectedToken, runtime, options.secrets, upstreamFilter);
-          return routeGatewayCall(config, "tools/call", request.params as Record<string, unknown> | undefined, options.secrets, runtime, upstreamFilter, clientAuthorizationHeader) as Promise<any>;
+          return routeGatewayCall(config, "tools/call", forwardedMcpParams(request.params as Record<string, unknown> | undefined, context), options.secrets, runtime, upstreamFilter, clientAuthorizationHeader) as Promise<any>;
         });
       });
       server.setRequestHandler("resources/read", async (request, context) => {
-        return recordSuccessOrFailure("resources/read", async () => {
+        return recordSuccessOrFailure("resources/read", { ...context.mcpReq._meta, ...context.mcpReq.envelope }, async () => {
           const { config } = await prepareGatewayRequest(context.http?.req, options.expectedToken, runtime, options.secrets, upstreamFilter);
           if (String(request.params.uri).startsWith("skill://mcpx/")) {
             try { return readServedSkill(config, String(request.params.uri), skillProject()); }
             catch { throw new ProtocolError(-32602, "Unknown skill resource"); }
           }
-          return routeGatewayCall(config, "resources/read", request.params as Record<string, unknown> | undefined, options.secrets, runtime, upstreamFilter, clientAuthorizationHeader) as Promise<any>;
+          return routeGatewayCall(config, "resources/read", forwardedMcpParams(request.params as Record<string, unknown> | undefined, context), options.secrets, runtime, upstreamFilter, clientAuthorizationHeader) as Promise<any>;
         });
       });
       server.setRequestHandler("prompts/get", async (request, context) => {
-        return recordSuccessOrFailure("prompts/get", async () => {
+        return recordSuccessOrFailure("prompts/get", { ...context.mcpReq._meta, ...context.mcpReq.envelope }, async () => {
           const { config } = await prepareGatewayRequest(context.http?.req, options.expectedToken, runtime, options.secrets, upstreamFilter);
-          return routeGatewayCall(config, "prompts/get", request.params as Record<string, unknown> | undefined, options.secrets, runtime, upstreamFilter, clientAuthorizationHeader) as Promise<any>;
+          return routeGatewayCall(config, "prompts/get", forwardedMcpParams(request.params as Record<string, unknown> | undefined, context), options.secrets, runtime, upstreamFilter, clientAuthorizationHeader) as Promise<any>;
         });
       });
 

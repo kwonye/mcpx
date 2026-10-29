@@ -1,6 +1,6 @@
 # Desktop App Overview
 
-The `mcpx` desktop app provides a visual interface for managing MCP servers, featuring a macOS menubar tray with a quick-status popover and a comprehensive dashboard with tabs for managing servers, projects, plugins, and settings.
+The `mcpx` desktop app provides a visual interface for managing MCP servers, featuring a macOS menubar tray with a quick-status popover and a comprehensive dashboard with tabs for managing servers, projects, standard skills, and settings.
 
 ## Architecture
 
@@ -23,7 +23,7 @@ The app is built with **Electron + React** and is designed to be a lightweight w
 - **Dashboard:** Tabbed interface with multiple views for server management and configuration.
 - **Servers Tab:** Server list, detail views, and real-time logs.
 - **Projects Tab:** Per-project server toggles and project-level configuration.
-- **Plugins Tab:** Plugin management UI with an embedded Shared Skills editor for ownership-managed skill projections.
+- **Library (`PluginsTab.tsx`):** Marketplace discovery and plugin lifecycle management, plus standard Agent Skills installation and editing. Claude, Codex, Cursor, and custom catalogs are supported; unsupported plugin components must be clearly identified.
 - **Settings Tab:** Global configuration and preferences.
 
 ## Building and Installing Locally

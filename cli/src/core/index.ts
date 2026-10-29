@@ -195,3 +195,5 @@ export type { AdoptionPlan, AdoptionItem } from "./adoption.js";
 export type { HarnessInstallation, SyncMode } from "./harnesses.js";
 export type { Operation } from "./operations.js";
 export { registerHarness } from "../adapters/index.js";
+export { readAgentInstructions } from "./agent-instructions.js";
+export { parseAgentSkill, agentSkillFrontmatterSchema, agentSkillNameSchema } from "./agent-skills.js";

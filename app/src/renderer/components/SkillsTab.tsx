@@ -3,12 +3,14 @@ import { useSkills } from "../hooks/useSkills";
 import { ConfirmDialog } from "./ConfirmDialog";
 
 export function SkillsTab() {
-  const { skills, loading, error, refresh, saveSkill, deleteSkill, customizeSkill, updateSkill, rollbackSkill } = useSkills();
+  const { skills, loading, error, refresh, saveSkill, deleteSkill, installSkill, customizeSkill, updateSkill, rollbackSkill } = useSkills();
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [selectedSkillId, setSelectedSkillId] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
   const [newSkillName, setNewSkillName] = useState("");
   const [content, setContent] = useState("");
+  const [source, setSource] = useState("");
+  const [installing, setInstalling] = useState(false);
   const [saving, setSaving] = useState(false);
   const [shareMessage, setShareMessage] = useState<string | null>(null);
   const lastSelectedId = useRef<string | null>(null);
@@ -31,7 +33,7 @@ export function SkillsTab() {
     if (!newSkillName.trim()) return;
     
     const id = newSkillName.trim().toLowerCase().replace(/\s+/g, "-");
-    if (!/^[a-z0-9][a-z0-9._-]*$/.test(id)) return;
+    if (id.length > 64 || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(id)) return;
     if (skills.some((skill) => skill.id === id)) {
       return;
     }
@@ -103,6 +105,17 @@ export function SkillsTab() {
           <span>New Skill</span>
         </button>
       </div>
+
+      <form className="create-skill-form" onSubmit={async event => {
+        event.preventDefault();
+        if (!source.trim()) return;
+        setInstalling(true);
+        if (await installSkill(source.trim())) setSource("");
+        setInstalling(false);
+      }}>
+        <input className="glass-input" aria-label="Agent Skill source" placeholder="Local skill directory or Git repository" value={source} onChange={event => setSource(event.target.value)} />
+        <button className="btn btn-primary btn-sm" disabled={installing || !source.trim()}>{installing ? "Installing..." : "Install Skill"}</button>
+      </form>
 
       {isCreating && (
         <form onSubmit={handleCreate} className="create-skill-form">

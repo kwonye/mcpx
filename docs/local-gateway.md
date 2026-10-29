@@ -67,13 +67,9 @@ Harnesses are registered in `cli/src/adapters/index.ts` with an adapter factory
 and a descriptor for paths and declared capabilities. The shared
 `JsonHarnessAdapter` handles standard JSON MCP configuration; OpenCode uses its
 alternate JSON key, and clients with different formats provide a custom
-adapter/codec. The Pi adapter supports global and project MCP config, skill
-directories, and local directory package declarations. Native package adoption
-currently supports registered Claude plugin install directories and Pi local
-directory packages. Pi `npm:`, `git:`, HTTP(S), and SSH package declarations
-remain untouched and are reported for review until resolved to a local source.
-Native package components remain harness-specific; the registry and codecs do
-not make arbitrary plugin behavior portable across harnesses.
+adapter/codec. Client connectors configure MCP endpoints and standard Agent Skills
+directories. Marketplace catalogs and plugin manifests are interpreted as distribution metadata;
+only standard skills and MCP servers are installed. Native package loaders remain unsupported.
 
 Codex projections use `~/.agents/skills` and project `.agents/skills`, while
 the older `~/.codex/skills` location remains available for discovery. VS Code
@@ -81,22 +77,13 @@ project projections use `.github/skills`. These locations follow the
 [Codex skill documentation](https://learn.chatgpt.com/docs/build-skills#where-codex-loads-local-skills)
 and [VS Code skill documentation](https://code.visualstudio.com/docs/agent-customization/agent-skills).
 
-Adopted Claude plugin and Pi package sources are stored as local, fingerprinted
-revisions under mcpx's package data. An update creates a new revision instead
-of editing the prior snapshot in place. Pinning a package prevents adoption of
-a changed source until it is unpinned. Use `mcpx package update <id>` to adopt a
-changed native revision. A package source root may rely on sibling `node_modules`
-dependencies outside the copied directory. Such packages need a managed
-installation that preserves their dependency layout before adoption.
-
 Legacy skill ownership manifests are migrated only when the existing
 projection matches its source. Ambiguous older projections are retained for
 review and are not blindly overwritten or pruned.
 
 Unknown or ambiguous MCP transports, unsafe variable interpolation, name
 conflicts, unreadable configurations, and unsupported formats are skipped or
-flagged for review; mcpx does not guess at their meaning. Native package
-snapshots are limited to 64 MiB.
+flagged for review; mcpx does not guess at their meaning. See [standards and migration](standards.md) for removed formats.
 
 ## CLI entry points
 
