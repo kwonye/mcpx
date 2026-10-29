@@ -75,31 +75,7 @@ function failStart(message: string): Promise<number> {
   });
 }
 
-function launchPlugin(command: string, args: string[], cwd: string, env: Record<string, string>): PluginProcess {
-  const resolved = resolveSpawnCommand(command, env, process.platform);
-  const bunSpawn = (globalThis as { Bun?: { spawn?: (options: {
-    cmd: string[];
-    cwd: string;
-    env: Record<string, string>;
-    stdin: "inherit";
-    stdout: "inherit";
-    stderr: "inherit";
-  }) => { exited: Promise<number>; kill: (signal?: NodeJS.Signals) => void } } }).Bun?.spawn;
-
-  // Bun's node:child_process stdio sharing does not duplicate piped handles on
-  // Windows, so the plugin sees EOF and the MCP discover probe dies. Bun.spawn
-  // inherit duplicates the host's actual stdin/stdout handles.
-  if (bunSpawn) {
-    try {
-      const proc = bunSpawn({ cmd: [resolved, ...args], cwd, env, stdin: "inherit", stdout: "inherit", stderr: "inherit" });
-      return { exited: proc.exited.then((code) => code ?? 1), kill: (signal) => proc.kill(signal) };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return { exited: failStart(message), kill: () => undefined };
-    }
-  }
-
-  const child = spawn(resolved, args, { stdio: [0, 1, 2], cwd, env });
+function trackChild(child: ReturnType<typeof spawn>): PluginProcess {
   let settled = false;
   const exited = new Promise<number>((resolve) => {
     const finish = (code: number) => {
@@ -113,6 +89,50 @@ function launchPlugin(command: string, args: string[], cwd: string, env: Record<
     child.on("exit", (code) => finish(code ?? 1));
   });
   return { exited, kill: (signal) => child.kill(signal) };
+}
+
+// Node was started with the MCP client's pipes. Copy them in userspace:
+// inheriting fds attaches the console when that parent was created with
+// windowsHide, and the plugin then exits before server/discover.
+function launchWindowsPipes(resolved: string, args: string[], cwd: string, env: Record<string, string>): PluginProcess {
+  const child = spawn(resolved, args, { stdio: ["pipe", "pipe", "pipe"], cwd, env, windowsHide: true });
+  const input = fs.createReadStream("", { fd: 0, autoClose: false });
+  const output = fs.createWriteStream("", { fd: 1, autoClose: false });
+  for (const stream of [child.stdin, child.stdout, child.stderr, input, output]) {
+    stream?.on("error", () => undefined);
+  }
+  if (child.stdin) input.pipe(child.stdin);
+  if (child.stdout) child.stdout.pipe(output);
+  if (child.stderr) child.stderr.pipe(process.stderr);
+  return trackChild(child);
+}
+
+function launchPlugin(command: string, args: string[], cwd: string, env: Record<string, string>): PluginProcess {
+  const resolved = resolveSpawnCommand(command, env, process.platform);
+  if (process.platform === "win32" && !process.versions.bun) return launchWindowsPipes(resolved, args, cwd, env);
+
+  const bunSpawn = (globalThis as { Bun?: { spawn?: (options: {
+    cmd: string[];
+    cwd: string;
+    env: Record<string, string>;
+    stdin: "inherit";
+    stdout: "inherit";
+    stderr: "inherit";
+  }) => { exited: Promise<number>; kill: (signal?: NodeJS.Signals) => void } } }).Bun?.spawn;
+
+  // Bun's node:child_process stdio sharing does not duplicate piped handles on
+  // Windows. Bun.spawn inherit duplicates the host's actual stdin/stdout handles.
+  if (bunSpawn) {
+    try {
+      const proc = bunSpawn({ cmd: [resolved, ...args], cwd, env, stdin: "inherit", stdout: "inherit", stderr: "inherit" });
+      return { exited: proc.exited.then((code) => code ?? 1), kill: (signal) => proc.kill(signal) };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return { exited: failStart(message), kill: () => undefined };
+    }
+  }
+
+  return trackChild(spawn(resolved, args, { stdio: [0, 1, 2], cwd, env }));
 }
 
 export async function runPluginHost(pluginNameOrId: string, serverId: string): Promise<void> {

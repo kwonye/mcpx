@@ -1,5 +1,7 @@
+import path from "node:path";
 import { describe, expect, it } from "bun:test";
 import { ensureWindowsExecutablePath, pluginHostBaseEnv, resolveSpawnCommand } from "../src/core/plugin-host.js";
+import { resolveLocalCliLaunch } from "../src/core/runtime-entry.js";
 
 describe("plugin host environment", () => {
   it("keeps POSIX launch variables and drops everything else", () => {
@@ -76,6 +78,37 @@ describe("plugin host environment", () => {
     expect(resolveSpawnCommand("C:\\Program Files\\nodejs\\node.exe", { PATH: "C:\\Windows" }, "win32", () => {
       throw new Error("exists should not be called");
     })).toBe("C:\\Program Files\\nodejs\\node.exe");
+  });
+
+  it("runs a Windows source checkout through node and the built CLI", () => {
+    const here = path.join("C:\\src", "cli", "src", "core");
+    const launch = resolveLocalCliLaunch({
+      here,
+      entry: path.join("C:\\src", "cli", "src", "cli.ts"),
+      execPath: "C:\\bun\\bun.exe",
+      platform: "win32",
+      bun: true,
+      electron: false,
+      distCliExists: true
+    });
+
+    expect(launch.command).toBe("node");
+    expect(launch.script).toBe(path.win32.join("C:\\src", "cli", "dist", "cli.js"));
+  });
+
+  it("keeps bun for source checkouts that are not Windows", () => {
+    const entry = "/src/cli/src/cli.ts";
+    const launch = resolveLocalCliLaunch({
+      here: "/src/cli/src/core",
+      entry,
+      execPath: "/usr/bin/bun",
+      platform: "linux",
+      bun: true,
+      electron: false,
+      distCliExists: true
+    });
+
+    expect(launch).toEqual({ command: "/usr/bin/bun", script: entry });
   });
 
   it("preserves a caller-provided PATHEXT", () => {
