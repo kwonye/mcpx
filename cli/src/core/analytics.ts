@@ -6,12 +6,22 @@
  * The PostHog client is configured with flushAt=1 / flushInterval=0 because
  * every CLI command is a short-lived process; call `shutdown()` (re-exported
  * below) before the process exits so enqueued events are not silently dropped.
+ *
+ * The client is created only when POSTHOG_API_KEY is set and telemetry is
+ * enabled. Environment opt-outs and the on-disk privacy preferences are
+ * checked before that, and a missing key degrades silently.
  */
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { PostHog } from "posthog-node";
 import { getConfigRoot, ensureParentDir } from "./paths.js";
+import {
+  TELEMETRY_NOTICE_VERSION,
+  isTelemetryEnvironmentDisabled,
+  loadTelemetryPreferences,
+  type TelemetryPreferences
+} from "./telemetry.js";
 
 // ---------------------------------------------------------------------------
 // Machine ID — stable anonymous identifier stored in the mcpx config dir.
@@ -52,33 +62,51 @@ export function getMachineId(): string {
 // PostHog singleton client.
 // ---------------------------------------------------------------------------
 
-const POSTHOG_API_KEY = process.env.POSTHOG_API_KEY ?? "";
-const POSTHOG_HOST = process.env.POSTHOG_HOST ?? "https://us.i.posthog.com";
+type AnalyticsChannel = "usage" | "errors";
 
 let _client: PostHog | null = null;
 
-function getClient(): PostHog | null {
+function readApiKey(): string {
+  return process.env.POSTHOG_API_KEY?.trim() ?? "";
+}
+
+function readHost(): string {
+  return process.env.POSTHOG_HOST?.trim() || "https://us.i.posthog.com";
+}
+
+function preferencesAllow(preferences: TelemetryPreferences, channel: AnalyticsChannel): boolean {
+  if (preferences.noticeAcknowledgedVersion < TELEMETRY_NOTICE_VERSION) return false;
+  return channel === "usage" ? preferences.usageAnalyticsEnabled : preferences.errorReportingEnabled;
+}
+
+function getClient(channel: AnalyticsChannel): PostHog | null {
+  // Opt-out is checked before the key and before the client exists so a
+  // disabled process never constructs PostHog or writes a configuration warning.
+  if (isTelemetryEnvironmentDisabled()) return null;
+
+  const apiKey = readApiKey();
+  if (!apiKey) return null;
+
+  const preferences = loadTelemetryPreferences();
+  if (!preferencesAllow(preferences, channel)) return null;
+
   if (_client) return _client;
 
-  if (!POSTHOG_API_KEY) {
-    if (process.env.NODE_ENV !== "production") {
-      process.stderr.write(
-        "[mcpx] POSTHOG_API_KEY variable required by PostHog is missing or un-configured, " +
-          "this causes events to be silently missed. " +
-          "This error stops appearing once POSTHOG_API_KEY is configured.\n"
-      );
-    }
-    return null;
-  }
-
-  _client = new PostHog(POSTHOG_API_KEY, {
-    host: POSTHOG_HOST,
+  _client = new PostHog(apiKey, {
+    host: readHost(),
     flushAt: 1,
     flushInterval: 0,
-    enableExceptionAutocapture: true,
+    enableExceptionAutocapture: preferences.errorReportingEnabled,
   });
 
   return _client;
+}
+
+function shouldDiscardQueuedEvents(): boolean {
+  if (isTelemetryEnvironmentDisabled() || !readApiKey()) return true;
+  const preferences = loadTelemetryPreferences();
+  if (preferences.noticeAcknowledgedVersion < TELEMETRY_NOTICE_VERSION) return true;
+  return !preferences.usageAnalyticsEnabled && !preferences.errorReportingEnabled;
 }
 
 // ---------------------------------------------------------------------------
@@ -93,7 +121,7 @@ export function capture(
   event: string,
   properties?: Record<string, unknown>
 ): void {
-  const client = getClient();
+  const client = getClient("usage");
   if (!client) return;
 
   client.capture({
@@ -108,7 +136,7 @@ export function capture(
  * The call is a no-op when PostHog is not configured.
  */
 export function captureException(error: unknown, additionalProperties?: Record<string, unknown>): void {
-  const client = getClient();
+  const client = getClient("errors");
   if (!client) return;
 
   client.captureException(error, getMachineId(), additionalProperties);
@@ -119,9 +147,27 @@ export function captureException(error: unknown, additionalProperties?: Record<s
  * Must be awaited before the CLI process exits.
  */
 export async function shutdown(): Promise<void> {
-  if (!_client) return;
+  const client = _client;
+  _client = null;
+  if (!client) return;
   try {
-    await _client.shutdown();
+    if (shouldDiscardQueuedEvents()) {
+      // disable() drops the in-memory queue so shutdown cannot flush events
+      // captured before an opt-out in the same process.
+      try {
+        await client.disable();
+      } catch {
+        // Queue cleanup below still prevents a normal shutdown from draining.
+      }
+      for (const queueKey of ["queue", "ai_queue", "ai_capture_queue", "logs_queue"] as const) {
+        try {
+          client.setPersistedProperty(queueKey as never, null);
+        } catch {
+          // Queue cleanup is best-effort; capture is already disabled above.
+        }
+      }
+    }
+    await client.shutdown();
   } catch {
     // Never let analytics teardown crash the CLI.
   }
