@@ -25,13 +25,14 @@ export class PluginCache {
   }
 
   private sourceDir(source: PluginSource): string {
-    // Sanitize source key for filesystem
+    // Local keys are a path hash. Embedding the absolute path made marketplace
+    // installs longer than Windows MAX_PATH, and libuv then fails spawn with ENOENT.
     const key = source.type === "github"
       ? `github_${source.original.split("@")[0].replace(/[^a-zA-Z0-9_/-]/g, "_")}`
       : source.type === "npm"
       ? `npm_${source.original.replace(/^npm:/, "").split("@")[0].replace(/[^a-zA-Z0-9_/-]/g, "_")}`
       : source.type === "local"
-      ? `local_${source.original.replace(/[^a-zA-Z0-9_/-]/g, "_")}`
+      ? `local_${crypto.createHash("sha256").update(path.resolve(source.original)).digest("hex").slice(0, 32)}`
       : source.type === "git-subdir"
       ? `git_subdir_${`${source.original}/${source.path ?? ""}`.replace(/[^a-zA-Z0-9_./@-]/g, "_")}`
       : `git_${source.original.replace(/[^a-zA-Z0-9_./@-]/g, "_")}`;
