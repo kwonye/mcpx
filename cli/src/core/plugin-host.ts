@@ -108,20 +108,14 @@ export function runPluginHost(pluginNameOrId: string, serverId: string): void {
   env.CLAUDE_PLUGIN_DATA = dataDir;
 
   ensureWindowsExecutablePath(process.env, process.platform);
-  // 'inherit' does not attach the parent's pipes on Windows, so the MCP client
-  // never sees the plugin process. Forward the streams explicitly.
+  // Share the host's stdio handles. 'inherit' uses the console on Windows, and a
+  // userspace pipe signals EOF immediately, so the plugin exits before discover.
   const child = spawn(command, args, {
-    stdio: ["pipe", "pipe", "pipe"],
+    stdio: [process.stdin, process.stdout, process.stderr],
     cwd,
     env: env as Record<string, string>,
     windowsHide: true,
   });
-  child.stdin?.on("error", () => undefined);
-  child.stdout?.on("error", () => undefined);
-  child.stderr?.on("error", () => undefined);
-  if (child.stdin) process.stdin.pipe(child.stdin);
-  if (child.stdout) child.stdout.pipe(process.stdout);
-  if (child.stderr) child.stderr.pipe(process.stderr);
 
   process.on("SIGINT", () => child.kill("SIGINT"));
   process.on("SIGTERM", () => child.kill("SIGTERM"));
