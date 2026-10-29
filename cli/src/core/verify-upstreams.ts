@@ -1,3 +1,6 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { StdioClientTransport, getDefaultEnvironment } from "@modelcontextprotocol/client/stdio";
 import type { McpxConfig } from "../types.js";
@@ -15,11 +18,17 @@ export async function verifyUpstreams(config: McpxConfig, names: string[]): Prom
     if (!spec || spec.enabled === false) continue;
     const client = new Client({ name: "mcpx-adoption-check", version: APP_VERSION }, { versionNegotiation: { mode: { pin: MCP_V2_PROTOCOL_VERSION } } });
     const signal = AbortSignal.timeout(10000);
+    let diag: string | undefined;
     try {
       let transport: StdioClientTransport | StreamableHTTPClientTransport;
       if (spec.transport === "stdio") {
         const env: Record<string, string> = { ...getDefaultEnvironment(), PATH: buildEnrichedPath(process.env.PATH) };
         for (const [key, value] of Object.entries(spec.env ?? {})) env[key] = secrets.resolveMaybeSecret(value);
+        // The SDK's discover probe discards stderr. The plugin host appends the
+        // plugin's own failure text here so verification can show it.
+        diag = path.join(os.tmpdir(), `mcpx-host-${process.pid}-${name.replace(/[^a-zA-Z0-9_-]/g, "_")}.txt`);
+        fs.rmSync(diag, { force: true });
+        env.MCPX_HOST_DIAG = diag;
         transport = new StdioClientTransport({ command: spec.command, args: spec.args, cwd: spec.cwd, env });
       } else {
         const headers: Record<string, string> = {};
@@ -33,8 +42,16 @@ export async function verifyUpstreams(config: McpxConfig, names: string[]): Prom
       else if (capabilities?.prompts) await client.listPrompts({}, { signal, timeout: 10000 });
     } catch (error) {
       const cause = error instanceof Error ? error.message : String(error);
-      throw new Error(`Could not verify managed upstream "${name}". The native installation was preserved; configure its credentials or connection and scan again. (${cause})`);
+      let host = "";
+      if (diag) {
+        try { host = fs.readFileSync(diag, "utf8").trim(); } catch { /* no host diagnostic */ }
+      }
+      const detail = host ? `${cause}; ${host}` : cause;
+      throw new Error(`Could not verify managed upstream "${name}". The native installation was preserved; configure its credentials or connection and scan again. (${detail})`);
     }
-    finally { await client.close().catch(() => undefined); }
+    finally {
+      await client.close().catch(() => undefined);
+      if (diag) fs.rmSync(diag, { force: true });
+    }
   }
 }

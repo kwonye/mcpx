@@ -75,6 +75,16 @@ function failStart(message: string): Promise<number> {
   });
 }
 
+function failHost(message: string): never {
+  const line = message.endsWith("\n") ? message : `${message}\n`;
+  try { fs.writeSync(2, line); } catch { /* stderr may already be closed */ }
+  const diag = process.env.MCPX_HOST_DIAG;
+  if (diag) {
+    try { fs.appendFileSync(diag, line); } catch { /* diagnostic only */ }
+  }
+  process.exit(1);
+}
+
 function trackChild(child: ReturnType<typeof spawn>): PluginProcess {
   let settled = false;
   const exited = new Promise<number>((resolve) => {
@@ -91,24 +101,37 @@ function trackChild(child: ReturnType<typeof spawn>): PluginProcess {
   return { exited, kill: (signal) => child.kill(signal) };
 }
 
-// The MCP client starts this host with piped stdin/stdout and windowsHide.
-// Inheriting stdio on Windows attaches the console, and opening fd 0 by path
-// fails, so the plugin sees EOF and exits during server/discover. Copy the
-// Node streams instead. This path runs under node, not Bun.
-function launchWindowsPipes(resolved: string, args: string[], cwd: string, env: Record<string, string>): PluginProcess {
-  const child = spawn(resolved, args, { stdio: ["pipe", "pipe", "pipe"], cwd, env });
-  for (const stream of [child.stdin, child.stdout, child.stderr, process.stdin, process.stdout]) {
-    stream?.on("error", () => undefined);
-  }
-  if (child.stdin) process.stdin.pipe(child.stdin);
-  if (child.stdout) child.stdout.pipe(process.stdout);
-  if (child.stderr) child.stderr.pipe(process.stderr);
-  return trackChild(child);
+// A direct `node server.js` child of the MCP client works on Windows. Give the
+// plugin those same stdin/stdout fds. A userspace pipe sees EOF first, and
+// `stdio: "inherit"` attaches the console when the host was started with
+// windowsHide. Stderr stays a pipe so a startup failure can be reported.
+function launchWindowsNode(resolved: string, args: string[], cwd: string, env: Record<string, string>): PluginProcess {
+  process.stdin.pause();
+  const child = spawn(resolved, args, { stdio: [0, 1, "pipe"], cwd, env });
+  let stderr = "";
+  child.stderr?.setEncoding("utf8");
+  child.stderr?.on("data", (chunk: string) => { stderr += chunk; });
+  child.stderr?.on("error", () => undefined);
+  const tracked = trackChild(child);
+  return {
+    kill: tracked.kill,
+    exited: tracked.exited.then((code) => {
+      const diag = process.env.MCPX_HOST_DIAG;
+      if (diag) {
+        const detail = stderr.trim() || `plugin process exited with code ${code}`;
+        try { fs.appendFileSync(diag, `${detail}\n`); } catch { /* diagnostic only */ }
+      }
+      if (code !== 0 && stderr.trim()) {
+        try { fs.writeSync(2, stderr); } catch { /* closed stderr */ }
+      }
+      return code;
+    })
+  };
 }
 
 function launchPlugin(command: string, args: string[], cwd: string, env: Record<string, string>): PluginProcess {
   const resolved = resolveSpawnCommand(command, env, process.platform);
-  if (process.platform === "win32" && !process.versions.bun) return launchWindowsPipes(resolved, args, cwd, env);
+  if (process.platform === "win32" && !process.versions.bun) return launchWindowsNode(resolved, args, cwd, env);
 
   const bunSpawn = (globalThis as { Bun?: { spawn?: (options: {
     cmd: string[];
@@ -139,24 +162,20 @@ export async function runPluginHost(pluginNameOrId: string, serverId: string): P
   const id = resolvePluginId(config, pluginNameOrId);
   const plugin = config.plugins?.[id];
   if (!plugin) {
-    process.stderr.write(`[mcpx] Plugin "${pluginNameOrId}" not found\n`);
-    process.exit(1);
+    failHost(`[mcpx] Plugin "${pluginNameOrId}" not found`);
   }
 
   if (!plugin.enabled) {
-    process.stderr.write(`[mcpx] Plugin "${plugin.name}" is disabled\n`);
-    process.exit(1);
+    failHost(`[mcpx] Plugin "${plugin.name}" is disabled`);
   }
 
   if (plugin.approvals?.mcpServers === false) {
-    process.stderr.write(`[mcpx] MCP servers for plugin "${plugin.name}" are not approved\n`);
-    process.exit(1);
+    failHost(`[mcpx] MCP servers for plugin "${plugin.name}" are not approved`);
   }
 
   const serverDef = plugin.discovered.mcpServers.find((s) => s.id === serverId);
   if (!serverDef) {
-    process.stderr.write(`[mcpx] Server "${serverId}" not found in plugin "${plugin.name}"\n`);
-    process.exit(1);
+    failHost(`[mcpx] Server "${serverId}" not found in plugin "${plugin.name}"`);
   }
 
   const pluginRoot = plugin.root;
@@ -183,8 +202,7 @@ export async function runPluginHost(pluginNameOrId: string, serverId: string): P
       const withinRoot = resolved === resolvedPluginRoot || resolved.startsWith(resolvedPluginRoot + path.sep);
       const withinData = resolved === resolvedDataDir || resolved.startsWith(resolvedDataDir + path.sep);
       if (!withinRoot && !withinData) {
-        process.stderr.write(`[mcpx] Rejected path escapes plugin root: ${p}\n`);
-        process.exit(1);
+        failHost(`[mcpx] Rejected path escapes plugin root: ${p}`);
       }
     }
   }
