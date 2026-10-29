@@ -5,7 +5,28 @@ import { loadConfig } from "./config.js";
 import { resolvePluginVars } from "./plugin-parse.js";
 import { resolvePluginId } from "./plugin-manager.js";
 
-const ALLOWLISTED_ENV = new Set(["PATH", "HOME", "TMPDIR", "LANG", "SHELL"]);
+const POSIX_INHERITED_ENV = ["PATH", "HOME", "TMPDIR", "LANG", "SHELL"] as const;
+// Windows cannot resolve `node` to `node.exe`, or load system DLLs, unless these
+// are present. The MCP client only forwards a subset, and it omits PATHEXT.
+const WINDOWS_INHERITED_ENV = [
+  "PATH", "PATHEXT", "SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "COMSPEC",
+  "TEMP", "TMP", "TMPDIR", "HOME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH",
+  "LANG", "SHELL"
+] as const;
+const DEFAULT_WINDOWS_PATHEXT = ".COM;.EXE;.BAT;.CMD;.VBS;.JS;.WS;.MSC";
+
+export function pluginHostBaseEnv(
+  source: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform
+): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const key of platform === "win32" ? WINDOWS_INHERITED_ENV : POSIX_INHERITED_ENV) {
+    const value = source[key];
+    if (value) env[key] = value;
+  }
+  if (platform === "win32" && !env.PATHEXT) env.PATHEXT = DEFAULT_WINDOWS_PATHEXT;
+  return env;
+}
 
 export function runPluginHost(pluginNameOrId: string, serverId: string): void {
   const config = loadConfig();
@@ -63,11 +84,7 @@ export function runPluginHost(pluginNameOrId: string, serverId: string): void {
   }
 
   // Build env: allowlisted vars + server-declared env + mcpx vars
-  const env: Record<string, string | undefined> = {};
-  for (const key of ALLOWLISTED_ENV) {
-    const val = process.env[key];
-    if (val) env[key] = val;
-  }
+  const env: Record<string, string | undefined> = { ...pluginHostBaseEnv() };
   for (const [k, v] of Object.entries(resolvedEnv)) {
     env[k] = v;
   }
@@ -97,7 +114,8 @@ export function runPluginHost(pluginNameOrId: string, serverId: string): void {
     process.exit(code ?? 1);
   });
   child.on("error", (error) => {
-    process.stderr.write(`[mcpx] Failed to start plugin server: ${error.message}\n`);
-    process.exit(1);
+    process.stderr.write(`[mcpx] Failed to start plugin server: ${error.message}\n`, () => {
+      process.exit(1);
+    });
   });
 }
