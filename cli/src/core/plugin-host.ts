@@ -85,6 +85,14 @@ function failHost(message: string): never {
   process.exit(1);
 }
 
+function noteHostDiagnostic(message: string): void {
+  const line = message.endsWith("\n") ? message : `${message}\n`;
+  try { fs.writeSync(2, line); } catch { /* stderr may already be closed */ }
+  const diag = process.env.MCPX_HOST_DIAG;
+  if (!diag) return;
+  try { fs.appendFileSync(diag, line); } catch { /* diagnostic only */ }
+}
+
 function trackChild(child: ReturnType<typeof spawn>): PluginProcess {
   let settled = false;
   const exited = new Promise<number>((resolve) => {
@@ -94,35 +102,36 @@ function trackChild(child: ReturnType<typeof spawn>): PluginProcess {
       resolve(code);
     };
     child.on("error", (error) => {
-      process.stderr.write(`[mcpx] Failed to start plugin server: ${error.message}\n`, () => finish(1));
+      noteHostDiagnostic(`[mcpx] Failed to start plugin server: ${error.message}`);
+      finish(1);
     });
-    child.on("exit", (code) => finish(code ?? 1));
+    // `exit` can run before stderr is flushed. `close` means the pipes are done.
+    child.on("close", (code) => finish(code ?? 1));
   });
   return { exited, kill: (signal) => child.kill(signal) };
 }
 
-// A direct `node server.js` child of the MCP client works on Windows. Give the
-// plugin those same stdin/stdout fds. A userspace pipe sees EOF first, and
-// `stdio: "inherit"` attaches the console when the host was started with
-// windowsHide. Stderr stays a pipe so a startup failure can be reported.
+// Windows rejects inheriting the MCP pipes (`EINVAL`) and a piped stdin can
+// already be at EOF, which makes the plugin exit before server/discover.
+// Copy bytes without forwarding that EOF, and keep stderr for the error.
 function launchWindowsNode(resolved: string, args: string[], cwd: string, env: Record<string, string>): PluginProcess {
-  process.stdin.pause();
-  const child = spawn(resolved, args, { stdio: [0, 1, "pipe"], cwd, env });
+  const child = spawn(resolved, args, { stdio: ["pipe", "pipe", "pipe"], cwd, env, windowsHide: true });
   let stderr = "";
   child.stderr?.setEncoding("utf8");
   child.stderr?.on("data", (chunk: string) => { stderr += chunk; });
-  child.stderr?.on("error", () => undefined);
+  for (const stream of [child.stdin, child.stdout, child.stderr, process.stdin, process.stdout]) {
+    stream?.on("error", () => undefined);
+  }
+  process.stdin.on("data", (chunk) => { child.stdin?.write(chunk); });
+  if (child.stdout) child.stdout.pipe(process.stdout, { end: false });
+  process.stdin.resume();
   const tracked = trackChild(child);
   return {
     kill: tracked.kill,
     exited: tracked.exited.then((code) => {
-      const diag = process.env.MCPX_HOST_DIAG;
-      if (diag) {
-        const detail = stderr.trim() || `plugin process exited with code ${code}`;
-        try { fs.appendFileSync(diag, `${detail}\n`); } catch { /* diagnostic only */ }
-      }
-      if (code !== 0 && stderr.trim()) {
-        try { fs.writeSync(2, stderr); } catch { /* closed stderr */ }
+      if (process.env.MCPX_HOST_DIAG) {
+        const launched = `command=${resolved} cwd=${cwd} cwdExists=${fs.existsSync(cwd)} args=${args.join(" ")}`;
+        noteHostDiagnostic(`plugin exit ${code}; ${launched}; stderr=${stderr.trim() || "<empty>"}`);
       }
       return code;
     })
