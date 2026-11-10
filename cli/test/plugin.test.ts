@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
@@ -136,6 +137,26 @@ describe("plugin cache", () => {
     // Verify cache hit is idempotent
     const cached2 = await cache.fetch(source, "test-plugin");
     expect(cached2.root).toBe(cached.root);
+  });
+
+  it("keeps a local cache directory short when the source path is long", async () => {
+    const pluginRoot = path.join(env.root, "nested", "a".repeat(180), "plugin");
+    fs.mkdirSync(path.join(pluginRoot, ".claude-plugin"), { recursive: true });
+    fs.writeFileSync(
+      path.join(pluginRoot, ".claude-plugin", "plugin.json"),
+      JSON.stringify({ name: "deep-plugin", version: "1.0.0" })
+    );
+
+    const cache = new PluginCache();
+    const source = parseSource(pluginRoot);
+    source.resolvedSha = await cache.resolveSha(source);
+    const cached = await cache.fetch(source, "deep-plugin");
+    const sourceDirName = path.basename(path.dirname(cached.root));
+    const expected = `local_${crypto.createHash("sha256").update(path.resolve(pluginRoot)).digest("hex").slice(0, 32)}`;
+
+    expect(sourceDirName).toBe(expected);
+    expect(sourceDirName.length).toBeLessThan(40);
+    expect(sourceDirName.includes("a".repeat(20))).toBe(false);
   });
 
   it("lists cached plugins", async () => {
