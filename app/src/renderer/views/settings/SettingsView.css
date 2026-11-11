@@ -1,0 +1,7 @@
+.ui-setting > .ui-alert {
+  margin-top: var(--space-3);
+}
+
+.settings__note {
+  padding: var(--space-3) var(--space-4) 0;
+}

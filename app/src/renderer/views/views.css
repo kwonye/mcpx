@@ -1,0 +1,131 @@
+/* Small layout helpers shared by every view. */
+.form-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.view-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.summary-line {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-1-5) var(--space-4);
+  font-size: var(--text-sm);
+  color: var(--color-text-tertiary);
+}
+
+.summary-line strong {
+  font-weight: var(--weight-medium);
+  color: var(--color-text-secondary);
+}
+
+.row-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-md);
+  background: var(--color-surface-sunken);
+  box-shadow: inset 0 0 0 1px var(--color-border);
+  color: var(--color-text-secondary);
+}
+
+.row-icon--accent {
+  background: var(--color-accent-subtle);
+  box-shadow: none;
+  color: var(--color-accent-text);
+}
+
+.mono-subtle {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.cost {
+  min-width: 64px;
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-tertiary);
+  text-align: right;
+  white-space: nowrap;
+}
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: 140px minmax(0, 1fr);
+  gap: var(--space-2-5) var(--space-4);
+  padding: var(--space-4);
+  font-size: var(--text-md);
+}
+
+.detail-grid dt {
+  color: var(--color-text-tertiary);
+}
+
+.detail-grid dd {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.text-muted {
+  color: var(--color-text-tertiary);
+}
+
+.toolbar {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.toolbar > .ui-field {
+  flex: 1;
+  min-width: 180px;
+}
+
+.toolbar > .ui-field--narrow {
+  flex: 0 0 180px;
+}
+
+.danger-zone {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+}
+
+.danger-zone p {
+  font-size: var(--text-sm);
+  color: var(--color-text-tertiary);
+}
+
+.chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1-5);
+}
+
+.section-text {
+  padding: var(--space-3) var(--space-4);
+}
+
+.row-note {
+  padding-left: 40px;
+  font-size: var(--text-sm);
+  color: var(--color-text-tertiary);
+  overflow-wrap: anywhere;
+}
+
+.row-note--danger {
+  color: var(--color-danger);
+}

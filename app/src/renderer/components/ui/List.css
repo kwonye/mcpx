@@ -1,0 +1,118 @@
+.ui-list {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  overflow: hidden;
+}
+
+.ui-row + .ui-row {
+  border-top: 1px solid var(--color-border);
+}
+
+.ui-row__line {
+  display: flex;
+  align-items: center;
+  min-height: 52px;
+}
+
+.ui-row__main {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex: 1;
+  min-width: 0;
+  align-self: stretch;
+  padding: var(--space-2-5) var(--space-3) var(--space-2-5) var(--space-4);
+  border: 0;
+  background: transparent;
+  text-align: left;
+}
+
+button.ui-row__main {
+  transition: background-color var(--duration-fast) ease;
+}
+
+.ui-row--interactive:hover {
+  background: var(--color-surface-hover);
+}
+
+button.ui-row__main:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--color-focus);
+  border-radius: var(--radius-lg);
+}
+
+.ui-row--selected {
+  background: var(--color-surface-selected);
+}
+
+.ui-row__leading {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  color: var(--color-text-secondary);
+}
+
+.ui-row__text {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-0-5);
+  flex: 1;
+  min-width: 0;
+}
+
+.ui-row__title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  font-size: var(--text-md);
+  font-weight: var(--weight-medium);
+  color: var(--color-text);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.ui-row__subtitle {
+  font-size: var(--text-sm);
+  color: var(--color-text-tertiary);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.ui-row--muted .ui-row__title {
+  color: var(--color-text-secondary);
+}
+
+.ui-row__meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex: none;
+}
+
+.ui-row__chevron {
+  flex: none;
+  color: var(--color-text-tertiary);
+  opacity: 0;
+  transition: opacity var(--duration-fast) ease;
+}
+
+.ui-row--interactive:hover .ui-row__chevron,
+button.ui-row__main:focus-visible .ui-row__chevron {
+  opacity: 1;
+}
+
+.ui-row__trailing {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: none;
+  padding-right: var(--space-3);
+}
+
+.ui-row__extra {
+  padding: 0 var(--space-4) var(--space-3);
+}

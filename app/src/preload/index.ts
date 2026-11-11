@@ -1,145 +1,164 @@
+// Sandbox-safe preload: only `electron` is imported at runtime; everything
+// else is type-only or a plain constant object bundled into this file.
 import { contextBridge, ipcRenderer } from "electron";
 import type { IpcRendererEvent } from "electron";
-import type {
-  OAuthSupport,
-  StatusReport,
-  Skill,
-  ManagedPlugin,
-  ManagedMarketplace,
-  MarketplaceListing,
-  MarketplacePluginDetail,
-  DaemonStartResult,
-  SyncSummary,
-  UpstreamServerSpec,
-  exportEnvironment,
-  importEnvironment,
-} from "@mcpx/core";
+import type { TelemetryStatus } from "@mcpx/core";
 import { IPC } from "../shared/ipc-channels";
-import type { DesktopSettingsPatch } from "../shared/desktop-settings";
-import type { DesktopSettings } from "../shared/desktop-settings";
-import type { TelemetryPreferences, TelemetryStatus } from "@mcpx/core";
+import type { InvokeChannel, IpcArgs, IpcResult, OAuthProgressPayload, PendingAuthEntry } from "../shared/ipc-contract";
 
-const ALLOWED_CHANNELS = new Set<string>(Object.values(IPC));
-const REMOTE_ERROR_PREFIX = /^Error invoking remote method '[^']+':\s*(?:Error:\s*)?/;
+const REMOTE_ERROR_PREFIX = /^Error invoking remote method '[^']+':\s*(?:\w*Error:\s*)?/;
 
-function invokeIpc<T>(channel: string, ...args: unknown[]): Promise<T> {
+function call<C extends InvokeChannel>(channel: C, ...args: IpcArgs<C>): Promise<IpcResult<C>> {
   return ipcRenderer.invoke(channel, ...args).catch((error: unknown) => {
     if (error instanceof Error) {
       error.message = error.message.replace(REMOTE_ERROR_PREFIX, "");
     }
     throw error;
-  });
+  }) as Promise<IpcResult<C>>;
 }
 
+function subscribe<T>(channel: string, callback: (payload: T) => void): () => void {
+  const listener = (_event: IpcRendererEvent, payload: T) => callback(payload);
+  ipcRenderer.on(channel, listener);
+  return () => {
+    ipcRenderer.removeListener(channel, listener);
+  };
+}
+
+// Main may send "navigate" on did-finish-load, before React subscribes, so
+// listen from preload load time and replay the last route to late subscribers.
+let lastRoute: string | null = null;
+const navigateListeners = new Set<(route: string) => void>();
+ipcRenderer.on(IPC.NAVIGATE, (_event: IpcRendererEvent, route: unknown) => {
+  if (typeof route !== "string") return;
+  if (navigateListeners.size === 0) {
+    lastRoute = route;
+    return;
+  }
+  for (const listener of navigateListeners) listener(route);
+});
+
+function onNavigate(callback: (route: string) => void): () => void {
+  navigateListeners.add(callback);
+  if (lastRoute !== null) {
+    const route = lastRoute;
+    lastRoute = null;
+    callback(route);
+  }
+  return () => {
+    navigateListeners.delete(callback);
+  };
+}
+
+/** Binds a channel to a typed function: `bind(IPC.X)(...args)`. */
+const bind = <C extends InvokeChannel>(channel: C) => (...args: IpcArgs<C>) => call(channel, ...args);
+
 const api = {
-  getStatus: () => invokeIpc<StatusReport>(IPC.GET_STATUS),
-  getServers: () => invokeIpc<Array<Record<string, unknown>>>(IPC.GET_SERVERS),
-  getDesktopSettings: () => invokeIpc<DesktopSettings>(IPC.GET_DESKTOP_SETTINGS),
-  getTelemetryStatus: () => invokeIpc<TelemetryStatus>(IPC.GET_TELEMETRY_STATUS),
-  acknowledgeTelemetryNotice: () => invokeIpc<TelemetryPreferences>(IPC.ACKNOWLEDGE_TELEMETRY_NOTICE),
-  addServer: (name: string, spec: UpstreamServerSpec, options?: { force?: boolean }) => invokeIpc(IPC.ADD_SERVER, name, spec, options),
-  updateServer: (name: string, spec: UpstreamServerSpec, resolvedSecrets?: Record<string, string>) => invokeIpc(IPC.UPDATE_SERVER, name, spec, resolvedSecrets),
-  removeServer: (name: string) => invokeIpc(IPC.REMOVE_SERVER, name),
-  setServerEnabled: (name: string, enabled: boolean) => invokeIpc(IPC.SET_SERVER_ENABLED, name, enabled),
-  updateDesktopSettings: (patch: DesktopSettingsPatch) => invokeIpc<DesktopSettings>(IPC.UPDATE_DESKTOP_SETTINGS, patch),
-  updateTelemetryPreferences: (patch: Partial<Pick<TelemetryPreferences, "usageAnalyticsEnabled" | "errorReportingEnabled">>) =>
-    invokeIpc<TelemetryPreferences>(IPC.UPDATE_TELEMETRY_PREFERENCES, patch),
-  resetTelemetryId: () => invokeIpc<TelemetryPreferences>(IPC.RESET_TELEMETRY_ID),
-  captureDesktopTabViewed: (tab: "servers" | "projects" | "plugins" | "settings") =>
-    invokeIpc<void>(IPC.CAPTURE_DESKTOP_TAB_VIEWED, tab),
-  onTelemetryChanged: (callback: (status: TelemetryStatus) => void) => {
-    const listener = (_event: IpcRendererEvent, status: TelemetryStatus) => callback(status);
-    ipcRenderer.on(IPC.TELEMETRY_CHANGED, listener);
-    return () => ipcRenderer.removeListener(IPC.TELEMETRY_CHANGED, listener);
+  platform: process.platform as "darwin" | "win32" | "linux" | (string & {}),
+
+  app: {
+    openDashboard: bind(IPC.OPEN_DASHBOARD),
+    quit: bind(IPC.QUIT_APP),
+    /** Main asks the dashboard to show a route ("servers", "clients", ...). */
+    onNavigate,
+    selectDirectory: bind(IPC.SELECT_DIRECTORY),
+    checkForUpdates: bind(IPC.CHECK_FOR_UPDATES)
   },
-  checkForUpdates: () => invokeIpc<{ status: string; message: string }>(IPC.CHECK_FOR_UPDATES),
-  syncAll: () => invokeIpc<SyncSummary>(IPC.SYNC_ALL),
-  daemonStart: () => invokeIpc<DaemonStartResult>(IPC.DAEMON_START),
-  daemonStop: () => invokeIpc<void>(IPC.DAEMON_STOP),
-  daemonRestart: () => invokeIpc<DaemonStartResult>(IPC.DAEMON_RESTART),
-  openDashboard: () => invokeIpc(IPC.OPEN_DASHBOARD),
-  quitApp: () => invokeIpc(IPC.QUIT_APP),
-  getPendingAuth: () => invokeIpc<Array<{ serverName: string; oauthLikely?: boolean; oauthSupport?: OAuthSupport; status?: number }> | null>(IPC.GET_PENDING_AUTH),
-  onAuthStateChanged: (callback: (entries: Array<{ serverName: string; oauthLikely?: boolean; oauthSupport?: OAuthSupport; status?: number }>) => void) => {
-    const listener = (_event: IpcRendererEvent, entries: Array<{ serverName: string; oauthLikely?: boolean; oauthSupport?: OAuthSupport; status?: number }>) => callback(entries);
-    ipcRenderer.on(IPC.AUTH_STATE_CHANGED, listener);
-    return () => {
-      ipcRenderer.removeListener(IPC.AUTH_STATE_CHANGED, listener);
-    };
+
+  status: {
+    get: bind(IPC.GET_STATUS),
+    tokenCounts: bind(IPC.GET_TOKEN_COUNTS),
+    syncAll: bind(IPC.SYNC_ALL)
   },
-  onOauthProgress: (callback: (event: { serverName: string; phase: string; authorizationUrl?: string; expiresAt?: number; message?: string }) => void) => {
-    const listener = (_event: IpcRendererEvent, payload: { serverName: string; phase: string; authorizationUrl?: string; expiresAt?: number; message?: string }) => callback(payload);
-    ipcRenderer.on(IPC.OAUTH_PROGRESS, listener);
-    return () => {
-      ipcRenderer.removeListener(IPC.OAUTH_PROGRESS, listener);
-    };
+
+  gateway: {
+    start: bind(IPC.DAEMON_START),
+    stop: bind(IPC.DAEMON_STOP),
+    restart: bind(IPC.DAEMON_RESTART)
   },
-  requestAuth: (serverName: string) => invokeIpc(IPC.REQUEST_AUTH, serverName),
-  checkOauthSupport: (serverName: string) => invokeIpc<{ support: OAuthSupport }>(IPC.CHECK_OAUTH_SUPPORT, serverName),
-  startOauth: (serverName: string) => invokeIpc(IPC.START_OAUTH, serverName),
-  cancelOauth: (serverName: string) => invokeIpc(IPC.CANCEL_OAUTH, serverName),
-  reopenOauthUrl: (serverName: string) => invokeIpc(IPC.OAUTH_REOPEN, serverName),
-  dismissAuth: (serverName: string) => invokeIpc(IPC.DISMISS_AUTH, serverName),
+
+  settings: {
+    get: bind(IPC.GET_DESKTOP_SETTINGS),
+    update: bind(IPC.UPDATE_DESKTOP_SETTINGS)
+  },
+
+  telemetry: {
+    status: bind(IPC.GET_TELEMETRY_STATUS),
+    acknowledge: bind(IPC.ACKNOWLEDGE_TELEMETRY_NOTICE),
+    updatePreferences: bind(IPC.UPDATE_TELEMETRY_PREFERENCES),
+    resetId: bind(IPC.RESET_TELEMETRY_ID),
+    captureTabViewed: bind(IPC.CAPTURE_DESKTOP_TAB_VIEWED),
+    onChanged: (callback: (status: TelemetryStatus) => void) => subscribe<TelemetryStatus>(IPC.TELEMETRY_CHANGED, callback)
+  },
+
+  servers: {
+    parseInput: bind(IPC.PARSE_SERVER_INPUT),
+    add: bind(IPC.ADD_SERVER),
+    update: bind(IPC.UPDATE_SERVER),
+    remove: bind(IPC.REMOVE_SERVER),
+    setEnabled: bind(IPC.SET_SERVER_ENABLED)
+  },
+
+  auth: {
+    configure: bind(IPC.CONFIGURE_AUTH),
+    pending: bind(IPC.GET_PENDING_AUTH),
+    onPendingChanged: (callback: (entries: PendingAuthEntry[]) => void) => subscribe<PendingAuthEntry[]>(IPC.AUTH_STATE_CHANGED, callback),
+    request: bind(IPC.REQUEST_AUTH),
+    dismiss: bind(IPC.DISMISS_AUTH),
+    checkOAuthSupport: bind(IPC.CHECK_OAUTH_SUPPORT),
+    startOAuth: bind(IPC.START_OAUTH),
+    cancelOAuth: bind(IPC.CANCEL_OAUTH),
+    reopenOAuth: bind(IPC.OAUTH_REOPEN),
+    onOAuthProgress: (callback: (event: OAuthProgressPayload) => void) => subscribe<OAuthProgressPayload>(IPC.OAUTH_PROGRESS, callback)
+  },
+
+  projects: {
+    add: bind(IPC.PROJECT_INIT),
+    remove: bind(IPC.PROJECT_REMOVE),
+    setServerEnabled: bind(IPC.PROJECT_SET_SERVER_ENABLED)
+  },
+
   skills: {
-    list: () => invokeIpc<Skill[]>(IPC.LIST_SKILLS),
-    get: (id: string) => invokeIpc<Skill | null>(IPC.GET_SKILL, id),
-    save: (id: string, content: string) => invokeIpc<{ id: string; success: true }>(IPC.SAVE_SKILL, id, content),
-    delete: (id: string) => invokeIpc<{ id: string; success: true }>(IPC.DELETE_SKILL, id),
-    install: (source: string, skill?: string) => invokeIpc(IPC.INSTALL_SKILL, source, skill),
-    customize: (id: string, name?: string) => invokeIpc(IPC.CUSTOMIZE_SKILL, id, name),
-    pin: (id: string) => invokeIpc(IPC.PIN_SKILL, id),
-    unpin: (id: string) => invokeIpc(IPC.UNPIN_SKILL, id),
-    update: (id: string) => invokeIpc<Skill>(IPC.UPDATE_SKILL, id),
-    rollback: (id: string) => invokeIpc<Skill>(IPC.ROLLBACK_SKILL, id)
+    list: bind(IPC.LIST_SKILLS),
+    save: bind(IPC.SAVE_SKILL),
+    delete: bind(IPC.DELETE_SKILL),
+    install: bind(IPC.INSTALL_SKILL),
+    customize: bind(IPC.CUSTOMIZE_SKILL),
+    pin: bind(IPC.PIN_SKILL),
+    unpin: bind(IPC.UNPIN_SKILL),
+    update: bind(IPC.UPDATE_SKILL),
+    rollback: bind(IPC.ROLLBACK_SKILL)
   },
+
   share: {
-    export: (directory: string, options?: Parameters<typeof exportEnvironment>[1]) =>
-      invokeIpc<ReturnType<typeof exportEnvironment>>(IPC.SHARE_EXPORT, directory, options),
-    import: (directory: string, options?: Parameters<typeof importEnvironment>[1]) =>
-      invokeIpc<Awaited<ReturnType<typeof importEnvironment>>>(IPC.SHARE_IMPORT, directory, options)
+    export: bind(IPC.SHARE_EXPORT),
+    import: bind(IPC.SHARE_IMPORT)
   },
+
   plugins: {
-    inspect: (source: string) => invokeIpc(IPC.PLUGIN_INSPECT, source),
-    install: (source: string, options?: unknown) => invokeIpc(IPC.PLUGIN_INSTALL, source, options),
-    prepare: (name: string) => invokeIpc(IPC.PLUGIN_PREPARE, name),
-    update: (name: string) => invokeIpc(IPC.PLUGIN_UPDATE, name),
-    pin: (name: string) => invokeIpc(IPC.PLUGIN_PIN, name),
-    unpin: (name: string) => invokeIpc(IPC.PLUGIN_UNPIN, name),
-    rollback: (name: string) => invokeIpc(IPC.PLUGIN_ROLLBACK, name),
-    uninstall: (name: string, options?: unknown) => invokeIpc(IPC.PLUGIN_UNINSTALL, name, options),
-    enable: (name: string) => invokeIpc(IPC.PLUGIN_ENABLE, name),
-    disable: (name: string) => invokeIpc(IPC.PLUGIN_DISABLE, name),
-    setProjectOverride: (name: string, projectPath: string, override: { enabled?: boolean; components?: Partial<Record<string, boolean>> }) =>
-      invokeIpc(IPC.PLUGIN_SET_PROJECT_OVERRIDE, name, projectPath, override),
-    resetProjectOverride: (name: string, projectPath: string) =>
-      invokeIpc(IPC.PLUGIN_RESET_PROJECT_OVERRIDE, name, projectPath),
-    approve: (name: string, component: string) => invokeIpc(IPC.PLUGIN_APPROVE, name, component),
-    configSet: (name: string, key: string, value: string, options?: unknown) =>
-      invokeIpc(IPC.PLUGIN_CONFIG_SET, name, key, value, options),
-    sync: (name?: string, options?: unknown) => invokeIpc(IPC.PLUGIN_SYNC, name, options),
-    status: (name?: string) => invokeIpc(IPC.PLUGIN_STATUS, name),
-    list: () => invokeIpc<ManagedPlugin[]>(IPC.PLUGIN_LIST),
-    marketplaces: {
-      list: () => invokeIpc<ManagedMarketplace[]>(IPC.MARKETPLACE_LIST),
-      add: (source: string, manifestPath?: string) => invokeIpc(IPC.MARKETPLACE_ADD, source, manifestPath),
-      refresh: (name: string) => invokeIpc(IPC.MARKETPLACE_REFRESH, name),
-      remove: (name: string) => invokeIpc(IPC.MARKETPLACE_REMOVE, name),
-      setAutoUpdate: (name: string, enabled: boolean) => invokeIpc(IPC.MARKETPLACE_SET_AUTO_UPDATE, name, enabled),
-       browse: (query?: string) => invokeIpc<MarketplaceListing[]>(IPC.MARKETPLACE_BROWSE, query),
-       inspectPlugin: (id: string) => invokeIpc<MarketplacePluginDetail>(IPC.MARKETPLACE_INSPECT_PLUGIN, id),
-      installPlugin: (id: string) => invokeIpc(IPC.MARKETPLACE_INSTALL_PLUGIN, id)
-    }
+    list: bind(IPC.PLUGIN_LIST),
+    install: bind(IPC.PLUGIN_INSTALL),
+    update: bind(IPC.PLUGIN_UPDATE),
+    pin: bind(IPC.PLUGIN_PIN),
+    unpin: bind(IPC.PLUGIN_UNPIN),
+    rollback: bind(IPC.PLUGIN_ROLLBACK),
+    uninstall: bind(IPC.PLUGIN_UNINSTALL),
+    enable: bind(IPC.PLUGIN_ENABLE),
+    disable: bind(IPC.PLUGIN_DISABLE),
+    approve: bind(IPC.PLUGIN_APPROVE),
+    setProjectOverride: bind(IPC.PLUGIN_SET_PROJECT_OVERRIDE),
+    resetProjectOverride: bind(IPC.PLUGIN_RESET_PROJECT_OVERRIDE)
   },
-  projectInit: (projectPath: string, name: string) => invokeIpc(IPC.PROJECT_INIT, projectPath, name),
-  projectRemove: (projectPath: string) => invokeIpc(IPC.PROJECT_REMOVE, projectPath),
-  setProjectServerEnabled: (projectPath: string, serverName: string, enabled: boolean) =>
-    invokeIpc(IPC.PROJECT_SET_SERVER_ENABLED, projectPath, serverName, enabled),
-  selectDirectory: () => invokeIpc(IPC.SELECT_DIRECTORY) as Promise<string | null>,
-  invoke: (channel: string, ...args: unknown[]): Promise<any> => {
-    if (!ALLOWED_CHANNELS.has(channel)) {
-      throw new Error(`Unknown IPC channel: ${channel}`);
-    }
-    return invokeIpc<any>(channel, ...args);
+
+  marketplaces: {
+    list: bind(IPC.MARKETPLACE_LIST),
+    add: bind(IPC.MARKETPLACE_ADD),
+    refresh: bind(IPC.MARKETPLACE_REFRESH),
+    remove: bind(IPC.MARKETPLACE_REMOVE),
+    setAutoUpdate: bind(IPC.MARKETPLACE_SET_AUTO_UPDATE),
+    browse: bind(IPC.MARKETPLACE_BROWSE),
+    inspect: bind(IPC.MARKETPLACE_INSPECT_PLUGIN),
+    install: bind(IPC.MARKETPLACE_INSTALL_PLUGIN)
   }
 };
 

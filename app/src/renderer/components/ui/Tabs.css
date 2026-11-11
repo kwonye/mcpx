@@ -1,0 +1,88 @@
+.ui-tabs {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+}
+
+.ui-tabs__bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.ui-tabs__list {
+  display: flex;
+  gap: var(--space-4);
+  flex: 1;
+  min-width: 0;
+}
+
+.ui-tabs__tab {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1-5);
+  height: 34px;
+  padding: 0 var(--space-0-5);
+  border: 0;
+  background: transparent;
+  font-size: var(--text-md);
+  font-weight: var(--weight-medium);
+  color: var(--color-text-tertiary);
+  transition: color var(--duration-fast) ease;
+}
+
+.ui-tabs__tab:hover {
+  color: var(--color-text);
+}
+
+.ui-tabs__tab[aria-selected="true"] {
+  color: var(--color-text);
+}
+
+.ui-tabs__tab[aria-selected="true"]::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--color-accent-text);
+}
+
+.ui-tabs__tab:focus-visible {
+  border-radius: var(--radius-sm);
+}
+
+.ui-tabs__count {
+  min-width: 18px;
+  height: 16px;
+  padding: 0 5px;
+  border-radius: var(--radius-full);
+  background: var(--color-surface-sunken);
+  box-shadow: inset 0 0 0 1px var(--color-border);
+  font-size: var(--text-xs);
+  line-height: 16px;
+  text-align: center;
+  color: var(--color-text-secondary);
+}
+
+.ui-tabs__trailing {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding-bottom: var(--space-1);
+}
+
+.ui-tabs__panel {
+  flex: 1;
+  min-height: 0;
+  padding-top: var(--space-4);
+}
+
+.ui-tabs__panel:focus-visible {
+  box-shadow: none;
+}
