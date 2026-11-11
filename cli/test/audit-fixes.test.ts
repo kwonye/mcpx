@@ -572,9 +572,9 @@ describe("SYNC-02: Project-local persistence", () => {
 describe("SYNC-04: Import flag", () => {
   it("wires up --import flag in sync command", async () => {
     // This test verifies the fix is in place by checking the source code
-    const cliPath = path.join(process.cwd(), "src/cli.ts");
+    const cliPath = path.join(process.cwd(), "src/commands/sync.ts");
     const source = fs.readFileSync(cliPath, "utf8");
-    
+
     // Should have --import option
     expect(source).toContain('--import');
     
@@ -602,9 +602,9 @@ describe("PLUG-01: Environment variable forwarding", () => {
 describe("PLUG-04: Plugin project overrides", () => {
   it("adds --project flag to plugin enable/disable", async () => {
     // This test verifies the fix is in place by checking the source code
-    const cliPath = path.join(process.cwd(), "src/cli.ts");
+    const cliPath = path.join(process.cwd(), "src/commands/plugin.ts");
     const source = fs.readFileSync(cliPath, "utf8");
-    
+
     // Should have --project option on plugin commands
     expect(source).toMatch(/plugin[\s\S]*?enable[\s\S]*?--project/);
     expect(source).toMatch(/plugin[\s\S]*?disable[\s\S]*?--project/);
