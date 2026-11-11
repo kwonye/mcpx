@@ -86,7 +86,6 @@ cli/                    # CLI package
 
 app/                    # Desktop app
   src/main/             # Electron main process (Tray, IPC, Window management)
-  src/main/daemon-child.ts # Dedicated mode for running the daemon as a child process
   src/preload/          # Context bridge (exposes mcpx API to renderer)
   src/renderer/         # React UI (Dashboard, Plugins Tab, Skills Tab, Settings)
   src/renderer/components/PluginsTab.tsx  # Plugin management UI with embedded SkillsTab

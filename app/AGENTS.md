@@ -11,7 +11,6 @@ The app is built with **Electron + React** and is designed to be a lightweight w
 - **Tray:** Implements a macOS-native menubar tray with a quick-status popover.
 - **Daemon Management:** Controls the background `mcpx` gateway.
 - **IPC Handlers:** Bridges the renderer to the core CLI logic via `@mcpx/core`.
-- **Daemon-Child Mode:** Includes logic to run the gateway as a dedicated child process (`src/main/daemon-child.ts`), ensuring the gateway stays alive even if the dashboard is closed.
 
 ### Preload (`src/preload/`)
 - Exposes a secure, typed API to the renderer process via `contextBridge`.
