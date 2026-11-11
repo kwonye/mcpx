@@ -12,7 +12,7 @@ import type {
 } from "../types.js";
 import { isServerEnabled } from "../types.js";
 import { managedGatewayEntryName } from "../adapters/utils/index.js";
-import { getAdapters } from "../adapters/index.js";
+import { getAdapters, type HostContext } from "../adapters/index.js";
 import { serverSpecsEqual } from "../adapters/utils/index.js";
 import { loadManagedIndex, saveManagedIndex } from "./managed-index.js";
 import { getManagedIndexPath } from "./paths.js";
@@ -22,8 +22,13 @@ import { listSkills } from "./skills.js";
 import { withManagedIndexLock } from "./managed-index-lock.js";
 
 export interface SyncOptions {
+  /** Limit sync to these clients. Explicitly named clients are synced even if not detected as installed. */
   targetClients?: ClientId[];
   importScan?: boolean;
+  /** Sync these clients even if they are not detected as installed (without limiting the set). */
+  forceClients?: ClientId[];
+  /** Override platform/home/env/fs probing used for client paths and install detection (tests). */
+  host?: Partial<HostContext>;
 }
 
 export interface SyncSummary {
@@ -100,12 +105,29 @@ function isClientInternalServerCommand(candidate: { spec: { transport: string; c
   return candidate.spec.transport === "stdio" && /\.app\/Contents\//.test(candidate.spec.command ?? "");
 }
 
-function getFilteredAdapters(targetClients?: ClientId[]): ClientAdapter[] {
-  const adapters = getAdapters();
-  if (targetClients && targetClients.length > 0) {
-    return adapters.filter((a) => targetClients!.includes(a.id));
+/**
+ * Pick the adapters to sync: installed clients plus any the caller named explicitly.
+ * Clients that are not installed get a SKIPPED result and nothing is written for them.
+ */
+function selectAdapters(opts: SyncOptions): { adapters: ClientAdapter[]; notInstalled: SyncResult[] } {
+  const targets = opts.targetClients && opts.targetClients.length > 0 ? opts.targetClients : undefined;
+  const candidates = getAdapters(opts.host).filter((a) => !targets || targets.includes(a.id));
+  const forced = new Set<ClientId>([...(targets ?? []), ...(opts.forceClients ?? [])]);
+  const adapters: ClientAdapter[] = [];
+  const notInstalled: SyncResult[] = [];
+  for (const adapter of candidates) {
+    if (forced.has(adapter.id) || (adapter.detectInstallation?.().installed ?? true)) {
+      adapters.push(adapter);
+      continue;
+    }
+    notInstalled.push({
+      clientId: adapter.id,
+      status: "SKIPPED",
+      reason: "not-installed",
+      message: `${adapter.displayName ?? adapter.id} not installed; nothing written (run \`mcpx sync ${adapter.id}\` to force).`,
+    });
   }
-  return adapters;
+  return { adapters, notInstalled };
 }
 
 function runImportPhase(
@@ -292,7 +314,7 @@ export function syncAllClients(
   const managedIndexPath = getManagedIndexPath();
   return withManagedIndexLock(`${managedIndexPath}.lock`, () => {
     const managedIndex = loadManagedIndex(managedIndexPath);
-    const adapters = getFilteredAdapters(opts.targetClients);
+    const { adapters, notInstalled } = selectAdapters(opts);
     const allPhaseErrors: SyncSummary["phaseErrors"] = [];
 
     // Phase 1: Import (optional, gated by importScan option)
@@ -314,7 +336,7 @@ export function syncAllClients(
       adapters, config, managedEntries, managedIndex, managedIndexPath,
       sourceEntriesToRemove, buildProjectScopes(config),
     );
-    const results = gatewayResult.results;
+    const results = [...gatewayResult.results, ...notInstalled];
     allPhaseErrors.push(...(gatewayResult.phaseErrors ?? []));
 
     // Phase 3: Skills
