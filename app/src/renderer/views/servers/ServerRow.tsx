@@ -29,9 +29,10 @@ export function ServerRow({ server, onEdit, onRemove }: ServerRowProps) {
       tone={server.enabled ? "default" : "muted"}
       leading={<span className="row-icon"><Icon size={15} strokeWidth={1.75} /></span>}
       title={server.name}
-      subtitle={<span className="mono-subtle">{server.target}</span>}
+      subtitle={server.target}
       meta={
         <>
+          <span className="row-status">
           {server.state.detail && server.state.kind !== "off" ? (
             <Tooltip content={server.state.detail}>
               <span tabIndex={-1}><StatusLabel tone={server.state.tone} pulse={server.state.kind === "checking"}>{server.state.label}</StatusLabel></span>
@@ -39,15 +40,16 @@ export function ServerRow({ server, onEdit, onRemove }: ServerRowProps) {
           ) : (
             <StatusLabel tone={server.state.tone} pulse={server.state.kind === "checking"}>{server.state.label}</StatusLabel>
           )}
-          <span className="cost" aria-label={tokens !== undefined ? `${formatTokens(tokens)} tokens of context` : undefined}>
-            {tokens !== undefined && tokens > 0 ? `${formatTokens(tokens)} tokens` : ""}
+          </span>
+          <span className="cost">
+            {server.state.signIn && server.enabled ? null : tokens !== undefined && tokens > 0 ? `${formatTokens(tokens)} tokens` : ""}
           </span>
         </>
       }
       trailing={
         <>
           {server.state.signIn && server.enabled && (
-            <Button size="sm" variant="secondary" icon={LogIn} onClick={() => request({ type: "sign-in", serverName: server.name })}>Sign in</Button>
+            <Button size="sm" variant="secondary" icon={LogIn} className="row-signin" onClick={() => request({ type: "sign-in", serverName: server.name })}>Sign in</Button>
           )}
           <Switch
             checked={server.enabled}

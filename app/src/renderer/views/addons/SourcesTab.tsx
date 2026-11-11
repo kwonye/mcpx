@@ -41,7 +41,6 @@ export function SourcesTab() {
           placeholder="Add a GitHub owner/repo, git URL, folder or marketplace.json URL"
           value={input}
           onChange={(event) => { setInput(event.target.value); add.reset(); }}
-          mono
           leading={<Plus size={14} />}
           error={add.error}
         />
@@ -108,7 +107,7 @@ function SourceRow({ source, onRemove }: { source: ManagedMarketplace; onRemove:
     <ListRow
       leading={<span className="row-icon"><Library size={15} strokeWidth={1.75} /></span>}
       title={<>{source.displayName}{source.builtIn && <Badge>Built-in</Badge>}</>}
-      subtitle={<span className="mono-subtle">{source.source}{checked ? ` · checked ${checked}` : ""}</span>}
+      subtitle={`${source.source}${checked ? ` · checked ${checked}` : ""}`}
       meta={<StatusLabel tone={state.tone}>{state.label}</StatusLabel>}
       trailing={
         <>

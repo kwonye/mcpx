@@ -43,7 +43,7 @@ export function GatewayControl({ compact = false }: { compact?: boolean }) {
             onClick={() => void toggle.run()}
           />
         ) : (
-          <Button size="sm" variant="ghost" icon={running ? Square : Play} loading={toggle.pending} onClick={() => void toggle.run()}>
+          <Button size="sm" variant="ghost" loading={toggle.pending} onClick={() => void toggle.run()}>
             {running ? "Stop" : "Start"}
           </Button>
         ))}

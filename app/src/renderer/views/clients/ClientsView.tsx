@@ -189,10 +189,10 @@ function ClientRow({ entry, onScan }: { entry: ClientEntry; onScan?: () => void 
     toast.success(`${entry.name}: ${MODE_LABEL[mode].toLowerCase()}`);
   });
 
+  const location = entry.projectPath ? tildify(entry.projectPath) : entry.configPath ? tildify(entry.configPath) : null;
   const subtitle = entry.detected
-    ? [entry.serverCount > 0 ? plural(entry.serverCount, "server") : "No servers yet", synced ? `synced ${synced}` : null].filter(Boolean).join(" · ")
+    ? [entry.serverCount > 0 ? plural(entry.serverCount, "server") : "No servers yet", synced ? `synced ${synced}` : null, location].filter(Boolean).join(" · ")
     : entry.state.detail;
-  const location = entry.projectPath ? `${tildify(entry.projectPath)} · ${tildify(entry.configPath ?? "")}` : entry.configPath ? tildify(entry.configPath) : null;
 
   return (
     <ListRow
@@ -215,7 +215,6 @@ function ClientRow({ entry, onScan }: { entry: ClientEntry; onScan?: () => void 
     >
       {setMode.error && <InlineAlert tone="danger" onDismiss={setMode.reset}>{setMode.error}</InlineAlert>}
       {entry.state.tone === "danger" && entry.state.detail && <p className="row-note row-note--danger">{entry.state.detail}</p>}
-      {entry.detected && location && <p className="row-note mono-subtle" title={entry.configPath}>{location}</p>}
     </ListRow>
   );
 }

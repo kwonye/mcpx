@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { Children, type ReactNode } from "react";
 import { ChevronRight } from "lucide-react";
 import "./List.css";
 
@@ -54,7 +54,7 @@ export function ListRow({ title, subtitle, leading, meta, trailing, onOpen, open
         )}
         {trailing && <div className="ui-row__trailing">{trailing}</div>}
       </div>
-      {children && <div className="ui-row__extra">{children}</div>}
+      {Children.toArray(children).length > 0 && <div className="ui-row__extra">{children}</div>}
     </li>
   );
 }

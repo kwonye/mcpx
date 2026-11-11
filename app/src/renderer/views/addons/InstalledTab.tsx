@@ -42,7 +42,6 @@ export function InstalledTab({ onDiscover }: { onDiscover: () => void }) {
           placeholder="Install from GitHub owner/repo, a git URL or a local folder"
           value={source}
           onChange={(event) => { setSource(event.target.value); install.reset(); }}
-          mono
           leading={<Download size={14} />}
           error={install.error}
         />
@@ -115,7 +114,7 @@ function PluginRow({ plugin, onOpen, onUninstall }: { plugin: ManagedPlugin; onO
       tone={plugin.enabled ? "default" : "muted"}
       leading={<span className="row-icon"><Puzzle size={15} strokeWidth={1.75} /></span>}
       title={<>{plugin.name}<Badge>v{plugin.version}</Badge>{plugin.pinned && <Badge>Pinned</Badge>}</>}
-      subtitle={<span className="mono-subtle">{pluginSource(plugin)}</span>}
+      subtitle={pluginSource(plugin)}
       meta={approval ? <StatusLabel tone="warning">Needs approval</StatusLabel> : <StatusLabel tone={state.tone}>{state.label}</StatusLabel>}
       trailing={
         <>

@@ -129,3 +129,30 @@
 .row-note--danger {
   color: var(--color-danger);
 }
+
+.ui-row__extra .row-note:first-child {
+  margin-top: calc(var(--space-2) * -1);
+}
+
+/* Fixed columns so status, cost and switches line up row to row. */
+.row-status {
+  display: inline-flex;
+  width: 132px;
+}
+
+.ui-row__meta .cost {
+  width: 84px;
+  min-width: 84px;
+}
+
+/* "Sign in" sits over the (empty) cost column; it can't live inside the row button. */
+.row-signin {
+  width: 80px;
+  margin-left: -88px; /* its own width + the trailing gap: net zero, so switches stay aligned */
+  position: relative;
+  z-index: 1;
+}
+
+.view-stack > .ui-section + .ui-section {
+  margin-top: var(--space-4);
+}

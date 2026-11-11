@@ -43,7 +43,7 @@ export function FirstRunNotice() {
   if (!needsPrivacyChoice(status)) return null;
 
   return (
-    <div className="first-run">
+    <div className="first-run drag-region">
       <section className="first-run__card" aria-labelledby="first-run-title">
         <div className="first-run__line">
           <ShieldCheck className="first-run__icon" size={18} strokeWidth={1.75} aria-hidden />

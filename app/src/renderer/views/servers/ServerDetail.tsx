@@ -46,7 +46,10 @@ export function ServerDetail({ server, loading, onEdit, onRemove }: ServerDetail
         titleAccessory={<StatusLabel tone={server.state.tone}>{server.state.label}</StatusLabel>}
         actions={
           <>
-            <Switch checked={server.enabled} busy={toggle.pending} label={`${server.name} enabled`} onCheckedChange={(enabled) => void toggle.run(enabled)} />
+            <label className="inline-switch">
+              <span>{server.enabled ? "On" : "Off"}</span>
+              <Switch checked={server.enabled} busy={toggle.pending} label={`${server.name} enabled`} onCheckedChange={(enabled) => void toggle.run(enabled)} />
+            </label>
             <Button icon={Pencil} onClick={() => onEdit(server)}>Edit</Button>
           </>
         }
@@ -89,7 +92,7 @@ export function ServerDetail({ server, loading, onEdit, onRemove }: ServerDetail
               <dd>
                 {server.tokens && server.tokens.total > 0
                   ? `${formatTokens(server.tokens.total)} tokens · ${plural(server.tokens.tools, "tool")}, ${plural(server.tokens.resources, "resource")}, ${plural(server.tokens.prompts, "prompt")}`
-                  : <span className="text-muted">{server.enabled ? "Shown once the gateway has connected." : "Not counted while off."}</span>}
+                  : <span className="text-muted">{!server.enabled ? "Not counted while off." : server.state.kind === "error" || server.state.kind === "needs-sign-in" ? "Available once the server connects." : "Shown once the gateway has connected."}</span>}
               </dd>
             </dl>
           </Section>
