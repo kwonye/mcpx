@@ -3,10 +3,10 @@
  */
 import { spawn } from "node:child_process";
 import type { Interface as ReadlineInterface } from "node:readline/promises";
-import { loadConfig, loadMergedConfig } from "../core/config.js";
+import { loadConfig } from "../core/config.js";
 import { mutateConfig } from "../core/config-store.js";
 import { SecretsManager } from "../core/secrets.js";
-import { syncAllClients, persistSyncState } from "../core/sync.js";
+import { synchronizeClients, type SyncSummary } from "../core/sync.js";
 import type { McpxConfig, UpstreamServerSpec } from "../types.js";
 import { removeAuthReference } from "../core/server-auth.js";
 import { startDaemon } from "../core/daemon.js";
@@ -33,7 +33,7 @@ export function ensureExitCodeForSyncFailures(hasErrors: boolean): void {
   }
 }
 
-export function printSyncSummary(summary: ReturnType<typeof syncAllClients>, asJson = false): void {
+export function printSyncSummary(summary: SyncSummary, asJson = false): void {
   if (asJson) {
     process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`);
     return;
@@ -100,15 +100,8 @@ export async function ensureDaemonIfEnabled(cliPath: string, secrets: SecretsMan
 export async function autoSyncManagedEntries(cliPath: string): Promise<void> {
   const secrets = new SecretsManager();
   await ensureDaemonIfEnabled(cliPath, secrets);
-  // Reload fresh right before syncing (rather than trusting a snapshot the
-  // caller may have loaded before an earlier config mutation completed), and
-  // persist the resulting client-sync state through the config lock so this
-  // never clobbers a concurrent mutation's changes with a stale save.
-  const config = loadMergedConfig();
-  const summary = syncAllClients(config, secrets);
-  await mutateConfig((freshConfig) => {
-    persistSyncState(summary, freshConfig);
-  });
+  // Use the same locked transaction as desktop and plugin operations.
+  const summary = await synchronizeClients({}, secrets);
   printSyncSummary(summary, false);
   ensureExitCodeForSyncFailures(summary.hasErrors);
 }
@@ -123,7 +116,7 @@ export async function performOAuthLogout(
   serverName: string,
   spec: UpstreamServerSpec,
   secrets: SecretsManager
-): Promise<{ removedSecrets: string[]; removedBinding: string | null; sync?: ReturnType<typeof syncAllClients> }> {
+): Promise<{ removedSecrets: string[]; removedBinding: string | null; sync?: SyncSummary }> {
   // Clear credentials first: even if the binding removal below fails for
   // some reason, a server left pointing at a dangling oauth:// reference
   // with the old tokens gone is safer than one still holding live tokens.
@@ -138,13 +131,9 @@ export async function performOAuthLogout(
     removedBinding = "Authorization";
   }
 
-  let sync: ReturnType<typeof syncAllClients> | undefined;
+  let sync: SyncSummary | undefined;
   if (removedBinding) {
-    const syncSourceConfig = loadConfig();
-    sync = syncAllClients(syncSourceConfig, secrets);
-    await mutateConfig((freshConfig) => {
-      persistSyncState(sync!, freshConfig);
-    });
+    sync = await synchronizeClients({}, secrets);
   }
 
   return { removedSecrets, removedBinding, sync };

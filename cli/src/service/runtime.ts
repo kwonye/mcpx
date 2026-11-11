@@ -54,7 +54,9 @@ export function resolveServiceProgram(options: ResolveServiceProgramOptions): Se
   const env: Record<string, string> = {
     [SUPERVISED_ENV]: "1",
     [DAEMON_LOG_FILE_ENV]: options.logFile,
-    MCPX_DAEMON_CHILD: "1"
+    MCPX_DAEMON_CHILD: "1",
+    // Lets the daemon (and the proxy bridges it writes) locate this CLI runtime.
+    MCPX_CLI_ENTRY: options.cliPath
   };
   if (electron) env.ELECTRON_RUN_AS_NODE = "1";
   for (const name of PASSTHROUGH_ENV) {

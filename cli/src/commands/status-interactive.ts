@@ -8,7 +8,7 @@ import { loadConfig } from "../core/config.js";
 import { mutateConfig, mutateProjectConfig } from "../core/config-store.js";
 import { setServerEnabled } from "../core/registry.js";
 import { SecretsManager } from "../core/secrets.js";
-import { syncAllClients, persistSyncState } from "../core/sync.js";
+import { synchronizeClients } from "../core/sync.js";
 import {
   applyAuthReference,
   defaultAuthSecretName,
@@ -238,10 +238,7 @@ async function reconnectGatewayAndSync(cliPath: string): Promise<void> {
   const secrets = new SecretsManager();
   const restart = await restartDaemon(config, cliPath, secrets);
   process.stdout.write(`${restart.message} pid=${restart.pid} port=${restart.port}\n`);
-  const summary = syncAllClients(config, secrets);
-  await mutateConfig((freshConfig) => {
-    persistSyncState(summary, freshConfig);
-  });
+  const summary = await synchronizeClients({}, secrets);
   printSyncSummary(summary, false);
 }
 
@@ -279,7 +276,7 @@ async function setServerEnabledInteractively(
 
           if (handled) {
             process.stdout.write(`${enabled ? "Enabled" : "Disabled"} server: ${serverName}\n`);
-            process.stdout.write("Auto-syncing managed gateway entries across all supported clients...\n");
+            process.stdout.write("Syncing managed integrations to detected and selected harnesses...\n");
             await autoSyncManagedEntries(cliPath);
             return true;
           }
@@ -292,7 +289,7 @@ async function setServerEnabledInteractively(
     setServerEnabled(freshConfig, serverName, enabled);
   });
   process.stdout.write(`${enabled ? "Enabled" : "Disabled"} server: ${serverName}\n`);
-  process.stdout.write("Auto-syncing managed gateway entries across all supported clients...\n");
+  process.stdout.write("Syncing managed integrations to detected and selected harnesses...\n");
   await autoSyncManagedEntries(cliPath);
   return true;
 }

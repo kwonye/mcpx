@@ -1,5 +1,5 @@
 import { app, dialog, Menu } from "electron";
-import { loadConfig, startMarketplaceAutoUpdater } from "@mcpx/core";
+import { loadConfig } from "@mcpx/core";
 import { createTray, setStartDaemonHandler, setStopDaemonHandler } from "./tray";
 import { buildApplicationMenu } from "./menu";
 import { openDashboard } from "./dashboard";
@@ -216,11 +216,11 @@ async function startMainProcessImpl(): Promise<void> {
   const tray = await createTrayIfSupported();
   setTrayAvailable(tray !== null);
 
-  registerIpcHandlers();
+  // Management goes through the daemon's control API so desktop, CLI and automatic work share one write queue.
+  registerIpcHandlers({ controlService: true });
 
   // Surface upstream call-time / re-auth errors as native notifications.
   startErrorNotifier();
-  startMarketplaceAutoUpdater();
 
   setStartDaemonHandler(() => {
     void startGateway();

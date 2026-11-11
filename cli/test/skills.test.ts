@@ -37,15 +37,15 @@ describe("skills core", () => {
     const skills = listSkills();
     expect(skills).toEqual([]);
 
-    saveSkill("test-skill", "# Test Skill\nContent");
+    saveSkill("test-skill", "---\nname: test-skill\ndescription: Test skill\n---\n# Test Skill\nContent");
     const skillsAfterSave = listSkills();
     expect(skillsAfterSave.length).toBe(1);
     expect(skillsAfterSave[0].id).toBe("test-skill");
-    expect(skillsAfterSave[0].content).toBe("# Test Skill\nContent");
+    expect(skillsAfterSave[0].content).toBe("---\nname: test-skill\ndescription: Test skill\n---\n# Test Skill\nContent");
 
     const skill = getSkill("test-skill");
     expect(skill).not.toBeNull();
-    expect(skill?.content).toBe("# Test Skill\nContent");
+    expect(skill?.content).toBe("---\nname: test-skill\ndescription: Test skill\n---\n# Test Skill\nContent");
 
     deleteSkill("test-skill");
     expect(listSkills()).toEqual([]);

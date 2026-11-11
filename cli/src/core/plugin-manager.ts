@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { localCliCommand } from "./runtime-entry.js";
 import path from "node:path";
 import { getConfigPath, getPluginDataRoot, ensureDir } from "./paths.js";
 import { PluginCache } from "./plugin-cache.js";
@@ -8,13 +9,14 @@ import { parseSource } from "./plugin-source.js";
 import { readManifest, discoverComponents, hasManifest } from "./plugin-parse.js";
 import { loadConfig, saveConfig } from "./config.js";
 import { mutateConfig } from "./config-store.js";
-import { syncAllClients, persistSyncState } from "./sync.js";
+import { synchronizeClients } from "./sync.js";
 import { SecretsManager } from "./secrets.js";
 import type {
   ManagedPlugin, PluginComponent, PluginManifest, PluginSource,
   DiscoveredComponents
 } from "../types.js";
 import { normalizePluginName } from "./identifiers.js";
+import { capture } from "./analytics.js";
 
 interface InstallPluginOptions {
   name?: string;
@@ -61,7 +63,7 @@ export class PluginManager {
     parsed.resolvedSha = sha;
     const cached = await this.cache.fetch(parsed, "");
 
-    // The plugin root might be a subdirectory — look for .claude-plugin
+    // Find a standard skill collection or a single Agent Skill.
     let pluginRoot = cached.root;
     if (!hasManifest(pluginRoot)) {
       // Try subdirectories
@@ -79,6 +81,7 @@ export class PluginManager {
 
     const manifest = readManifest(pluginRoot);
     const components = discoverComponents(pluginRoot);
+    if (!components.skills.length && !components.mcpServers.length) throw new Error("No supported Agent Skills or MCP servers found in this plugin.");
     return { manifest, components, root: pluginRoot, source: sourceLabel, sha: cached.sha };
   }
 
@@ -91,7 +94,7 @@ export class PluginManager {
 
   async installResolvedPlugin(source: PluginSource, options?: InstallPluginOptions, sourceLabel = source.original): Promise<ManagedPlugin> {
     const info = await this.inspectResolvedSource(source, sourceLabel);
-    const pluginName = normalizePluginName(options?.name || info.manifest?.name || path.basename(info.root));
+    const pluginName = normalizePluginName(options?.name || info.manifest?.name || path.basename(source.type === "local" ? path.resolve(source.original) : source.original).replace(/\.git$/, ""));
     const pluginId = `${pluginName}@${info.sha.slice(0, 8)}`;
 
     const dataDir = path.join(getPluginDataRoot(), pluginId);
@@ -114,9 +117,9 @@ export class PluginManager {
       components: {
         mcpServers: options?.components?.mcpServers ?? discovered.mcpServers.length > 0,
         skills: options?.components?.skills ?? discovered.skills.length > 0,
-        hooks: options?.components?.hooks ?? discovered.hooks.length > 0,
-        agents: options?.components?.agents ?? discovered.agents.length > 0,
-        commands: options?.components?.commands ?? discovered.commands.length > 0,
+        hooks: false,
+        agents: false,
+        commands: false,
       },
       discovered,
       enabled,
@@ -135,6 +138,9 @@ export class PluginManager {
       if (config.plugins[pluginId]) {
         throw new Error(`Plugin ${pluginId} is already installed`);
       }
+
+      if (Object.values(config.plugins).some(existing => existing.name === pluginName)) throw new Error(`Plugin ${pluginName} is already installed; update it instead`);
+      if (options?.marketplace && Object.values(config.plugins).some(existing => existing.marketplace?.name === options.marketplace!.name && existing.marketplace.pluginName === options.marketplace!.pluginName)) throw new Error("This marketplace plugin is already installed; update it instead");
 
       // Name collision check: ensure no existing plugin has the same server names
       for (const existing of Object.values(config.plugins)) {
@@ -159,11 +165,10 @@ export class PluginManager {
         const nsName = `${pluginName}__${mcp.id}`;
         const approved = plugin.approvals?.mcpServers !== false;
         config.servers[nsName] = mcp.transport === "http" && mcp.url
-          ? { transport: "http", url: new URL(mcp.url).toString(), enabled: enabled && approved }
+          ? { transport: "http", url: new URL(mcp.url).toString(), headers: mcp.headers, enabled: enabled && approved }
           : {
               transport: "stdio",
-              command: "npx",
-              args: ["-y", "@kwonye/mcpx@latest", "plugin-host", pluginId, mcp.id],
+              ...localCliCommand(["plugin-host", pluginId, mcp.id]),
               enabled: enabled && approved,
             };
       }
@@ -172,14 +177,8 @@ export class PluginManager {
     // Init data
     this.lifecycle.initData(pluginId);
 
-    // Sync projections — sync (slow I/O) runs outside the lock; persisting
-    // its result is a second locked mutation against a freshly reloaded
-    // config so it can't clobber a concurrent write.
-    const syncConfig = loadConfig(this.configPath);
-    const summary = syncAllClients(syncConfig, this.secrets);
-    await mutateConfig((freshConfig) => {
-      persistSyncState(summary, freshConfig);
-    }, this.configPath);
+    // Synchronize from the canonical config under the shared writer lock.
+    await synchronizeClients({ configPath: this.configPath }, this.secrets);
 
     return plugin;
   }
@@ -205,7 +204,7 @@ export class PluginManager {
   ): Promise<ManagedPlugin> {
     const currentSnapshot = loadConfig(this.configPath).plugins?.[pluginId];
     if (!currentSnapshot) throw new Error(`Plugin ${pluginId} not found`);
-    const pluginName = normalizePluginName(info.manifest?.name || currentSnapshot.name);
+    const pluginName = currentSnapshot.name;
 
     // Now update with freshly-read config inside the lock
     let updatedPlugin: ManagedPlugin | undefined;
@@ -220,7 +219,8 @@ export class PluginManager {
       }
 
       // Update plugin record
-      current.previous = { version: current.version, resolvedSha: current.resolvedSha, root: current.root };
+      current.previous = { version: current.version, resolvedSha: current.resolvedSha, root: current.root, source: current.source, sourceFingerprint: current.marketplace?.sourceFingerprint };
+      current.source = info.source;
       current.version = info.manifest?.version || current.version;
       current.resolvedSha = info.sha;
       current.root = info.root;
@@ -233,11 +233,10 @@ export class PluginManager {
       for (const mcp of info.components.mcpServers) {
         const nsName = `${pluginName}__${mcp.id}`;
         config.servers[nsName] = mcp.transport === "http" && mcp.url
-          ? { transport: "http", url: new URL(mcp.url).toString(), enabled: current.enabled && approved }
+          ? { transport: "http", url: new URL(mcp.url).toString(), headers: mcp.headers, enabled: current.enabled && approved }
           : {
               transport: "stdio",
-              command: "npx",
-              args: ["-y", "@kwonye/mcpx@latest", "plugin-host", pluginId, mcp.id],
+              ...localCliCommand(["plugin-host", pluginId, mcp.id]),
               enabled: current.enabled && approved,
             };
       }
@@ -252,11 +251,7 @@ export class PluginManager {
     }, this.configPath);
 
     if (sync) {
-      const syncConfig = loadConfig(this.configPath);
-      const summary = syncAllClients(syncConfig, this.secrets);
-      await mutateConfig((freshConfig) => {
-        persistSyncState(summary, freshConfig);
-      }, this.configPath);
+      await synchronizeClients({ configPath: this.configPath }, this.secrets);
     }
 
     return updatedPlugin!;
@@ -281,11 +276,7 @@ export class PluginManager {
       await this.lifecycle.removeData(pluginId);
     }
 
-    const syncConfig = loadConfig(this.configPath);
-    const summary = syncAllClients(syncConfig, this.secrets);
-    await mutateConfig((freshConfig) => {
-      persistSyncState(summary, freshConfig);
-    }, this.configPath);
+    await synchronizeClients({ configPath: this.configPath }, this.secrets);
   }
 
   async enablePlugin(pluginId: string): Promise<void> {
@@ -302,11 +293,7 @@ export class PluginManager {
     }, this.configPath);
 
     // Sync outside the lock (slow I/O)
-    const syncConfig = loadConfig(this.configPath);
-    const summary = syncAllClients(syncConfig, this.secrets);
-    await mutateConfig((freshConfig) => {
-      persistSyncState(summary, freshConfig);
-    }, this.configPath);
+    await synchronizeClients({ configPath: this.configPath }, this.secrets);
   }
 
   async disablePlugin(pluginId: string): Promise<void> {
@@ -323,14 +310,11 @@ export class PluginManager {
     }, this.configPath);
 
     // Sync outside the lock (slow I/O)
-    const syncConfig = loadConfig(this.configPath);
-    const summary = syncAllClients(syncConfig, this.secrets);
-    await mutateConfig((freshConfig) => {
-      persistSyncState(summary, freshConfig);
-    }, this.configPath);
+    await synchronizeClients({ configPath: this.configPath }, this.secrets);
   }
 
   async approveComponent(pluginId: string, component: string): Promise<void> {
+    if (!["skills", "mcpServers"].includes(component)) throw new Error("Only Agent Skills and MCP servers can be approved");
     // Existence check and approval inside the lock
     await mutateConfig((config) => {
       if (!config.plugins) throw new Error(`Plugin ${pluginId} not found`);
@@ -339,23 +323,12 @@ export class PluginManager {
 
       if (!plugin.approvals) plugin.approvals = {};
       plugin.approvals[component as PluginComponent] = true;
+      if (component === "mcpServers") for (const name of plugin.serverNames) if (config.servers[name]) config.servers[name].enabled = plugin.enabled;
 
-      // If approving mcpServers, enable the servers
-      if (component === "mcpServers") {
-        for (const name of plugin.serverNames) {
-          if (config.servers[name]) {
-            (config.servers[name] as any).enabled = plugin.enabled;
-          }
-        }
-      }
     }, this.configPath);
 
     // Sync outside the lock (slow I/O)
-    const syncConfig = loadConfig(this.configPath);
-    const summary = syncAllClients(syncConfig, this.secrets);
-    await mutateConfig((freshConfig) => {
-      persistSyncState(summary, freshConfig);
-    }, this.configPath);
+    await synchronizeClients({ configPath: this.configPath }, this.secrets);
   }
 
   async getPluginStatus(pluginId: string): Promise<ManagedPlugin | null> {
@@ -374,7 +347,14 @@ export class PluginManager {
     const resolvedId = resolvePluginId(config, pluginId);
     const plugin = config.plugins[resolvedId];
     if (!plugin) throw new Error(`Plugin ${pluginId} not found`);
-    await this.lifecycle.prepareDependencies(resolvedId, plugin.root);
+    await mutateConfig(fresh => { fresh.plugins![resolvedId].status = "preparing"; }, this.configPath);
+    try {
+      await this.lifecycle.prepareDependencies(resolvedId, plugin.root);
+      await mutateConfig(fresh => { fresh.plugins![resolvedId].status = "healthy"; delete fresh.plugins![resolvedId].error; }, this.configPath);
+    } catch (error) {
+      await mutateConfig(fresh => { fresh.plugins![resolvedId].status = "error"; fresh.plugins![resolvedId].error = "Dependency preparation failed. Retry preparation to repair this installation."; }, this.configPath);
+      throw error;
+    }
   }
 }
 
@@ -439,31 +419,37 @@ export async function rollbackPlugin(nameOrId: string): Promise<ManagedPlugin> {
   const id = resolvePluginId(config, nameOrId);
   const current = config.plugins?.[id];
   if (!current?.previous) throw new Error(`Plugin ${nameOrId} has no previous revision`);
-  const source = parseSource(current.source);
-  source.resolvedSha = current.previous.resolvedSha;
-  const info = await manager.inspectResolvedSource(source, current.source);
-  return manager["applyPluginUpdate"](id, info, undefined, true);
+  const previous = current.previous;
+  if (!fs.existsSync(previous.root)) throw new Error("The previous plugin revision is no longer cached");
+  const info = { manifest: readManifest(previous.root), components: discoverComponents(previous.root), root: previous.root, source: previous.source ?? current.source, sha: previous.resolvedSha };
+  return manager.applyPluginUpdate(id, info, previous.sourceFingerprint ?? `rollback:${previous.resolvedSha}`, true);
 }
 
 export async function uninstallPlugin(nameOrId: string, keepData?: boolean): Promise<void> {
   const manager = new PluginManager();
   const config = loadConfig(manager["configPath"]);
   const id = resolvePluginId(config, nameOrId);
+  const plugin = config.plugins?.[id];
   await manager.uninstallPlugin(id, keepData);
+  capture("plugin_uninstalled", { plugin_name: plugin?.name, from_marketplace: !!plugin?.marketplace });
 }
 
 export async function enablePlugin(nameOrId: string): Promise<void> {
   const manager = new PluginManager();
   const config = loadConfig(manager["configPath"]);
   const id = resolvePluginId(config, nameOrId);
+  const plugin = config.plugins?.[id];
   await manager.enablePlugin(id);
+  capture("plugin_enabled", { from_marketplace: !!plugin?.marketplace });
 }
 
 export async function disablePlugin(nameOrId: string): Promise<void> {
   const manager = new PluginManager();
   const config = loadConfig(manager["configPath"]);
   const id = resolvePluginId(config, nameOrId);
+  const plugin = config.plugins?.[id];
   await manager.disablePlugin(id);
+  capture("plugin_disabled", { from_marketplace: !!plugin?.marketplace });
 }
 
 export async function setPluginProjectOverride(
@@ -483,11 +469,7 @@ export async function setPluginProjectOverride(
   });
 
   const secrets = new SecretsManager();
-  const syncConfig = loadConfig();
-  const summary = syncAllClients(syncConfig, secrets);
-  await mutateConfig((freshConfig) => {
-    persistSyncState(summary, freshConfig);
-  });
+  await synchronizeClients({}, secrets);
 }
 
 export async function resetPluginProjectOverride(nameOrId: string, projectPath: string): Promise<void> {
@@ -507,11 +489,7 @@ export async function resetPluginProjectOverride(nameOrId: string, projectPath: 
   });
 
   const secrets = new SecretsManager();
-  const syncConfig = loadConfig();
-  const summary = syncAllClients(syncConfig, secrets);
-  await mutateConfig((freshConfig) => {
-    persistSyncState(summary, freshConfig);
-  });
+  await synchronizeClients({}, secrets);
 }
 
 export async function approvePluginComponent(nameOrId: string, component: string): Promise<void> {
@@ -579,15 +557,7 @@ export async function pluginConfigSet(nameOrId: string, key: string, value: stri
 }
 
 export async function pluginSync(): Promise<void> {
-  // Load config and compute sync outside the lock (slow I/O)
-  const config = loadConfig();
-  const secrets = new SecretsManager();
-  const summary = syncAllClients(config, secrets);
-
-  // Persist sync state inside the lock with fresh reload
-  await mutateConfig((freshConfig) => {
-    persistSyncState(summary, freshConfig);
-  });
+  await synchronizeClients();
 }
 
 export async function preparePlugin(name: string): Promise<void> {

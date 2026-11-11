@@ -28,7 +28,7 @@ describe("client catalogue paths", () => {
   it("covers every client id", () => {
     expect(CLIENT_IDS).toEqual([
       "claude", "claude-desktop", "codex", "cursor", "cline", "opencode", "kiro",
-      "vscode", "vscode-insiders", "qwen", "openclaw", "hermes"
+      "vscode", "vscode-insiders", "qwen", "openclaw", "hermes", "pi"
     ]);
   });
 
@@ -45,7 +45,8 @@ describe("client catalogue paths", () => {
       "vscode-insiders": "C:\\Users\\me\\AppData\\Roaming\\Code - Insiders\\User\\mcp.json",
       qwen: "C:\\Users\\me\\.qwen\\settings.json",
       openclaw: "C:\\Users\\me\\.openclaw\\openclaw.json",
-      hermes: "C:\\Users\\me\\.hermes\\config.yaml"
+      hermes: "C:\\Users\\me\\.hermes\\config.yaml",
+      pi: "C:\\Users\\me\\.pi\\agent\\mcp.json"
     });
   });
 
@@ -246,19 +247,18 @@ describe("sync only writes installed clients", () => {
     expect(fs.readFileSync(vscodePath, "utf8")).toBe(original);
   });
 
-  it("points the Claude Desktop bridge at mcpx found on PATH without shelling out", () => {
+  it("points the Claude Desktop bridge at this installation's CLI runtime with its consumer token", () => {
     const { env, config, host } = setup("mcpx-clients-bridge-");
     installClients(env.root, ["claude-desktop"]);
-    const binDir = path.join(env.root, "bin");
-    fs.mkdirSync(binDir);
-    fs.writeFileSync(path.join(binDir, "mcpx"), "");
 
-    syncAllClients(config, new SecretsManager(), { host: { ...host, env: { ...host.env, PATH: binDir } } });
+    syncAllClients(config, new SecretsManager(), { host });
 
     const desktopPath = path.join(env.root, "Library", "Application Support", "Claude", "claude_desktop_config.json");
-    expect(JSON.parse(fs.readFileSync(desktopPath, "utf8")).mcpServers["vercel (mcpx)"]).toEqual({
-      command: path.join(binDir, "mcpx"),
-      args: ["proxy", "vercel"]
-    });
+    const bridge = JSON.parse(fs.readFileSync(desktopPath, "utf8")).mcpServers["vercel (mcpx)"];
+    // No `which mcpx` / npx fallback: the bridge runs the same CLI that wrote it.
+    expect(bridge.command).toBe(process.execPath);
+    expect(bridge.args.slice(-2)).toEqual(["proxy", "vercel"]);
+    expect(bridge.env.MCPX_CLI_ENTRY).toBe(bridge.args[0]);
+    expect(bridge.env.MCPX_PROXY_TOKEN).toMatch(/^[A-Za-z0-9_-]{20,}$/);
   });
 });

@@ -10,14 +10,11 @@ import type {
   MarketplacePluginDetail,
   DaemonStartResult,
   SyncSummary,
-  UpstreamServerSpec,
-  exportEnvironment,
-  importEnvironment,
 } from "@mcpx/core";
 import { IPC } from "../shared/ipc-channels";
 import type { DesktopSettingsPatch } from "../shared/desktop-settings";
 import type { DesktopSettings } from "../shared/desktop-settings";
-import type { TelemetryPreferences, TelemetryStatus } from "@mcpx/core";
+import type { SecretBackendKind, SecretBackendSwitchResult, TelemetryPreferences, TelemetryStatus } from "@mcpx/core";
 
 const ALLOWED_CHANNELS = new Set<string>(Object.values(IPC));
 const REMOTE_ERROR_PREFIX = /^Error invoking remote method '[^']+':\s*(?:Error:\s*)?/;
@@ -32,13 +29,29 @@ function invokeIpc<T>(channel: string, ...args: unknown[]): Promise<T> {
 }
 
 const api = {
+  management: {
+    snapshot: () => invokeIpc<import("@mcpx/core").ManagementSnapshot>(IPC.MANAGEMENT_COMMAND, "snapshot", []),
+    plan: (harnesses?: string[]) => invokeIpc<import("@mcpx/core").AdoptionPlan>(IPC.MANAGEMENT_COMMAND, "adoption.plan", [harnesses]),
+    apply: (plan: import("@mcpx/core").AdoptionPlan, ids: string[]) => invokeIpc<import("@mcpx/core").Operation>(IPC.MANAGEMENT_COMMAND, "adoption.apply", [plan, ids]),
+    rollback: (id: string) => invokeIpc<import("@mcpx/core").Operation>(IPC.MANAGEMENT_COMMAND, "operation.rollback", [id]),
+    mode: (id: string, mode: import("@mcpx/core").SyncMode) => invokeIpc(IPC.MANAGEMENT_COMMAND, "harness.mode", [id, mode]),
+    pinPackage: (id: string, pinned: boolean) => invokeIpc(IPC.MANAGEMENT_COMMAND, "package.pin", [id, pinned]),
+    sync: () => invokeIpc<SyncSummary>(IPC.MANAGEMENT_COMMAND, "sync", []),
+    onChange: (callback: () => void) => {
+      const listener = () => callback();
+      ipcRenderer.on(IPC.MANAGEMENT_EVENT, listener);
+      return () => ipcRenderer.removeListener(IPC.MANAGEMENT_EVENT, listener);
+    }
+  },
   getStatus: () => invokeIpc<StatusReport>(IPC.GET_STATUS),
   getServers: () => invokeIpc<Array<Record<string, unknown>>>(IPC.GET_SERVERS),
   getDesktopSettings: () => invokeIpc<DesktopSettings>(IPC.GET_DESKTOP_SETTINGS),
+  getSecretBackend: () => invokeIpc<SecretBackendKind>(IPC.GET_SECRET_BACKEND),
+  setSecretBackend: (backend: SecretBackendKind) => invokeIpc<SecretBackendSwitchResult>(IPC.SET_SECRET_BACKEND, backend),
   getTelemetryStatus: () => invokeIpc<TelemetryStatus>(IPC.GET_TELEMETRY_STATUS),
   acknowledgeTelemetryNotice: () => invokeIpc<TelemetryPreferences>(IPC.ACKNOWLEDGE_TELEMETRY_NOTICE),
-  addServer: (name: string, spec: UpstreamServerSpec, options?: { force?: boolean }) => invokeIpc(IPC.ADD_SERVER, name, spec, options),
-  updateServer: (name: string, spec: UpstreamServerSpec, resolvedSecrets?: Record<string, string>) => invokeIpc(IPC.UPDATE_SERVER, name, spec, resolvedSecrets),
+  addServer: (name: string, spec: unknown) => invokeIpc(IPC.ADD_SERVER, name, spec),
+  updateServer: (name: string, spec: unknown, resolvedSecrets?: Record<string, string>) => invokeIpc(IPC.UPDATE_SERVER, name, spec, resolvedSecrets),
   removeServer: (name: string) => invokeIpc(IPC.REMOVE_SERVER, name),
   setServerEnabled: (name: string, enabled: boolean) => invokeIpc(IPC.SET_SERVER_ENABLED, name, enabled),
   updateDesktopSettings: (patch: DesktopSettingsPatch) => invokeIpc<DesktopSettings>(IPC.UPDATE_DESKTOP_SETTINGS, patch),
@@ -89,14 +102,12 @@ const api = {
     customize: (id: string, name?: string) => invokeIpc(IPC.CUSTOMIZE_SKILL, id, name),
     pin: (id: string) => invokeIpc(IPC.PIN_SKILL, id),
     unpin: (id: string) => invokeIpc(IPC.UNPIN_SKILL, id),
-    update: (id: string) => invokeIpc<Skill>(IPC.UPDATE_SKILL, id),
-    rollback: (id: string) => invokeIpc<Skill>(IPC.ROLLBACK_SKILL, id)
+    update: (id: string) => invokeIpc(IPC.UPDATE_SKILL, id),
+    rollback: (id: string) => invokeIpc(IPC.ROLLBACK_SKILL, id)
   },
   share: {
-    export: (directory: string, options?: Parameters<typeof exportEnvironment>[1]) =>
-      invokeIpc<ReturnType<typeof exportEnvironment>>(IPC.SHARE_EXPORT, directory, options),
-    import: (directory: string, options?: Parameters<typeof importEnvironment>[1]) =>
-      invokeIpc<Awaited<ReturnType<typeof importEnvironment>>>(IPC.SHARE_IMPORT, directory, options)
+    export: (directory: string, options?: unknown) => invokeIpc<ReturnType<typeof import("@mcpx/core").exportEnvironment>>(IPC.SHARE_EXPORT, directory, options),
+    import: (directory: string, options?: unknown) => invokeIpc<Awaited<ReturnType<typeof import("@mcpx/core").importEnvironment>>>(IPC.SHARE_IMPORT, directory, options)
   },
   plugins: {
     inspect: (source: string) => invokeIpc(IPC.PLUGIN_INSPECT, source),
@@ -106,7 +117,7 @@ const api = {
     pin: (name: string) => invokeIpc(IPC.PLUGIN_PIN, name),
     unpin: (name: string) => invokeIpc(IPC.PLUGIN_UNPIN, name),
     rollback: (name: string) => invokeIpc(IPC.PLUGIN_ROLLBACK, name),
-    uninstall: (name: string, options?: unknown) => invokeIpc(IPC.PLUGIN_UNINSTALL, name, options),
+    uninstall: (name: string, options?: { keepData?: boolean }) => invokeIpc(IPC.PLUGIN_UNINSTALL, name, options),
     enable: (name: string) => invokeIpc(IPC.PLUGIN_ENABLE, name),
     disable: (name: string) => invokeIpc(IPC.PLUGIN_DISABLE, name),
     setProjectOverride: (name: string, projectPath: string, override: { enabled?: boolean; components?: Partial<Record<string, boolean>> }) =>
@@ -122,7 +133,7 @@ const api = {
     marketplaces: {
       list: () => invokeIpc<ManagedMarketplace[]>(IPC.MARKETPLACE_LIST),
       add: (source: string, manifestPath?: string) => invokeIpc(IPC.MARKETPLACE_ADD, source, manifestPath),
-      refresh: (name: string) => invokeIpc(IPC.MARKETPLACE_REFRESH, name),
+      refresh: (name: string) => invokeIpc<{ marketplace: ManagedMarketplace; updated: string[]; errors: string[] }>(IPC.MARKETPLACE_REFRESH, name),
       remove: (name: string) => invokeIpc(IPC.MARKETPLACE_REMOVE, name),
       setAutoUpdate: (name: string, enabled: boolean) => invokeIpc(IPC.MARKETPLACE_SET_AUTO_UPDATE, name, enabled),
        browse: (query?: string) => invokeIpc<MarketplaceListing[]>(IPC.MARKETPLACE_BROWSE, query),

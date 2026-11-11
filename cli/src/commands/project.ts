@@ -12,6 +12,16 @@ export function registerProjects(program: Command, { cliPath }: CommandContext):
     .command("project")
     .description("Manage project-based MCP configurations");
 
+  projectCmd.command("instructions [target]")
+    .description("Read applicable AGENTS.md files, from project root to nearest scope")
+    .option("--root <directory>", "Project root", process.cwd())
+    .action(async (target: string | undefined, options: { root: string }) => {
+      const { readAgentInstructions } = await import("../core/agent-instructions.js");
+      for (const instruction of readAgentInstructions(options.root, target ?? options.root)) {
+        process.stdout.write(`# ${instruction.path}\n\n${instruction.content}\n`);
+      }
+    });
+
   projectCmd
     .command("init [name]")
     .description("Initialize a local .mcpx.json configuration in the current directory")
@@ -85,7 +95,7 @@ export function registerProjects(program: Command, { cliPath }: CommandContext):
       });
       process.stdout.write(`Unregistered project "${entry.name}" (${resolvedPath}) from the global configuration.\n`);
       
-      process.stdout.write("Auto-syncing managed gateway entries across all supported clients...\n");
+      process.stdout.write("Syncing managed integrations to detected and selected harnesses...\n");
       await autoSyncManagedEntries(cliPath);
       captureTelemetryEvent({
         name: "operation_completed",

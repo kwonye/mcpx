@@ -19,6 +19,7 @@ describe("tray wiring per platform", () => {
   const navigateDashboardMock = vi.fn();
   const trayInstances: MockTray[] = [];
   const createFromPathMock = vi.fn((path: string) => ({ path, setTemplateImage: vi.fn() }));
+  let appIsPackaged = false;
 
   class MockTray {
     handlers: Record<string, (...args: unknown[]) => void> = {};
@@ -45,12 +46,17 @@ describe("tray wiring per platform", () => {
     vi.resetModules();
     vi.clearAllMocks();
     trayInstances.length = 0;
+    appIsPackaged = false;
 
     vi.doMock("electron", () => ({
       Tray: TrayMock,
       nativeImage: { createFromPath: createFromPathMock },
       Menu: { buildFromTemplate: vi.fn((template) => ({ template })) },
-      app: {}
+      app: {
+        get isPackaged() {
+          return appIsPackaged;
+        }
+      }
     }));
     vi.doMock("../../src/main/popover", () => ({
       togglePopover: togglePopoverMock,
@@ -126,6 +132,22 @@ describe("tray wiring per platform", () => {
     const updated = tray.setContextMenu.mock.calls[1][0] as { template: Item[] };
     expect(updated.template.map((item) => item.label)).toContain("Stop Gateway");
     expect(updated.template.map((item) => item.label)).toContain("Gateway: Running");
+  });
+
+  it("loads packaged tray icons from the unpacked asar (nativeImage cannot read inside app.asar)", async () => {
+    setPlatform("darwin");
+    appIsPackaged = true;
+    const previousResourcesPath = Reflect.get(process, "resourcesPath");
+    Reflect.set(process, "resourcesPath", "/Applications/mcpx.app/Contents/Resources");
+    try {
+      const { createTray } = await import("../../src/main/tray");
+      createTray();
+      expect(createFromPathMock).toHaveBeenCalled();
+      expect(createFromPathMock.mock.calls.every((call) => String(call[0]).includes("app.asar.unpacked"))).toBe(true);
+    } finally {
+      if (previousResourcesPath === undefined) Reflect.deleteProperty(process, "resourcesPath");
+      else Reflect.set(process, "resourcesPath", previousResourcesPath);
+    }
   });
 
   it("updates icon and tooltip when the daemon status changes", async () => {

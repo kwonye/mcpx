@@ -5,7 +5,8 @@ import { loadMergedConfig } from "../core/config.js";
 import type { ClientStatus } from "../types.js";
 import { getDaemonStatus } from "../core/daemon.js";
 import { loadManagedIndex } from "../core/managed-index.js";
-import { STATUS_CLIENTS, buildStatusReport, type StatusReport, type StatusServerEntry } from "../core/status.js";
+import { getAdapters } from "../adapters/index.js";
+import { buildStatusReport, type StatusReport, type StatusServerEntry } from "../core/status.js";
 
 export async function loadStatusReport(): Promise<StatusReport> {
   const config = loadMergedConfig();
@@ -130,7 +131,7 @@ export function printStatusReportText(report: StatusReport): void {
   }
 
   process.stdout.write("Client sync states:\n");
-  for (const client of STATUS_CLIENTS) {
+  for (const client of new Set([...getAdapters().map(adapter => adapter.id), ...Object.keys(report.clients)])) {
     const state = report.clients[client];
     if (!state) {
       process.stdout.write(`- ${clientStatusEmoji("SKIPPED")} ${client}: SKIPPED\n`);

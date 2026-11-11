@@ -306,7 +306,7 @@ describe("runOAuthLogin rollback", () => {
     // try/catch inside runOAuthLogin.
     const codeReceiver: OAuthCodeReceiver = {
       redirectUrl: "http://127.0.0.1:9/callback",
-      waitForCode: async () => "fake-authorization-code"
+      waitForCode: async () => ({ code: "fake-authorization-code" })
     };
 
     const configPath = `${env.root}/config/mcpx/config.json`;
@@ -356,7 +356,7 @@ describe("runOAuthLogin rollback", () => {
     const openUrl = async () => {};
     const codeReceiver: OAuthCodeReceiver = {
       redirectUrl: "http://127.0.0.1:9/callback",
-      waitForCode: async () => "fake-authorization-code"
+      waitForCode: async () => ({ code: "fake-authorization-code" })
     };
     const configPath = `${env.root}/config/mcpx/config.json`;
 
@@ -429,6 +429,37 @@ async function startWorkingOAuthUpstream(): Promise<StartedServer & { tokenCalls
   return { ...upstream, tokenCalls: () => tokenCalls };
 }
 
+// Like startWorkingOAuthUpstream, but also serves RFC 8414 metadata that
+// advertises RFC 9207 support, so the SDK requires `iss` on the callback.
+async function startIssAdvertisingOAuthUpstream(): Promise<StartedServer & { tokenCalls: () => number }> {
+  let tokenCalls = 0;
+  let issuer = "";
+  const upstream = await startServer((req, res) => {
+    if (req.method === "GET" && req.url === "/.well-known/oauth-authorization-server") {
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({
+        issuer,
+        authorization_endpoint: `${issuer}/authorize`,
+        token_endpoint: `${issuer}/token`,
+        response_types_supported: ["code"],
+        code_challenge_methods_supported: ["S256"],
+        authorization_response_iss_parameter_supported: true
+      }));
+      return;
+    }
+    if (req.method === "POST" && req.url === "/token") {
+      tokenCalls++;
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ access_token: "fresh-access-token", token_type: "Bearer", expires_in: 3600 }));
+      return;
+    }
+    res.statusCode = 404;
+    res.end();
+  });
+  issuer = upstream.url;
+  return { ...upstream, tokenCalls: () => tokenCalls };
+}
+
 function seedConfigWithServer(configPath: string, serverName: string, spec: HttpServerSpec): void {
   const config = defaultConfig();
   config.servers[serverName] = spec;
@@ -474,7 +505,7 @@ describe("runOAuthLogin success", () => {
 
     const codeReceiver: OAuthCodeReceiver = {
       redirectUrl: "http://127.0.0.1:9/callback",
-      waitForCode: async () => "fake-authorization-code"
+      waitForCode: async () => ({ code: "fake-authorization-code" })
     };
     const progressPhases: string[] = [];
 
@@ -527,6 +558,54 @@ describe("runOAuthLogin default loopback callback server", () => {
     const result = await runOAuthLogin(serverName, spec, secrets, openUrl, configPath);
 
     expect(result).toEqual({ serverName, authorized: true });
+  });
+
+  it("forwards the RFC 9207 iss parameter so servers that advertise it authorize", async () => {
+    const env = setupTempEnv("mcpx-oauth-");
+    cleanups.push(env.restore);
+    const upstream = await startIssAdvertisingOAuthUpstream();
+    cleanups.push(() => closeServer(upstream.server));
+
+    const secrets = new SecretsManager();
+    const serverName = "test-server";
+    seedClientSecret(secrets, serverName);
+    const spec: HttpServerSpec = { transport: "http", url: `${upstream.url}/mcp` };
+    const configPath = `${env.root}/config/mcpx/config.json`;
+    seedConfigWithServer(configPath, serverName, spec);
+
+    const openUrl = async (authorizationUrl: string) => {
+      const { redirectUri, state } = callbackDetailsFrom(authorizationUrl);
+      await fetch(`${redirectUri}?code=fake-code&state=${state}&iss=${encodeURIComponent(upstream.url)}`);
+    };
+
+    const result = await runOAuthLogin(serverName, spec, secrets, openUrl, configPath);
+
+    expect(result).toEqual({ serverName, authorized: true });
+    expect(upstream.tokenCalls()).toBe(1);
+  });
+
+  it("rejects without redeeming the code when the callback iss does not match the issuer", async () => {
+    const env = setupTempEnv("mcpx-oauth-");
+    cleanups.push(env.restore);
+    const upstream = await startIssAdvertisingOAuthUpstream();
+    cleanups.push(() => closeServer(upstream.server));
+
+    const secrets = new SecretsManager();
+    const serverName = "test-server";
+    seedClientSecret(secrets, serverName);
+    const spec: HttpServerSpec = { transport: "http", url: `${upstream.url}/mcp` };
+    const configPath = `${env.root}/config/mcpx/config.json`;
+    seedConfigWithServer(configPath, serverName, spec);
+
+    const openUrl = async (authorizationUrl: string) => {
+      const { redirectUri, state } = callbackDetailsFrom(authorizationUrl);
+      await fetch(`${redirectUri}?code=fake-code&state=${state}&iss=${encodeURIComponent("https://attacker.example")}`);
+    };
+
+    const err = await expectRejection(runOAuthLogin(serverName, spec, secrets, openUrl, configPath));
+
+    expect((err as Error).name).toBe("IssuerMismatchError");
+    expect(upstream.tokenCalls()).toBe(0);
   });
 
   it("rejects on state mismatch, and a duplicate request afterward gets a plain response instead of re-rejecting", async () => {

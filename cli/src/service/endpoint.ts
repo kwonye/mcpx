@@ -1,6 +1,10 @@
-// Daemon identity: the runtime record, the local control endpoint (single-
-// instance guard + newline-delimited JSON control channel) and its clients.
+// Daemon identity: the runtime record, the local control endpoint and its clients.
+// The endpoint is the daemon's single-instance guard and its only control
+// channel: an HTTP server on a Unix socket (POSIX) or named pipe (Windows).
+// Lifecycle routes (/v1/ping, /v1/shutdown) are answered here; every other
+// route is the authenticated management API (core/control.ts).
 import fs from "node:fs";
+import http from "node:http";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
@@ -29,15 +33,14 @@ export const PingResponseSchema = z.object({
   instanceId: z.string(),
   startedAt: z.string(),
   port: z.number().int().optional(),
-  supervised: z.boolean().optional()
+  supervised: z.boolean().optional(),
+  activeWriters: z.number().int().optional()
 });
 export type DaemonPing = z.infer<typeof PingResponseSchema>;
 
-const ControlRequestSchema = z.object({
-  op: z.enum(["ping", "shutdown"]),
+const ShutdownRequestSchema = z.object({
   instanceId: z.string().optional()
 });
-export type ControlRequest = z.infer<typeof ControlRequestSchema>;
 
 export function readRuntimeRecord(recordPath = getRuntimeRecordPath()): RuntimeRecord | null {
   try {
@@ -152,9 +155,16 @@ export function rawExchangeSync(target: ExchangeTarget, payload: string, options
 // ---------------------------------------------------------------------------
 // Control client.
 
+/** The response body of an HTTP exchange (or the raw data from a non-HTTP peer). */
+function responseBody(data: string): string {
+  if (!data.startsWith("HTTP/")) return data;
+  const start = data.indexOf("\r\n\r\n");
+  return start < 0 ? "" : data.slice(start + 4);
+}
+
 function parsePing(result: ExchangeResult): DaemonPing | null {
   if (!result.ok) return null;
-  const line = result.data.split("\n")[0] ?? "";
+  const line = responseBody(result.data).split("\n")[0] ?? "";
   try {
     const parsed = PingResponseSchema.safeParse(JSON.parse(line));
     return parsed.success ? parsed.data : null;
@@ -163,28 +173,33 @@ function parsePing(result: ExchangeResult): DaemonPing | null {
   }
 }
 
-function controlPayload(request: ControlRequest): string {
-  return `${JSON.stringify(request)}\n`;
+const PING_REQUEST = "GET /v1/ping HTTP/1.0\r\nHost: localhost\r\nConnection: close\r\n\r\n";
+
+function shutdownRequest(instanceId: string): string {
+  const body = JSON.stringify({ instanceId });
+  return `POST /v1/shutdown HTTP/1.0\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: ${Buffer.byteLength(body)}\r\nConnection: close\r\n\r\n${body}`;
+}
+
+function shutdownAccepted(result: ExchangeResult): boolean {
+  return result.ok && responseBody(result.data).includes("\"ok\":true");
 }
 
 /** Asks whoever holds this user's control endpoint who it is. Null when nobody answers. */
 export async function pingDaemon(endpoint = getControlEndpoint(), timeoutMs = 1500): Promise<DaemonPing | null> {
-  return parsePing(await rawExchange({ path: endpoint }, controlPayload({ op: "ping" }), { line: true, timeoutMs }));
+  return parsePing(await rawExchange({ path: endpoint }, PING_REQUEST, { line: false, timeoutMs }));
 }
 
 export function pingDaemonSync(endpoint = getControlEndpoint(), timeoutMs = 1500): DaemonPing | null {
   if (process.platform !== "win32" && !fs.existsSync(endpoint)) return null;
-  return parsePing(rawExchangeSync({ path: endpoint }, controlPayload({ op: "ping" }), { line: true, timeoutMs }));
+  return parsePing(rawExchangeSync({ path: endpoint }, PING_REQUEST, { line: false, timeoutMs }));
 }
 
 export async function requestShutdown(instanceId: string, endpoint = getControlEndpoint(), timeoutMs = 2000): Promise<boolean> {
-  const result = await rawExchange({ path: endpoint }, controlPayload({ op: "shutdown", instanceId }), { line: true, timeoutMs });
-  return result.ok && result.data.includes("\"ok\":true");
+  return shutdownAccepted(await rawExchange({ path: endpoint }, shutdownRequest(instanceId), { line: false, timeoutMs }));
 }
 
 export function requestShutdownSync(instanceId: string, endpoint = getControlEndpoint(), timeoutMs = 2000): boolean {
-  const result = rawExchangeSync({ path: endpoint }, controlPayload({ op: "shutdown", instanceId }), { line: true, timeoutMs });
-  return result.ok && result.data.includes("\"ok\":true");
+  return shutdownAccepted(rawExchangeSync({ path: endpoint }, shutdownRequest(instanceId), { line: false, timeoutMs }));
 }
 
 /** Whether anything accepts connections on the endpoint (a live daemon, possibly still starting). */
@@ -239,9 +254,14 @@ export interface ControlHandlers {
   shutdown(): void;
 }
 
+/** Handles every request that is not a lifecycle route (the management API). */
+export type ControlRequestListener = (request: http.IncomingMessage, response: http.ServerResponse) => void;
+
 export interface InstanceGuard {
   endpoint: string;
   setHandlers(handlers: ControlHandlers): void;
+  /** Attach (or detach with null) the listener for non-lifecycle routes. */
+  setRequestListener(listener: ControlRequestListener | null): void;
   close(): Promise<void>;
 }
 
@@ -263,6 +283,11 @@ function listenOnce(server: net.Server, endpoint: string): Promise<NodeJS.ErrnoE
 
 const MAX_REQUEST_BYTES = 4096;
 
+function sendJson(response: http.ServerResponse, status: number, body: unknown, done?: () => void): void {
+  response.writeHead(status, { "content-type": "application/json" });
+  response.end(`${JSON.stringify(body)}\n`, done);
+}
+
 /**
  * Exclusively binds the per-user control endpoint for the lifetime of this
  * process. The OS releases a named pipe when the owner dies; a Unix socket
@@ -272,46 +297,54 @@ const MAX_REQUEST_BYTES = 4096;
  */
 export async function acquireInstanceGuard(endpoint = getControlEndpoint()): Promise<InstanceGuard> {
   let handlers: ControlHandlers | null = null;
+  let listener: ControlRequestListener | null = null;
   const sockets = new Set<net.Socket>();
-  const server = net.createServer((socket) => {
+  const server = http.createServer((request, response) => {
+    const route = (request.url ?? "/").split("?")[0];
+    if (route === "/v1/ping" && request.method === "GET") {
+      if (!handlers) sendJson(response, 503, { ok: false, error: "starting" });
+      else sendJson(response, 200, handlers.ping());
+      return;
+    }
+    if (route === "/v1/shutdown" && request.method === "POST") {
+      let body = "";
+      request.setEncoding("utf8");
+      request.on("data", (chunk: string) => {
+        body += chunk;
+        if (body.length > MAX_REQUEST_BYTES) request.destroy();
+      });
+      request.on("end", () => {
+        if (!handlers) {
+          sendJson(response, 503, { ok: false, error: "starting" });
+          return;
+        }
+        let parsed: z.infer<typeof ShutdownRequestSchema>;
+        try {
+          parsed = ShutdownRequestSchema.parse(body.trim() ? JSON.parse(body) : {});
+        } catch {
+          sendJson(response, 400, { ok: false, error: "bad_request" });
+          return;
+        }
+        const current = handlers.ping();
+        if (parsed.instanceId && parsed.instanceId !== current.instanceId) {
+          sendJson(response, 409, { ok: false, error: "instance_mismatch" });
+          return;
+        }
+        const shutdown = handlers.shutdown;
+        sendJson(response, 200, { ok: true, pid: process.pid }, () => shutdown());
+      });
+      return;
+    }
+    if (listener) {
+      listener(request, response);
+      return;
+    }
+    sendJson(response, 404, { ok: false, error: "not_found" });
+  });
+  server.on("connection", (socket: net.Socket) => {
     sockets.add(socket);
     socket.on("close", () => sockets.delete(socket));
     socket.on("error", () => socket.destroy());
-    socket.setEncoding("utf8");
-    let buffer = "";
-    socket.on("data", (chunk: string) => {
-      buffer += chunk;
-      if (buffer.length > MAX_REQUEST_BYTES) {
-        socket.destroy();
-        return;
-      }
-      const newline = buffer.indexOf("\n");
-      if (newline < 0) return;
-      const line = buffer.slice(0, newline);
-      buffer = buffer.slice(newline + 1);
-      let request: ControlRequest;
-      try {
-        request = ControlRequestSchema.parse(JSON.parse(line));
-      } catch {
-        socket.end(`${JSON.stringify({ ok: false, error: "bad_request" })}\n`);
-        return;
-      }
-      if (!handlers) {
-        socket.end(`${JSON.stringify({ ok: false, error: "starting" })}\n`);
-        return;
-      }
-      if (request.op === "ping") {
-        socket.end(`${JSON.stringify(handlers.ping())}\n`);
-        return;
-      }
-      const current = handlers.ping();
-      if (request.instanceId && request.instanceId !== current.instanceId) {
-        socket.end(`${JSON.stringify({ ok: false, error: "instance_mismatch" })}\n`);
-        return;
-      }
-      const shutdown = handlers.shutdown;
-      socket.end(`${JSON.stringify({ ok: true, pid: process.pid })}\n`, () => shutdown());
-    });
   });
 
   const isPosix = process.platform !== "win32";
@@ -372,6 +405,9 @@ export async function acquireInstanceGuard(endpoint = getControlEndpoint()): Pro
     endpoint,
     setHandlers(next) {
       handlers = next;
+    },
+    setRequestListener(next) {
+      listener = next;
     },
     close() {
       return new Promise((resolve) => {

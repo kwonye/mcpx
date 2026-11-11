@@ -29,12 +29,21 @@ export function registerDoctor(program: Command, _ctx: CommandContext): void {
         details: getManagedIndexPath()
       });
 
-      // Check encrypted secrets store
+      // Check the active secret backend (encrypted file by default, OS keychain when opted in).
       try {
-        new SecretsManager().listSecretNames();
-        checks.push({ check: "secrets_store", status: "ok", details: getSecretsStorePath() });
-      } catch {
-        checks.push({ check: "secrets_store", status: "warn", details: "encrypted secrets store unavailable" });
+        const secrets = new SecretsManager();
+        secrets.listSecretNames();
+        checks.push({
+          check: "secrets_store",
+          status: "ok",
+          details: secrets.backend === "keychain" ? "keychain" : `file (${getSecretsStorePath()})`
+        });
+      } catch (err) {
+        checks.push({
+          check: "secrets_store",
+          status: "warn",
+          details: err instanceof Error ? err.message : "secrets store unavailable"
+        });
       }
 
       const daemon = getDaemonStatus(config);

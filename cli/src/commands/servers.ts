@@ -12,6 +12,7 @@ import { SecretsManager } from "../core/secrets.js";
 import { fetchRegistryServerDetail, selectBestPackage, extractRequiredInputs, mapRegistryToSpec } from "../core/registry-client.js";
 import { isServerEnabled, type HttpServerSpec, type StdioServerSpec, type UpstreamServerSpec } from "../types.js";
 import { captureTelemetryEvent, durationBucket, markTelemetryMilestone } from "../core/telemetry.js";
+import { capture } from "../core/analytics.js";
 import { clearOAuthCredentials } from "../core/oauth.js";
 import { autoSyncManagedEntries, promptLine, type CommandContext } from "./shared.js";
 import { maybeAutoConfigureAuthForAddedServer, runDeferredOAuthLogin } from "./add-auth.js";
@@ -149,7 +150,8 @@ function registerEnabledCommand(parent: Command, enabled: boolean, cliPath: stri
       }
 
       process.stdout.write(`${enabled ? "Enabled" : "Disabled"} server: ${name} (${type} config)\n`);
-      process.stdout.write("Auto-syncing managed gateway entries across all supported clients...\n");
+      capture(enabled ? "server_enabled" : "server_disabled", { scope: type });
+      process.stdout.write("Syncing managed integrations to detected and selected harnesses...\n");
       await autoSyncManagedEntries(cliPath);
       captureTelemetryEvent({
         name: "operation_completed",
@@ -246,6 +248,7 @@ function registerAddCommand(parent: Command, cliPath: string): void {
         }
 
         process.stdout.write(`Added server: ${shortName} (${spec.transport}) from registry "${registryName}"${type === "project" ? ` (project: ${projectPath})` : ""}\n`);
+        capture("server_added", { transport: spec.transport, from_registry: true, registry_name: registryName, scope: type });
         if (authSetup.deferredOAuthLogin && spec.transport === "http") {
           await runDeferredOAuthLogin(shortName, spec, secrets, configPath);
         }
@@ -264,12 +267,13 @@ function registerAddCommand(parent: Command, cliPath: string): void {
         }
 
         process.stdout.write(`Added server: ${parsed.name} (${parsed.spec.transport})${type === "project" ? ` (project: ${projectPath})` : ""}\n`);
+        capture("server_added", { transport: parsed.spec.transport, from_registry: false, scope: type });
         if (authSetup.deferredOAuthLogin && parsed.spec.transport === "http") {
           await runDeferredOAuthLogin(parsed.name, parsed.spec, secrets, configPath);
         }
       }
 
-      process.stdout.write("Auto-syncing managed gateway entries across all supported clients...\n");
+      process.stdout.write("Syncing managed integrations to detected and selected harnesses...\n");
       await autoSyncManagedEntries(cliPath);
       markTelemetryMilestone("first_server_added");
       captureTelemetryEvent({
@@ -301,7 +305,8 @@ function registerRemoveCommand(parent: Command, cliPath: string): void {
       }
 
       process.stdout.write(`Removed server: ${name} ${type === "project" ? `from project: ${projectPath}` : "globally"}\n`);
-      process.stdout.write("Auto-syncing managed gateway entries across all supported clients...\n");
+      capture("server_removed", { scope: type });
+      process.stdout.write("Syncing managed integrations to detected and selected harnesses...\n");
       await autoSyncManagedEntries(cliPath);
       captureTelemetryEvent({
         name: "operation_completed",

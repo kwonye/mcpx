@@ -1,23 +1,17 @@
-import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useSkills } from "../hooks/useSkills";
 import { ConfirmDialog } from "./ConfirmDialog";
 
-export interface SkillsTabHandle {
-  isDirty: boolean;
-  save: () => Promise<boolean>;
-  discard: () => void;
-}
-
-export const SkillsTab = forwardRef<SkillsTabHandle>(function SkillsTab(_props, ref) {
-  const { skills, loading, error, refresh, saveSkill, deleteSkill, customizeSkill, updateSkill, rollbackSkill } = useSkills();
+export function SkillsTab() {
+  const { skills, loading, error, refresh, saveSkill, deleteSkill, installSkill, customizeSkill, updateSkill, rollbackSkill } = useSkills();
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [selectedSkillId, setSelectedSkillId] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
   const [newSkillName, setNewSkillName] = useState("");
   const [content, setContent] = useState("");
+  const [source, setSource] = useState("");
+  const [installing, setInstalling] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [dirty, setDirty] = useState(false);
-  const [pendingSelectionId, setPendingSelectionId] = useState<string | null>(null);
   const [shareMessage, setShareMessage] = useState<string | null>(null);
   const lastSelectedId = useRef<string | null>(null);
 
@@ -30,27 +24,16 @@ export const SkillsTab = forwardRef<SkillsTabHandle>(function SkillsTab(_props, 
     }
     if (selectedSkill && lastSelectedId.current !== selectedSkill.id) {
       setContent(selectedSkill.content);
-      setDirty(false);
       lastSelectedId.current = selectedSkill.id;
     }
   }, [selectedSkill, skills]);
-
-  useEffect(() => {
-    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
-      if (!dirty) return;
-      event.preventDefault();
-      event.returnValue = "";
-    };
-    window.addEventListener("beforeunload", handleBeforeUnload);
-    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
-  }, [dirty]);
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newSkillName.trim()) return;
     
     const id = newSkillName.trim().toLowerCase().replace(/\s+/g, "-");
-    if (!/^[a-z0-9][a-z0-9._-]*$/.test(id)) return;
+    if (id.length > 64 || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(id)) return;
     if (skills.some((skill) => skill.id === id)) {
       return;
     }
@@ -62,69 +45,11 @@ export const SkillsTab = forwardRef<SkillsTabHandle>(function SkillsTab(_props, 
     }
   };
 
-  const handleSave = async (): Promise<boolean> => {
-    if (!selectedSkill) return false;
+  const handleSave = async () => {
+    if (!selectedSkill) return;
     setSaving(true);
-    let success = true;
-    if (!selectedSkill.readOnly) {
-      success = await saveSkill(selectedSkill.id, content);
-      if (success) setDirty(false);
-    }
+    if (!selectedSkill.readOnly) await saveSkill(selectedSkill.id, content);
     setSaving(false);
-    return success;
-  };
-
-  const selectSkill = (id: string) => {
-    if (id === selectedSkillId) return;
-    if (dirty) {
-      setPendingSelectionId(id);
-      return;
-    }
-    setSelectedSkillId(id);
-  };
-
-  const discardDraftAndSelect = () => {
-    if (!pendingSelectionId) return;
-    const nextId = pendingSelectionId;
-    setPendingSelectionId(null);
-    setDirty(false);
-    setSelectedSkillId(nextId);
-  };
-
-  const saveDraftAndSelect = async () => {
-    if (!pendingSelectionId || !selectedSkill || selectedSkill.readOnly) return;
-    const nextId = pendingSelectionId;
-    const success = await handleSave();
-    if (!success) return;
-    setDirty(false);
-    setPendingSelectionId(null);
-    setSelectedSkillId(nextId);
-  };
-
-  const handleContentChange = (value: string) => {
-    setContent(value);
-    setDirty(true);
-  };
-
-  useImperativeHandle(ref, () => ({
-    isDirty: dirty,
-    save: async () => {
-      const success = await handleSave();
-      if (success) setPendingSelectionId(null);
-      return success;
-    },
-    discard: () => {
-      if (selectedSkill) setContent(selectedSkill.content);
-      setDirty(false);
-      setPendingSelectionId(null);
-    }
-  }), [dirty, selectedSkill, content]);
-
-  const refreshSelectedContent = (result: unknown) => {
-    if (result && typeof result === "object" && "content" in result && typeof (result as { content?: unknown }).content === "string") {
-      setContent((result as { content: string }).content);
-      setDirty(false);
-    }
   };
 
   const handleDelete = async (id: string) => {
@@ -181,6 +106,17 @@ export const SkillsTab = forwardRef<SkillsTabHandle>(function SkillsTab(_props, 
         </button>
       </div>
 
+      <form className="create-skill-form" onSubmit={async event => {
+        event.preventDefault();
+        if (!source.trim()) return;
+        setInstalling(true);
+        if (await installSkill(source.trim())) setSource("");
+        setInstalling(false);
+      }}>
+        <input className="glass-input" aria-label="Agent Skill source" placeholder="Local skill directory or Git repository" value={source} onChange={event => setSource(event.target.value)} />
+        <button className="btn btn-primary btn-sm" disabled={installing || !source.trim()}>{installing ? "Installing..." : "Install Skill"}</button>
+      </form>
+
       {isCreating && (
         <form onSubmit={handleCreate} className="create-skill-form">
           <input
@@ -206,7 +142,7 @@ export const SkillsTab = forwardRef<SkillsTabHandle>(function SkillsTab(_props, 
               key={skill.id}
               className="skill-list-item"
               data-active={skill.id === selectedSkillId}
-              onClick={() => selectSkill(skill.id)}
+              onClick={() => setSelectedSkillId(skill.id)}
             >
               <span className="material-symbols-outlined">psychology</span>
               <span>{skill.id}</span>
@@ -226,13 +162,13 @@ export const SkillsTab = forwardRef<SkillsTabHandle>(function SkillsTab(_props, 
                 <h2>{selectedSkill.id}</h2>
                 <div className="skill-editor-actions">
                   {selectedSkill.readOnly && <button className="btn btn-secondary btn-sm" onClick={() => void customizeSkill(selectedSkill.id)}>Customize</button>}
-                  {selectedSkill.readOnly && <button className="btn btn-secondary btn-sm" onClick={async () => refreshSelectedContent(await updateSkill(selectedSkill.id))}>Update</button>}
-                  {selectedSkill.readOnly && <button className="btn btn-secondary btn-sm" onClick={async () => refreshSelectedContent(await rollbackSkill(selectedSkill.id))}>Rollback</button>}
+                  {selectedSkill.readOnly && <button className="btn btn-secondary btn-sm" onClick={() => void updateSkill(selectedSkill.id)}>Update</button>}
+                  {selectedSkill.readOnly && <button className="btn btn-secondary btn-sm" onClick={() => void rollbackSkill(selectedSkill.id)}>Rollback</button>}
                   <button className="btn btn-secondary btn-sm" onClick={() => handleDelete(selectedSkill.id)}>
                     <span className="material-symbols-outlined font-icon-sm">delete</span>
                     Delete
                   </button>
-                  <button className="btn btn-primary btn-sm" onClick={() => void handleSave()} disabled={saving}>
+                  <button className="btn btn-primary btn-sm" onClick={handleSave} disabled={saving}>
                     {saving ? "Saving..." : "Save"}
                   </button>
                 </div>
@@ -240,7 +176,7 @@ export const SkillsTab = forwardRef<SkillsTabHandle>(function SkillsTab(_props, 
               <textarea
                 className="skill-textarea"
                 value={content}
-                onChange={(e) => handleContentChange(e.target.value)}
+                onChange={(e) => setContent(e.target.value)}
                 readOnly={selectedSkill.readOnly}
                 placeholder="Enter skill instructions..."
               />
@@ -254,17 +190,6 @@ export const SkillsTab = forwardRef<SkillsTabHandle>(function SkillsTab(_props, 
       </div>
     </div>
     <ConfirmDialog
-      open={pendingSelectionId !== null}
-      title="Unsaved changes"
-      message="Save your changes before switching skills?"
-      initialFocus="cancel"
-      confirmLabel="Save"
-      secondaryLabel="Discard"
-      onConfirm={() => void saveDraftAndSelect()}
-      onSecondary={discardDraftAndSelect}
-      onCancel={() => setPendingSelectionId(null)}
-    />
-    <ConfirmDialog
       open={confirmDeleteId !== null}
       title="Delete skill?"
       message={confirmDeleteId ? `Delete skill "${confirmDeleteId}"?` : ""}
@@ -274,4 +199,4 @@ export const SkillsTab = forwardRef<SkillsTabHandle>(function SkillsTab(_props, 
       onCancel={() => setConfirmDeleteId(null)}
     /></>
   );
-});
+}

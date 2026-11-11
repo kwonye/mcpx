@@ -3,9 +3,9 @@ import { loadConfig } from "../core/config.js";
 import { mutateConfig } from "../core/config-store.js";
 import { listSkills, getSkill, saveSkill, deleteSkill, customizeSkill, installSkillFromSource, pinSkill, unpinSkill, updateSkill, rollbackSkill } from "../core/skills.js";
 import { SecretsManager } from "../core/secrets.js";
-import { syncAllClients, persistSyncState } from "../core/sync.js";
+import { synchronizeClients } from "../core/sync.js";
 import { captureTelemetryEvent, durationBucket } from "../core/telemetry.js";
-import type { CommandContext } from "./shared.js";
+import { ensureExitCodeForSyncFailures, type CommandContext } from "./shared.js";
 import { recordTelemetryOperationFailure } from "./telemetry-support.js";
 
 export function registerSkill(program: Command, _ctx: CommandContext): void {
@@ -38,8 +38,8 @@ export function registerSkill(program: Command, _ctx: CommandContext): void {
         return;
       }
       saveSkill(id, `---\nname: ${id}\ndescription: Instructions for using ${id}.\n---\n\nAdd your instructions here.`);
-      const summary = syncAllClients(loadConfig(), new SecretsManager());
-      await mutateConfig((config) => persistSyncState(summary, config));
+      const summary = await synchronizeClients();
+      ensureExitCodeForSyncFailures(summary.hasErrors);
       process.stdout.write(`Skill "${id}" created.\n`);
       captureTelemetryEvent({
         name: "operation_completed",
@@ -59,8 +59,8 @@ export function registerSkill(program: Command, _ctx: CommandContext): void {
         return;
       }
       deleteSkill(id);
-      const summary = syncAllClients(loadConfig(), new SecretsManager());
-      await mutateConfig((config) => persistSyncState(summary, config));
+      const summary = await synchronizeClients();
+      ensureExitCodeForSyncFailures(summary.hasErrors);
       process.stdout.write(`Skill "${id}" removed.\n`);
       captureTelemetryEvent({
         name: "operation_completed",
@@ -84,8 +84,8 @@ export function registerSkill(program: Command, _ctx: CommandContext): void {
     .action(async (source: string, options: { skill?: string }) => {
       try {
         const installed = await installSkillFromSource(source, options.skill);
-        const summary = syncAllClients(loadConfig(), new SecretsManager());
-        await mutateConfig((freshConfig) => persistSyncState(summary, freshConfig));
+        const summary = await synchronizeClients();
+        ensureExitCodeForSyncFailures(summary.hasErrors);
         process.stdout.write(`Skill installed: ${installed.id}\n`);
       } catch (error) {
         process.stderr.write(`Error: ${error instanceof Error ? error.message : String(error)}\n`);
@@ -95,6 +95,6 @@ export function registerSkill(program: Command, _ctx: CommandContext): void {
 
   skill.command("pin <id>").description("Pin an installed skill at its current revision").action((id: string) => { pinSkill(id); process.stdout.write(`Skill pinned: ${id}\n`); });
   skill.command("unpin <id>").description("Allow an installed skill to update").action((id: string) => { unpinSkill(id); process.stdout.write(`Skill unpinned: ${id}\n`); });
-  skill.command("update <id>").description("Update an installed skill from its source").action(async (id: string) => { const skill = await updateSkill(id); const summary = syncAllClients(loadConfig(), new SecretsManager()); await mutateConfig((freshConfig) => persistSyncState(summary, freshConfig)); process.stdout.write(`Skill updated: ${skill.id}\n`); });
-  skill.command("rollback <id>").description("Restore the previous installed skill revision").action(async (id: string) => { const skill = rollbackSkill(id); const summary = syncAllClients(loadConfig(), new SecretsManager()); await mutateConfig((freshConfig) => persistSyncState(summary, freshConfig)); process.stdout.write(`Skill rolled back: ${skill.id}\n`); });
+  skill.command("update <id>").description("Update an installed skill from its source").action(async (id: string) => { const skill = await updateSkill(id); const summary = await synchronizeClients(); ensureExitCodeForSyncFailures(summary.hasErrors); process.stdout.write(`Skill updated: ${skill.id}\n`); });
+  skill.command("rollback <id>").description("Restore the previous installed skill revision").action(async (id: string) => { const skill = rollbackSkill(id); const summary = await synchronizeClients(); ensureExitCodeForSyncFailures(summary.hasErrors); process.stdout.write(`Skill rolled back: ${skill.id}\n`); });
 }

@@ -3,9 +3,9 @@ import path from "node:path";
 import { loadConfig } from "../core/config.js";
 import { mutateConfig } from "../core/config-store.js";
 import { SecretsManager } from "../core/secrets.js";
-import { syncAllClients, persistSyncState } from "../core/sync.js";
+import { synchronizeClients } from "../core/sync.js";
 import { exportEnvironment, importEnvironment } from "../core/share.js";
-import type { CommandContext } from "./shared.js";
+import { ensureExitCodeForSyncFailures, type CommandContext } from "./shared.js";
 
 export function registerShare(program: Command, _ctx: CommandContext): void {
   const share = program.command("share").description("Export and import portable mcpx environments");
@@ -37,8 +37,8 @@ export function registerShare(program: Command, _ctx: CommandContext): void {
         const result = await importEnvironment(directory, { dryRun: options.dryRun, locked: options.locked, inputs: options.input });
         process.stdout.write(JSON.stringify(result, null, 2) + "\n");
         if (!options.dryRun) {
-          const summary = syncAllClients(loadConfig(), new SecretsManager());
-          await mutateConfig((freshConfig) => persistSyncState(summary, freshConfig));
+          const summary = await synchronizeClients();
+          ensureExitCodeForSyncFailures(summary.hasErrors);
         }
       } catch (error) {
         process.stderr.write(`Error: ${error instanceof Error ? error.message : String(error)}\n`);

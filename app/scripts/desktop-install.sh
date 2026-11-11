@@ -2,11 +2,16 @@
 set -e
 
 DEV_MODE=false
+LAUNCH_APP=true
 FLAVOR="production"
 REMOTE_DEBUGGING_PORT=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --no-launch)
+      LAUNCH_APP=false
+      shift
+      ;;
     --dev)
       DEV_MODE=true
       shift
@@ -80,6 +85,7 @@ rm -f "${APP_DIR}/dist/builder-debug.yml"
 export MCPX_DESKTOP_FLAVOR="${FLAVOR}"
 export MCPX_DESKTOP_DEBUG="${BUILD_DEBUG}"
 export CSC_IDENTITY_AUTO_DISCOVERY="false"
+(cd "${APP_DIR}/../cli" && bun run build)
 bun run build
 
 echo "Creating app bundle..."
@@ -108,6 +114,11 @@ codesign --force --deep --sign - "${APP_INSTALL_PATH}"
 
 echo "Verifying signature..."
 codesign --verify --deep --strict "${APP_INSTALL_PATH}"
+
+if [[ "$LAUNCH_APP" != true ]]; then
+  echo "Installed ${APP_INSTALL_PATH} without launching."
+  exit 0
+fi
 
 echo "Launching app..."
 OPEN_ARGS=()

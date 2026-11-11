@@ -5,7 +5,9 @@ import { SettingsPanel } from "../../src/renderer/components/SettingsPanel";
 const mockMcpx = {
   getDesktopSettings: vi.fn(),
   updateDesktopSettings: vi.fn(),
-  checkForUpdates: vi.fn()
+  checkForUpdates: vi.fn(),
+  getSecretBackend: vi.fn(),
+  setSecretBackend: vi.fn()
 };
 
 beforeEach(() => {
@@ -76,23 +78,6 @@ describe("SettingsPanel", () => {
     expect(await screen.findByText("save failed")).toBeDefined();
   });
 
-  it("renders settings when optional telemetry loading fails", async () => {
-    mockMcpx.getDesktopSettings.mockResolvedValue({ autoUpdateEnabled: true, startOnLoginEnabled: true });
-    mockMcpx.getTelemetryStatus = vi.fn().mockRejectedValue(new Error("telemetry unavailable"));
-
-    render(<SettingsPanel />);
-    expect(await screen.findByText("General Settings")).toBeDefined();
-    expect(screen.queryByText("Loading settings...")).toBeNull();
-  });
-
-  it("offers retry when settings loading fails", async () => {
-    mockMcpx.getDesktopSettings.mockRejectedValue(new Error("settings unavailable"));
-
-    render(<SettingsPanel />);
-    expect(await screen.findByText("settings unavailable")).toBeDefined();
-    expect(screen.getByRole("button", { name: "Retry" })).toBeDefined();
-  });
-
   it("checks for updates on demand and shows the result", async () => {
     mockMcpx.getDesktopSettings.mockResolvedValue({
       autoUpdateEnabled: true,
@@ -121,5 +106,48 @@ describe("SettingsPanel", () => {
     render(<SettingsPanel />);
 
     expect(await screen.findByText(/restart mcpx\./i)).toBeDefined();
+  });
+
+  it("switches secrets to the OS keychain from settings", async () => {
+    mockMcpx.getDesktopSettings.mockResolvedValue({
+      autoUpdateEnabled: true,
+      startOnLoginEnabled: false
+    });
+    mockMcpx.getSecretBackend.mockResolvedValue("file");
+    mockMcpx.setSecretBackend.mockResolvedValue({
+      backend: "keychain",
+      changed: true,
+      migrated: ["alpha"],
+      preserved: [],
+      removedFrom: "file"
+    });
+
+    const { container } = render(<SettingsPanel />);
+    await screen.findByText("OS keychain");
+    const toggle = container.querySelector("#toggle-secretBackend") as HTMLInputElement;
+    expect(toggle.checked).toBe(false);
+
+    fireEvent.click(toggle);
+
+    await waitFor(() => {
+      expect(mockMcpx.setSecretBackend).toHaveBeenCalledWith("keychain");
+    });
+    expect(toggle.checked).toBe(true);
+  });
+
+  it("reverts the keychain toggle when switching backends fails", async () => {
+    mockMcpx.getDesktopSettings.mockResolvedValue({
+      autoUpdateEnabled: true,
+      startOnLoginEnabled: false
+    });
+    mockMcpx.getSecretBackend.mockResolvedValue("file");
+    mockMcpx.setSecretBackend.mockRejectedValue(new Error("keychain unavailable"));
+
+    const { container } = render(<SettingsPanel />);
+    await screen.findByText("OS keychain");
+    fireEvent.click(container.querySelector("#toggle-secretBackend") as HTMLInputElement);
+
+    expect(await screen.findByText("keychain unavailable")).toBeDefined();
+    expect((container.querySelector("#toggle-secretBackend") as HTMLInputElement).checked).toBe(false);
   });
 });

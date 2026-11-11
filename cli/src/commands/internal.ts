@@ -8,10 +8,10 @@ import type { CommandContext } from "./shared.js";
 function registerPluginHostCommand(program: Command): void {
   program
     .command("plugin-host <plugin> <server>")
-    .description("Run a plugin MCP server under mcpx policy enforcement")
+    .description("Run a managed plugin MCP server")
     .action(async (plugin: string, server: string) => {
       const { runPluginHost } = await import("../core/plugin-host.js");
-      runPluginHost(plugin, server);
+      await runPluginHost(plugin, server);
     });
 }
 

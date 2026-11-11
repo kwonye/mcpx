@@ -5,7 +5,9 @@ import { isServerEnabled, type ClientId, type ClientStatus, type ManagedIndex, t
 import { SecretsManager } from "./secrets.js";
 import { ensureGatewayToken } from "./registry.js";
 
-export const STATUS_CLIENTS: ClientId[] = ["claude", "claude-desktop", "codex", "cursor", "cline", "opencode", "kiro", "vscode", "vscode-insiders", "qwen", "openclaw", "hermes"];
+import { installationAdapters } from "./harnesses.js";
+import { getAdapters } from "../adapters/index.js";
+export const STATUS_CLIENTS: ClientId[] = getAdapters().map(adapter => adapter.id);
 
 export interface StatusAuthBinding {
   kind: "header" | "env";
@@ -43,6 +45,7 @@ export interface StatusReport {
   servers: StatusServerEntry[];
   clients: McpxConfig["clients"];
   projects?: McpxConfig["projects"];
+  fetchError?: string;
   totalGlobalTokens?: number;
   totalProjectTokens?: Record<string, number>;
 }
@@ -66,10 +69,11 @@ function deriveClientStatus(managed: boolean, configured?: ClientStatus): Client
 }
 
 function buildClientMappings(config: McpxConfig, managedIndex: ManagedIndex, serverName: string): StatusClientMapping[] {
-  return STATUS_CLIENTS.map((clientId) => {
+  return installationAdapters(config).map(({ adapter }) => {
+    const clientId = adapter.id;
     const configState = config.clients[clientId];
     const managedClient = managedIndex.managed[clientId];
-    const managedEntry = managedClient?.entries?.[`${serverName} (mcpx)`];
+    const managedEntry = managedClient?.entries?.[adapter.managedName?.(serverName) ?? `${serverName} (mcpx)`];
     const managed = Boolean(managedEntry);
 
     return {
@@ -176,6 +180,7 @@ export async function buildStatusReport(
 
   return {
     gatewayUrl,
+    fetchError: tokenCountFetchError,
     daemon,
     upstreamCount: servers.length,
     servers,

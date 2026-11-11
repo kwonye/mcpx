@@ -19,6 +19,8 @@ import { withManagedIndexLock } from "./managed-index-lock.js";
 import { getManagedIndexPath } from "./paths.js";
 import { startMarketplaceAutoUpdater } from "./marketplace-updater.js";
 import { captureTelemetryEvent, durationBucket } from "./telemetry.js";
+import { capture } from "./analytics.js";
+import { activeControlWriters, attachManagementApi } from "./control.js";
 import { APP_VERSION } from "../version.js";
 import {
   DAEMON_EXIT_ALREADY_RUNNING,
@@ -401,7 +403,7 @@ async function startDaemonInner(config: McpxConfig, cliPath: string, secrets: Se
       detached: true,
       windowsHide: true,
       stdio: ["ignore", logFd, logFd],
-      env: buildDaemonChildEnv()
+      env: { ...buildDaemonChildEnv(), MCPX_CLI_ENTRY: cliPath }
     });
   } finally {
     fs.closeSync(logFd);
@@ -463,6 +465,7 @@ export async function startDaemon(
 ): Promise<DaemonStartResult> {
   const startedAt = Date.now();
   const result = await startDaemonInner(config, cliPath, secrets, options);
+  if (result.started) capture("daemon_started", { port: result.port });
   captureTelemetryEvent({
     name: "operation_completed",
     properties: { operation: "daemon_start", outcome: "success", durationBucket: durationBucket(Date.now() - startedAt) }
@@ -533,7 +536,10 @@ export async function stopDaemonAsync(options: DaemonLifecycleOptions = {}): Pro
     forced = forceKill(ping.pid);
     stopped = (await waitFor(() => !isPidAlive(ping.pid), 3000)) || forced;
   }
-  if (stopped) removeRuntimeRecord(ping.instanceId);
+  if (stopped) {
+    removeRuntimeRecord(ping.instanceId);
+    capture("daemon_stopped", {});
+  }
 
   const result: DaemonStopResult = {
     stopped,
@@ -583,7 +589,10 @@ export function stopDaemon(options: DaemonLifecycleOptions = {}): DaemonStopResu
     forced = forceKill(ping.pid);
     stopped = waitForSync(() => !isPidAlive(ping.pid), 3000) || forced;
   }
-  if (stopped) removeRuntimeRecord(ping.instanceId);
+  if (stopped) {
+    removeRuntimeRecord(ping.instanceId);
+    capture("daemon_stopped", {});
+  }
 
   const result: DaemonStopResult = {
     stopped,
@@ -713,14 +722,17 @@ export async function runDaemonForeground(config: McpxConfig, port: number, secr
   let ready = false;
   let shutdown: () => Promise<void> = async () => {};
   guard.setHandlers({
-    ping: () => ({ ok: true, pid: process.pid, ready, version: APP_VERSION, instanceId, startedAt, port, supervised }),
+    ping: () => ({ ok: true, pid: process.pid, ready, version: APP_VERSION, instanceId, startedAt, port, supervised, activeWriters: activeControlWriters() }),
     shutdown: () => void shutdown()
   });
+  // The management API (core/control.ts) shares this endpoint.
+  const management = attachManagementApi(guard);
 
   const token = ensureGatewayToken(config, secrets);
   const server = createGatewayServer({ port, expectedToken: token, secrets, instanceId });
   const listenError = await waitForListening(server);
   if (listenError) {
+    await management.close();
     await guard.close();
     if (listenError.code === "EADDRINUSE") {
       process.stderr.write(`mcpx: ${new DaemonPortInUseError(port).message}\n`);
@@ -755,6 +767,8 @@ export async function runDaemonForeground(config: McpxConfig, port: number, secr
       setTimeout(() => process.exit(0), 8000).unref();
       clearInterval(rotateTimer);
       stopMarketplaceUpdater();
+      // Drains in-flight coordinated writes before the gateway goes away.
+      await management.close();
       await withTimeout(server.shutdown(), 5000);
       removeRuntimeRecord(instanceId);
       await guard.close();

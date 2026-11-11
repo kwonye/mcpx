@@ -13,12 +13,23 @@ export interface HostContext {
   exists: (filePath: string) => boolean;
 }
 
+let defaultOverrides: () => Partial<HostContext> = () => ({});
+
+/**
+ * Process-wide defaults applied under every explicit override. Test harnesses use it
+ * to confine install detection to a temp root; production code never sets it.
+ */
+export function setDefaultHostOverrides(overrides: (() => Partial<HostContext>) | null): void {
+  defaultOverrides = overrides ?? (() => ({}));
+}
+
 export function currentHost(overrides: Partial<HostContext> = {}): HostContext {
   return {
     platform: process.platform,
     home: homeDir(),
     env: process.env,
     exists: (filePath) => fs.existsSync(filePath),
+    ...defaultOverrides(),
     ...overrides
   };
 }

@@ -1,11 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import { z } from "zod";
-import type { ClientId, ManagedGatewayEntry, SyncClientOptions, UpstreamServerSpec } from "../types.js";
-import { APP_VERSION } from "../version.js";
+import type { ClientId, ManagedGatewayEntry, PluginComponent, SyncClientOptions, UpstreamServerSpec } from "../types.js";
+import { localCliCommand } from "../core/runtime-entry.js";
 import {
   appDataDir,
-  findOnPath,
   homePath,
   joinPath,
   localAppDataDir,
@@ -75,6 +74,18 @@ export interface ClientDefinition {
   afterMerge?(doc: JsonObject, options: SyncClientOptions, managedNames: string[]): void;
   skillsDir(ctx: HostContext): string;
   skillsLayout: "dir" | "flat";
+  /** Other skill directories the client reads natively (skills there are not projected again). */
+  additionalSkillDirs?(ctx: HostContext): string[];
+  /** Native name for a managed server (default `<name> (mcpx)`). */
+  managedName?(serverName: string): string;
+  /** Refuse to sync with this message (e.g. the client's MCP support is turned off). */
+  syncBlocker?(configPath: string, ctx: HostContext): string | null;
+  /** Project-scoped config file, relative to a registered project root. */
+  projectConfig?: string;
+  /** Project-scoped skills directory, relative to a registered project root (default `.<id>/skills`). */
+  projectSkills?: string;
+  /** Plugin components projected into project installations. */
+  pluginComponents?: PluginComponent[];
 }
 
 interface ImportRules {
@@ -96,7 +107,7 @@ function mapStandardEntry(entry: RawEntry, disabledElsewhere: boolean, rules: Im
 
   if ((type === undefined || rules.types?.stdio.includes(type)) && entry.command && !entry.url) {
     const parts = Array.isArray(entry.command) ? entry.command : [entry.command, ...(entry.args ?? [])];
-    if (parts.length === 0) return "Entry could not be mapped to an mcpx server.";
+    if (parts.length === 0 || !parts[0]) return "Entry could not be mapped to an mcpx server.";
     return {
       transport: "stdio",
       command: parts[0],
@@ -134,13 +145,41 @@ function httpEntry(type: string | undefined, urlKey = "url") {
 }
 
 // Claude Desktop's claude_desktop_config.json only supports stdio servers, so mcpx
-// installs a stdio bridge (`mcpx proxy <name>`) per managed server.
+// installs a stdio bridge (`mcpx proxy <name>`) per managed server. The bridge runs
+// this installation's CLI runtime and authenticates as the client's consumer token.
 // See https://modelcontextprotocol.io/quickstart/user
-function proxyBridgeEntry(entry: ManagedGatewayEntry, ctx: HostContext): JsonObject {
+function proxyBridgeEntry(entry: ManagedGatewayEntry): JsonObject {
   const upstreamName = entry.name.replace(/ \(mcpx\)$/, "");
-  const mcpxPath = findOnPath(ctx, "mcpx");
-  if (mcpxPath) return { command: mcpxPath, args: ["proxy", upstreamName] };
-  return { command: "npx", args: ["-y", `@kwonye/mcpx@${APP_VERSION}`, "proxy", upstreamName] };
+  const cli = localCliCommand(["proxy", upstreamName]);
+  const proxyToken = /^Bearer\s+(.+)$/i.exec(entry.headers.Authorization ?? "")?.[1];
+  return {
+    command: cli.command,
+    args: cli.args,
+    env: {
+      ...cli.env,
+      ...(cli.args[0] ? { MCPX_CLI_ENTRY: cli.args[0] } : {}),
+      ...(proxyToken ? { MCPX_PROXY_TOKEN: proxyToken } : {})
+    }
+  };
+}
+
+// Pi only allows letters, digits, '_' and '-' in MCP server names.
+function piManagedName(name: string): string {
+  return `${name.replace(/[^A-Za-z0-9_-]/g, "_")}__mcpx`;
+}
+
+function piSyncBlocker(configPath: string): string | null {
+  const settingsPath = path.join(path.dirname(configPath), "settings.json");
+  try {
+    if (!fs.existsSync(settingsPath)) return null;
+    const settings = JSON.parse(fs.readFileSync(settingsPath, "utf8")) as { extensions?: unknown };
+    if (Array.isArray(settings.extensions) && settings.extensions.includes("-builtin:mcp")) {
+      return "Pi built-in MCP is disabled. Enable it before syncing.";
+    }
+  } catch {
+    return `Pi settings at ${settingsPath} could not be parsed; refusing to sync.`;
+  }
+  return null;
 }
 
 function normalizeProjectKey(projectPath: string): string {
@@ -218,7 +257,10 @@ function vscodeFamily(id: "vscode" | "vscode-insiders", displayName: string, dat
     toEntry: httpEntry("http"),
     importEntry: standardImport,
     skillsDir: (ctx) => homePath(ctx, ".copilot", "skills"),
-    skillsLayout: "dir"
+    skillsLayout: "dir",
+    // Stable and Insiders share a workspace's .vscode/mcp.json; only one installation owns it.
+    ...(id === "vscode" ? { projectConfig: ".vscode/mcp.json", projectSkills: ".github/skills" } : {}),
+    pluginComponents: ["skills"]
   };
 }
 
@@ -238,7 +280,10 @@ export const CLIENT_CATALOGUE: ClientDefinition[] = [
     disabledNames: claudeDisabledNames,
     afterMerge: reconcileClaudeProjects,
     skillsDir: (ctx) => homePath(ctx, ".claude", "skills"),
-    skillsLayout: "dir"
+    skillsLayout: "dir",
+    projectConfig: ".mcp.json",
+    projectSkills: ".claude/skills",
+    pluginComponents: ["skills"]
   },
   {
     id: "claude-desktop",
@@ -274,8 +319,13 @@ export const CLIENT_CATALOGUE: ClientDefinition[] = [
     importEntry: (entry, disabled) => Array.isArray(entry.command)
       ? "Entry could not be mapped to an mcpx server."
       : mapStandardEntry(entry, disabled, { enabled: "enabled-flag" }),
-    skillsDir: (ctx) => homePath(ctx, ".codex", "skills"),
-    skillsLayout: "dir"
+    // Codex reads the shared Agent Skills location; ~/.codex/skills is its legacy one.
+    skillsDir: (ctx) => homePath(ctx, ".agents", "skills"),
+    skillsLayout: "dir",
+    additionalSkillDirs: (ctx) => [homePath(ctx, ".codex", "skills")],
+    projectConfig: ".codex/config.toml",
+    projectSkills: ".agents/skills",
+    pluginComponents: ["skills"]
   },
   {
     id: "cursor",
@@ -294,7 +344,9 @@ export const CLIENT_CATALOGUE: ClientDefinition[] = [
     toEntry: httpEntry("http"),
     importEntry: standardImport,
     skillsDir: (ctx) => homePath(ctx, ".cursor", "skills"),
-    skillsLayout: "dir"
+    skillsLayout: "dir",
+    projectConfig: ".cursor/mcp.json",
+    pluginComponents: ["skills"]
   },
   {
     id: "cline",
@@ -325,7 +377,8 @@ export const CLIENT_CATALOGUE: ClientDefinition[] = [
         enabled: "disabled-flag"
       }),
     skillsDir: (ctx) => homePath(ctx, ".config", "cline", "skills"),
-    skillsLayout: "dir"
+    skillsLayout: "dir",
+    pluginComponents: ["skills"]
   },
   {
     id: "opencode",
@@ -342,7 +395,9 @@ export const CLIENT_CATALOGUE: ClientDefinition[] = [
       enabled: "enabled-flag"
     }),
     skillsDir: (ctx) => joinPath(ctx, xdgConfigDir(ctx), "opencode", "skills"),
-    skillsLayout: "dir"
+    skillsLayout: "dir",
+    projectConfig: "opencode.json",
+    pluginComponents: []
   },
   {
     id: "kiro",
@@ -356,7 +411,8 @@ export const CLIENT_CATALOGUE: ClientDefinition[] = [
     toEntry: httpEntry(undefined),
     importEntry: standardImport,
     skillsDir: (ctx) => homePath(ctx, ".kiro", "skills"),
-    skillsLayout: "flat"
+    skillsLayout: "dir",
+    pluginComponents: ["skills"]
   },
   vscodeFamily("vscode", "VS Code", "Code", "Visual Studio Code.app", "Microsoft VS Code", "code"),
   vscodeFamily("vscode-insiders", "VS Code Insiders", "Code - Insiders", "Visual Studio Code - Insiders.app", "Microsoft VS Code Insiders", "code-insiders"),
@@ -381,7 +437,8 @@ export const CLIENT_CATALOGUE: ClientDefinition[] = [
     disabledNames: (doc) => new Set(((doc.mcp as JsonObject | undefined)?.excluded as string[] | undefined) ?? []),
     afterMerge: (doc, _options, managedNames) => purgeManagedFromExcludedArray(doc, managedNames),
     skillsDir: (ctx) => homePath(ctx, ".qwen", "skills"),
-    skillsLayout: "flat"
+    skillsLayout: "dir",
+    pluginComponents: ["skills"]
   },
   {
     id: "openclaw",
@@ -398,7 +455,8 @@ export const CLIENT_CATALOGUE: ClientDefinition[] = [
       ...((doc.mcpServers as JsonObject | undefined) ?? {})
     }),
     skillsDir: (ctx) => homePath(ctx, ".openclaw", "skills"),
-    skillsLayout: "dir"
+    skillsLayout: "dir",
+    pluginComponents: ["skills"]
   },
   {
     id: "hermes",
@@ -412,7 +470,30 @@ export const CLIENT_CATALOGUE: ClientDefinition[] = [
     keepDisabled: true,
     importEntry: oauthAware({ enabled: "enabled-flag" }),
     skillsDir: (ctx) => homePath(ctx, ".hermes", "skills"),
-    skillsLayout: "dir"
+    skillsLayout: "dir",
+    pluginComponents: ["skills"]
+  },
+  {
+    id: "pi",
+    displayName: "Pi",
+    format: "json",
+    configPaths: (ctx) => [homePath(ctx, ".pi", "agent", "mcp.json")],
+    container: ["mcpServers"],
+    installMarkers: (ctx) => [homePath(ctx, ".pi")],
+    binaries: ["pi"],
+    toEntry: httpEntry("http"),
+    importEntry: (entry, disabled) => mapStandardEntry(entry, disabled, {
+      types: { http: ["http", "remote", "streamable-http"], stdio: ["local", "stdio"] },
+      enabled: "enabled-flag"
+    }),
+    managedName: piManagedName,
+    syncBlocker: piSyncBlocker,
+    skillsDir: (ctx) => homePath(ctx, ".pi", "agent", "skills"),
+    skillsLayout: "dir",
+    additionalSkillDirs: (ctx) => [homePath(ctx, ".agents", "skills")],
+    projectConfig: ".pi/mcp.json",
+    projectSkills: ".pi/skills",
+    pluginComponents: ["skills"]
   }
 ];
 

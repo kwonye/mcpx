@@ -28,6 +28,7 @@ const clientStateSchema = z.object({
 });
 
 const httpServerSchema = z.object({
+  scope: z.string().optional(),
   transport: z.literal("http"),
   url: z.url(),
   headers: z.record(z.string(), z.string()).optional(),
@@ -35,6 +36,7 @@ const httpServerSchema = z.object({
 });
 
 const stdioServerSchema = z.object({
+  scope: z.string().optional(),
   transport: z.literal("stdio"),
   command: z.string().min(1),
   args: z.array(z.string()).optional(),
@@ -69,6 +71,7 @@ const discoveredMcpServerSchema = z.object({
   cwd: z.string().optional(),
   url: z.string().optional(),
   oauthResource: z.string().optional(),
+  headers: z.record(z.string(), z.string()).optional(),
 });
 
 const discoveredComponentsSchema = z.object({
@@ -110,10 +113,10 @@ const managedPluginSchema = z.object({
   }).optional(),
   updateError: z.string().optional(),
   pinned: z.boolean().default(false),
-  previous: z.object({ version: z.string(), resolvedSha: z.string(), root: z.string() }).optional(),
+  previous: z.object({ version: z.string(), resolvedSha: z.string(), root: z.string(), source: z.string().optional(), sourceFingerprint: z.string().optional() }).optional(),
   projectOverrides: z.record(z.string(), z.object({
     enabled: z.boolean().optional(),
-    components: z.record(pluginComponentSchema, z.boolean()).optional(),
+    components: z.partialRecord(pluginComponentSchema, z.boolean()).optional(),
     config: z.record(z.string(), z.unknown()).optional(),
   })).optional(),
 });
@@ -124,7 +127,7 @@ const managedMarketplaceSchema = z.object({
   source: z.string(),
   sourceType: z.enum(["github", "git", "local", "hosted-json"]).default("github"),
   manifestPath: z.string().optional(),
-  format: z.enum(["claude", "codex"]).optional(),
+  format: z.enum(["claude", "codex", "cursor"]).optional(),
   builtIn: z.boolean().default(false),
   autoUpdate: z.boolean().default(false),
   addedAt: z.string(),
@@ -137,9 +140,14 @@ const managedMarketplaceSchema = z.object({
 
 const configSchema = z.object({
   schemaVersion: z.literal(1).default(1),
+  consumers: z.record(z.string(), z.object({ tokenRef: z.string().regex(/^secret:\/\/[A-Za-z0-9._-]+$/), projectPath: z.string().optional() })).default({}),
+  packages: z.record(z.string(), z.object({ id: z.string(), root: z.string(), source: z.string(), harness: z.string(), fingerprint: z.string(), pinned: z.boolean(), name: z.string().optional(), identity: z.string().optional(), servers: z.array(z.string()).optional(), skills: z.array(z.object({ id: z.string(), path: z.string(), projectionPath: z.string() })).optional(), scope: z.string().optional(), previous: z.object({ root: z.string(), fingerprint: z.string() }).optional() })).default({}),
+  revision: z.number().int().nonnegative().default(0),
+  harnesses: z.record(z.string(), z.object({ mode: z.enum(["observe", "selected", "automatic"]) })).default({}),
+  origins: z.record(z.string(), z.object({ id: z.string(), kind: z.string(), harness: z.string(), source: z.string(), nativeKey: z.string(), fingerprint: z.string(), operationId: z.string() })).default({}),
   gateway: z.object({
     port: z.number().int().min(1).max(65535).default(37373),
-    tokenRef: z.string().default("secret://local_gateway_token"),
+    tokenRef: z.string().regex(/^secret:\/\/[A-Za-z0-9._-]+$/).default("secret://local_gateway_token"),
     autoStart: z.boolean().default(true)
   }).default({
     port: 37373,
@@ -150,7 +158,10 @@ const configSchema = z.object({
   clients: z.record(z.string(), clientStateSchema).default({}),
   projects: z.record(z.string(), projectEntrySchema).default({}),
   plugins: z.record(z.string(), managedPluginSchema).default({}),
-  marketplaces: z.record(z.string(), managedMarketplaceSchema).default({})
+  marketplaces: z.record(z.string(), managedMarketplaceSchema).default({}),
+  secrets: z.object({
+    backend: z.enum(["file", "keychain"]).default("file")
+  }).default({ backend: "file" })
 });
 
 export interface ProjectLocalConfig {
@@ -175,7 +186,8 @@ export function defaultConfig(): McpxConfig {
     clients: {},
     projects: {},
     plugins: {},
-    marketplaces: ensureDefaultMarketplaces(undefined)
+    marketplaces: ensureDefaultMarketplaces(undefined),
+    secrets: { backend: "file" }
   };
 }
 
@@ -219,9 +231,7 @@ export function loadConfig(configPath = getConfigPath()): McpxConfig {
 
   const clientEntries: Partial<Record<ClientId, McpxConfig["clients"][ClientId]>> = {};
   for (const [key, value] of Object.entries(parsed.data.clients)) {
-    if (["claude", "claude-desktop", "codex", "cursor", "cline", "opencode", "kiro", "vscode", "vscode-insiders", "qwen", "openclaw", "hermes"].includes(key)) {
-      clientEntries[key as ClientId] = value;
-    }
+    clientEntries[key as ClientId] = value;
   }
 
   const servers = Object.fromEntries(
@@ -230,12 +240,18 @@ export function loadConfig(configPath = getConfigPath()): McpxConfig {
 
   return repairConfig({
     schemaVersion: 1,
+    consumers: parsed.data.consumers,
+    packages: parsed.data.packages,
+    revision: parsed.data.revision,
+    harnesses: parsed.data.harnesses,
+    origins: parsed.data.origins,
     gateway: parsed.data.gateway,
     servers,
     clients: clientEntries,
     projects: parsed.data.projects,
     plugins: parsed.data.plugins,
-    marketplaces: ensureDefaultMarketplaces(parsed.data.marketplaces)
+    marketplaces: ensureDefaultMarketplaces(parsed.data.marketplaces),
+    secrets: parsed.data.secrets
   });
 }
 

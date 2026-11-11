@@ -9,6 +9,13 @@ import { loadManagedIndex } from "../src/core/managed-index.js";
 import { getManagedIndexPath } from "../src/core/paths.js";
 import { installClients, isolatedHost, setupTempEnv } from "./helpers.js";
 
+function resolvedSpec(spec: any): any {
+  const copy = structuredClone(spec);
+  const values = copy.transport === "http" ? copy.headers : copy.env;
+  for (const key of Object.keys(values ?? {})) values[key] = new SecretsManager().resolveMaybeSecret(values[key]);
+  return copy;
+}
+
 describe("sync engine", () => {
   const cleanups: Array<() => void> = [];
   let originalPlatform: PropertyDescriptor | undefined;
@@ -164,7 +171,7 @@ describe("sync engine", () => {
     expect(Object.keys(managed.managed.vscode?.entries ?? {})).toEqual(["circleback (mcpx)"]);
   });
 
-  it("prunes orphaned (mcpx) entries not tracked in the managed index", () => {
+  it("preserves untracked entries even when their names end in (mcpx)", () => {
     const env = setupTempEnv("mcpx-sync-orphaned-");
     cleanups.push(env.restore);
 
@@ -206,7 +213,7 @@ describe("sync engine", () => {
     };
 
     expect(synced.servers["vercel (mcpx)"]).toBeDefined();
-    expect(synced.servers["ghost (mcpx)"]).toBeUndefined();
+    expect(synced.servers["ghost (mcpx)"]).toBeDefined();
     expect(synced.servers.unmanaged).toBeUndefined();
     expect(synced.servers["unmanaged (mcpx)"]).toBeDefined();
   });
@@ -490,7 +497,7 @@ describe("sync engine", () => {
         serverName: "stitch"
       })
     ]);
-    expect(config.servers.stitch).toEqual({
+    expect(resolvedSpec(config.servers.stitch)).toEqual({
       transport: "stdio",
       command: "npx",
       args: ["-y", "@openai/stitch-mcp"],
@@ -538,7 +545,7 @@ describe("sync engine", () => {
     const summary = syncAllClients(config, new SecretsManager(), { importScan: true, host: isolatedHost(env.root) });
 
     expect(summary.hasErrors).toBe(false);
-    expect(config.servers.docs).toEqual({
+    expect(resolvedSpec(config.servers.docs)).toEqual({
       transport: "http",
       url: "https://developers.openai.com/mcp",
       headers: {
@@ -639,7 +646,7 @@ describe("sync engine", () => {
         serverName: "stitch"
       })
     ]);
-    expect(config.servers.stitch).toEqual({
+    expect(resolvedSpec(config.servers.stitch)).toEqual({
       transport: "http",
       url: "https://example.com/canonical",
       enabled: true
@@ -1173,7 +1180,7 @@ describe("sync engine", () => {
         serverName: "local_server"
       })
     ]);
-    expect(config.servers.local_server).toEqual({
+    expect(resolvedSpec(config.servers.local_server)).toEqual({
       transport: "stdio",
       command: "npx",
       args: ["-y", "@example/local-server"],
@@ -1315,7 +1322,7 @@ describe("sync engine", () => {
         serverName: "remote_api"
       })
     ]);
-    expect(config.servers.remote_api).toEqual({
+    expect(resolvedSpec(config.servers.remote_api)).toEqual({
       transport: "http",
       url: "https://api.example.com/mcp",
       headers: { Authorization: "Bearer token123" },
@@ -1589,7 +1596,7 @@ describe("sync engine", () => {
         serverName: "kiro_remote"
       })
     ]);
-    expect(config.servers.kiro_remote).toEqual({
+    expect(resolvedSpec(config.servers.kiro_remote)).toEqual({
       transport: "http",
       url: "https://kiro.example.com/mcp",
       headers: {

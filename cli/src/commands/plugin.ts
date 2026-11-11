@@ -9,7 +9,7 @@ import { captureTelemetryEvent, durationBucket } from "../core/telemetry.js";
 import { promptLine, type CommandContext } from "./shared.js";
 import { recordTelemetryOperationFailure } from "./telemetry-support.js";
 
-const PLUGIN_COMPONENTS = ["mcpServers", "skills", "hooks", "agents", "commands"] as const;
+const PLUGIN_COMPONENTS = ["skills", "mcpServers"] as const;
 
 export function registerPlugin(program: Command, _ctx: CommandContext): void {
   const plugin = program.command("plugin").description("Manage plugins");
@@ -60,7 +60,7 @@ export function registerPlugin(program: Command, _ctx: CommandContext): void {
               rl.close();
             }
           }
-          p = await installMarketplacePlugin(source);
+          p = await installMarketplacePlugin(source, { enabled: options.enable !== false, name: options.name });
         } else {
           const { installPlugin } = await import("../core/plugin-manager.js");
           p = await installPlugin(source, { name: options.name, enabled: options.enable !== false });
@@ -90,7 +90,7 @@ export function registerPlugin(program: Command, _ctx: CommandContext): void {
   marketplace
     .command("add <source>")
     .option("--manifest <path>", "Marketplace manifest path inside the source")
-    .description("Add a Claude or Codex plugin marketplace")
+    .description("Add a Claude, Codex, or Cursor plugin marketplace")
     .action(async (source: string, options: { manifest?: string }) => {
       const startedAt = Date.now();
       try {
@@ -120,6 +120,7 @@ export function registerPlugin(program: Command, _ctx: CommandContext): void {
           const result = await refreshMarketplaceWithPlugins(marketplaceName);
           process.stdout.write(`Marketplace updated: ${marketplaceName} (${result.updated.length} plugin update(s))\n`);
           for (const error of result.errors) process.stderr.write(`Warning: ${error}\n`);
+          if (result.errors.length) process.exitCode = 1;
         }
         captureTelemetryEvent({
           name: "operation_completed",
@@ -165,6 +166,7 @@ export function registerPlugin(program: Command, _ctx: CommandContext): void {
 
   plugin
     .command("discover [query]")
+    .alias("browse")
     .option("--marketplace <name>", "Filter by marketplace")
     .option("--category <category>", "Filter by category")
     .description("Browse available marketplace plugins")

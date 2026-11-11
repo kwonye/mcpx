@@ -7,7 +7,7 @@ import {
   restartDaemon,
   runDaemonForeground,
   startDaemon,
-  stopDaemon
+  stopDaemonAsync
 } from "../core/daemon.js";
 import type { CommandContext } from "./shared.js";
 
@@ -26,8 +26,8 @@ export function registerDaemon(program: Command, _ctx: CommandContext): void {
   daemon
     .command("stop")
     .description("Stop background daemon")
-    .action(() => {
-      const result = stopDaemon();
+    .action(async () => {
+      const result = await stopDaemonAsync();
       process.stdout.write(`${result.message}\n`);
     });
 

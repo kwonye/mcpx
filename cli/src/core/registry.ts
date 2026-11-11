@@ -41,11 +41,15 @@ export function removeServer(config: McpxConfig, name: string, force = false): v
 export function updateServer(config: McpxConfig, name: string, spec: UpstreamServerSpec): void {
   validateServerName(name);
 
-  if (!config.servers[name]) {
+  const existing = config.servers[name];
+  if (!existing) {
     throw new Error(`Server \"${name}\" does not exist.`);
   }
 
-  config.servers[name] = normalizeServerSpecEnabled(spec);
+  const updated = spec.scope === undefined && existing.scope !== undefined
+    ? { ...spec, scope: existing.scope }
+    : spec;
+  config.servers[name] = normalizeServerSpecEnabled(updated);
 }
 
 export function setServerEnabled(config: McpxConfig, name: string, enabled: boolean): void {
@@ -61,9 +65,7 @@ export function setServerEnabled(config: McpxConfig, name: string, enabled: bool
 }
 
 export function getGatewayTokenSecretName(config: McpxConfig): string {
-  if (!config.gateway.tokenRef.startsWith("secret://")) {
-    return "local_gateway_token";
-  }
+  if (!/^secret:\/\/[A-Za-z0-9._-]+$/.test(config.gateway.tokenRef)) throw new Error("Invalid gateway token reference");
 
   return config.gateway.tokenRef.slice("secret://".length) || "local_gateway_token";
 }

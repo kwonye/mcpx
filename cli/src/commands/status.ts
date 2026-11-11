@@ -1,7 +1,7 @@
 import type { Command } from "commander";
 import type { CommandContext } from "./shared.js";
 import { loadStatusReport, printStatusReportText } from "./status-format.js";
-import { runInteractiveStatusMenu } from "./status-interactive.js";
+import { runManagementTui } from "../core/tui.js";
 
 export function registerStatus(program: Command, { cliPath }: CommandContext): void {
   program
@@ -19,7 +19,7 @@ export function registerStatus(program: Command, { cliPath }: CommandContext): v
 
       const interactive = (options.interactive ?? true) && process.stdin.isTTY && process.stdout.isTTY;
       if (interactive) {
-        await runInteractiveStatusMenu(cliPath);
+        await runManagementTui(cliPath);
         return;
       }
 

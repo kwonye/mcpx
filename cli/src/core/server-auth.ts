@@ -65,8 +65,14 @@ export function resolveAuthTarget(spec: UpstreamServerSpec, header?: string, env
 
   return {
     kind: "env",
-    key: requireNonEmpty(env, "Env var name")
+    key: requireEnvName(env)
   };
+}
+
+function requireEnvName(value: string | undefined): string {
+  const name = requireNonEmpty(value, "Env var name");
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) throw new Error("Invalid environment variable name.");
+  return name;
 }
 
 export function applyAuthReference(spec: UpstreamServerSpec, target: AuthTarget, secretRef: string): void {
@@ -76,6 +82,9 @@ export function applyAuthReference(spec: UpstreamServerSpec, target: AuthTarget,
     }
 
     const headers = { ...(spec.headers ?? {}) };
+    for (const key of Object.keys(headers)) {
+      if (key.toLowerCase() === target.key.toLowerCase()) delete headers[key];
+    }
     headers[target.key] = secretRef;
     spec.headers = headers;
     return;

@@ -46,6 +46,8 @@ import { registerUpdate } from "./commands/update.js";
 import { registerProjects } from "./commands/project.js";
 import { registerPlugin } from "./commands/plugin.js";
 import { registerTelemetry } from "./commands/telemetry.js";
+import { acquireCommandLease, registerManage, releaseCommandLease } from "./commands/manage.js";
+import { captureException, shutdown as shutdownAnalytics } from "./core/analytics.js";
 
 export async function runCli(argv = process.argv): Promise<void> {
   if (process.env.MCPX_UPDATE_CHILD === "1") {
@@ -146,10 +148,14 @@ export async function runCli(argv = process.argv): Promise<void> {
   registerProjects(program, ctx);
   registerPlugin(program, ctx);
   registerTelemetry(program, ctx);
+  registerManage(program, ctx);
 
+  const lease = await acquireCommandLease(argv, cliPath);
+  let commandFailed = false;
   try {
     await program.parseAsync(argv);
   } catch (error) {
+    commandFailed = true;
     const operation = telemetryOperation(rawArgs);
     if (operation) {
       captureTelemetryEvent({
@@ -164,13 +170,16 @@ export async function runCli(argv = process.argv): Promise<void> {
     });
     throw error;
   } finally {
+    await releaseCommandLease(lease, !commandFailed && !process.exitCode);
     await flushTelemetry(150);
     await flushNodeErrorReporting(150);
+    await shutdownAnalytics();
   }
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(fs.realpathSync(process.argv[1])).href) {
   void runCli().catch((error) => {
+    captureException(error);
     if (error instanceof ConfigLoadError) {
       process.stderr.write(`Config error: ${error.message}\n`);
       if (error.backupPath) {

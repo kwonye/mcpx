@@ -6,6 +6,7 @@ import type {
   ClientAdapter,
   ClientImportScanResult,
   ClientInstallation,
+  HarnessDescriptor,
   ManagedIndex,
   McpxConfig,
   PluginSyncInput,
@@ -14,11 +15,11 @@ import type {
   SyncClientOptions,
   SyncResult
 } from "../types.js";
-import { syncPluginsToClient } from "../core/plugin-projections.js";
+import { syncProjectPluginSkills } from "../core/plugin-projections.js";
 import { projectSkillsToDir } from "../core/skill-projections.js";
 import { writeJsonAtomic } from "../util/fs.js";
 import { rawEntrySchema, type ClientDefinition, type ConfigFormat } from "./catalogue.js";
-import { findOnPath, type HostContext } from "./host.js";
+import { findOnPath, joinPath, type HostContext } from "./host.js";
 import {
   buildImportSkip,
   detectManagedEntryDrift,
@@ -78,20 +79,59 @@ function containerOf(doc: JsonObject, keys: string[]): JsonObject {
 
 /** Generic adapter driven entirely by a catalogue definition. */
 export class CatalogueAdapter implements ClientAdapter {
-  readonly id;
+  readonly id: string;
   readonly displayName: string;
+  readonly descriptor: HarnessDescriptor;
 
-  constructor(private readonly def: ClientDefinition, private readonly host: HostContext) {
-    this.id = def.id;
+  /**
+   * @param projectPath When set, this is the project-scoped installation of the client
+   * (config and skills under the project root, id `<client>@<projectPath>`).
+   */
+  constructor(private readonly def: ClientDefinition, private readonly host: HostContext, readonly projectPath?: string) {
+    this.id = projectPath ? `${def.id}@${path.resolve(projectPath)}` : def.id;
     this.displayName = def.displayName;
+    this.descriptor = {
+      label: def.displayName,
+      projectConfig: def.projectConfig,
+      projectSkills: def.projectSkills,
+      skillLayout: def.skillsLayout,
+      pluginComponents: def.pluginComponents
+    };
+  }
+
+  /** The project-scoped installation of this client, or null when the client has no project config. */
+  forProject(projectPath: string): CatalogueAdapter | null {
+    return this.def.projectConfig ? new CatalogueAdapter(this.def, this.host, projectPath) : null;
+  }
+
+  private configCandidates(): string[] {
+    if (this.projectPath && this.def.projectConfig) return [joinPath(this.host, this.projectPath, this.def.projectConfig)];
+    return this.def.configPaths(this.host);
   }
 
   detectConfigPath(): string {
-    const candidates = this.def.configPaths(this.host);
+    const candidates = this.configCandidates();
     return candidates.find((candidate) => this.host.exists(candidate)) ?? candidates[0];
   }
 
+  skillDirectory(): string {
+    if (this.projectPath) return joinPath(this.host, this.projectPath, this.def.projectSkills ?? `.${this.def.id}/skills`);
+    return this.def.skillsDir(this.host);
+  }
+
+  additionalSkillDirectories(): string[] {
+    return this.projectPath ? [] : this.def.additionalSkillDirs?.(this.host) ?? [];
+  }
+
+  managedName(serverName: string): string {
+    return this.def.managedName?.(serverName) ?? `${serverName} (mcpx)`;
+  }
+
   detectInstallation(): ClientInstallation {
+    if (this.projectPath) {
+      const found = [this.detectConfigPath(), this.skillDirectory()].find((marker) => this.host.exists(marker));
+      return found ? { installed: true, evidence: found } : { installed: false };
+    }
     const markers = [...this.def.configPaths(this.host), ...this.def.installMarkers(this.host)];
     const found = markers.find((marker) => this.host.exists(marker));
     if (found) {
@@ -111,11 +151,15 @@ export class CatalogueAdapter implements ClientAdapter {
   }
 
   syncSkills(skills: Skill[]): void {
-    projectSkillsToDir(this.def.skillsDir(this.host), skills, this.def.skillsLayout);
+    projectSkillsToDir(this.skillDirectory(), skills, this.def.skillsLayout);
   }
 
   syncPlugins(plugins: PluginSyncInput[]): PluginSyncResult {
-    return syncPluginsToClient(this.id, plugins);
+    // Plugin skills are projected only into clients that declare them (not e.g. Claude Desktop).
+    if (!this.def.pluginComponents?.includes("skills")) {
+      return { clientId: this.id, status: "SKIPPED", projectedDirs: [], unsupported: ["skills", "hooks", "agents", "commands"] };
+    }
+    return syncProjectPluginSkills(this.id, this.skillDirectory(), plugins);
   }
 
   scanForImports(_config: McpxConfig, managedIndex: ManagedIndex): ClientImportScanResult {
@@ -154,13 +198,16 @@ export class CatalogueAdapter implements ClientAdapter {
   syncGateway(_config: McpxConfig, options: SyncClientOptions): SyncResult {
     const configPath = this.detectConfigPath();
     try {
+      const blocked = this.def.syncBlocker?.(configPath, this.host);
+      if (blocked) return errorResult(this.id, configPath, blocked);
       const doc = readDocument(this.def.format, configPath, this.displayName);
       const servers = containerOf(doc, this.def.container);
       removeSourceEntries(servers, options.sourceEntriesToRemove);
 
-      const managedNames = options.managedEntries.map((entry) => entry.name);
+      const managedEntries = this.def.managedName ? this.renameEntries(options.managedEntries) : options.managedEntries;
+      const managedNames = managedEntries.map((entry) => entry.name);
       // Disabled servers are omitted (absent from the client) unless the client has a native enabled flag.
-      const written = this.def.keepDisabled ? options.managedEntries : options.managedEntries.filter((entry) => entry.enabled);
+      const written = this.def.keepDisabled ? managedEntries : managedEntries.filter((entry) => entry.enabled);
       const serverEntries = Object.fromEntries(written.map((entry) => [entry.name, this.def.toEntry(entry, this.host)]));
       const writtenNames = Object.keys(serverEntries);
 
@@ -177,18 +224,36 @@ export class CatalogueAdapter implements ClientAdapter {
 
       pruneStaleManagedEntries(options.managedIndex, this.id, servers, writtenNames);
       Object.assign(servers, serverEntries);
-      this.def.afterMerge?.(doc, options, managedNames);
+      // Global-config reconciliation (e.g. Claude's per-project disabled lists) never runs on a project file.
+      if (!this.projectPath) this.def.afterMerge?.(doc, options, managedNames);
 
       writeDocument(this.def.format, configPath, doc);
+      // Fingerprint entries as the client will read them back (TOML/YAML round-trips included).
+      const onDisk = containerOf(readDocument(this.def.format, configPath, this.displayName), this.def.container);
       setManagedEntries(
         options.managedIndex,
         this.id,
         configPath,
-        Object.fromEntries(Object.entries(serverEntries).map(([name, entry]) => [name, JSON.stringify(entry)]))
+        Object.fromEntries(Object.entries(serverEntries).map(([name, entry]) => [name, JSON.stringify(entry)])),
+        onDisk
       );
       return { ...okResult(this.id, configPath), driftedEntries: driftedNames.length > 0 ? driftedNames : undefined };
     } catch (error) {
       return errorResult(this.id, configPath, (error as Error).message);
     }
+  }
+
+  /** Apply the client's native naming; refuse names that collide after normalization. */
+  private renameEntries(entries: SyncClientOptions["managedEntries"]): SyncClientOptions["managedEntries"] {
+    const seen = new Set<string>();
+    return entries.map((entry) => {
+      const name = this.managedName(entry.name.replace(/ \(mcpx\)$/, ""));
+      const identity = name.replace(/-/g, "_");
+      if (seen.has(identity)) {
+        throw new Error(`${this.displayName} server names collide after normalization; rename the integrations.`);
+      }
+      seen.add(identity);
+      return { ...entry, name };
+    });
   }
 }

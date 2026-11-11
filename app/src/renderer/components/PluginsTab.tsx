@@ -1,5 +1,5 @@
-import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
-import { SkillsTab, type SkillsTabHandle } from "./SkillsTab";
+import { useEffect, useMemo, useState } from "react";
+import { SkillsTab } from "./SkillsTab";
 import { Toggle } from "./ui/Toggle";
 import { ConfirmDialog } from "./ConfirmDialog";
 import type {
@@ -12,13 +12,7 @@ import type {
 
 type View = "discover" | "installed" | "marketplaces" | "skills";
 
-export interface PluginsTabHandle {
-  isDirty: boolean;
-  save: () => Promise<boolean>;
-  discard: () => void;
-}
-
-export const PluginsTab = forwardRef<PluginsTabHandle>(function PluginsTab(_props, ref) {
+export function PluginsTab() {
   const [view, setView] = useState<View>("discover");
   const [plugins, setPlugins] = useState<ManagedPlugin[]>([]);
   const [marketplaces, setMarketplaces] = useState<ManagedMarketplace[]>([]);
@@ -33,6 +27,9 @@ export const PluginsTab = forwardRef<PluginsTabHandle>(function PluginsTab(_prop
   const [installingId, setInstallingId] = useState<string | null>(null);
   const [installInput, setInstallInput] = useState("");
   const [installingSource, setInstallingSource] = useState(false);
+  const [manifestPath, setManifestPath] = useState("");
+  const [busyPlugins, setBusyPlugins] = useState<Set<string>>(() => new Set());
+  const [notice, setNotice] = useState<string | null>(null);
   const [marketplaceInput, setMarketplaceInput] = useState("");
   const [addingMarketplace, setAddingMarketplace] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
@@ -43,8 +40,6 @@ export const PluginsTab = forwardRef<PluginsTabHandle>(function PluginsTab(_prop
     destructive?: boolean;
     action: () => Promise<void>;
   } | null>(null);
-  const [pendingView, setPendingView] = useState<View | null>(null);
-  const skillsRef = useRef<SkillsTabHandle>(null);
 
   async function loadPlugins() {
     try {
@@ -67,12 +62,9 @@ export const PluginsTab = forwardRef<PluginsTabHandle>(function PluginsTab(_prop
     setLoadingCatalog(true);
     setError(null);
     try {
-      const [available] = await Promise.all([
-        window.mcpx.plugins.marketplaces.browse(),
-        loadMarketplaces(),
-        loadPlugins(),
-      ]);
+      const available = await window.mcpx.plugins.marketplaces.browse();
       setListings(available as MarketplaceListing[]);
+      await Promise.all([loadMarketplaces(), loadPlugins()]);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
     } finally {
@@ -142,23 +134,20 @@ export const PluginsTab = forwardRef<PluginsTabHandle>(function PluginsTab(_prop
     }
   }
 
-  async function togglePlugin(plugin: ManagedPlugin) {
+  async function managePlugin(id: string, work: () => Promise<unknown>) {
+    setBusyPlugins(current => new Set(current).add(id));
     setError(null);
-    try {
-      await (plugin.enabled ? window.mcpx.plugins.disable(plugin.id) : window.mcpx.plugins.enable(plugin.id));
-      await loadPlugins();
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught));
-    }
+    try { await work(); await loadPlugins(); }
+    catch (caught) { setError(caught instanceof Error ? caught.message : String(caught)); }
+    finally { setBusyPlugins(current => { const next = new Set(current); next.delete(id); return next; }); }
+  }
+
+  async function togglePlugin(plugin: ManagedPlugin) {
+    await managePlugin(plugin.id, () => plugin.enabled ? window.mcpx.plugins.disable(plugin.id) : window.mcpx.plugins.enable(plugin.id));
   }
 
   async function approve(pluginId: string, component: string) {
-    try {
-      await window.mcpx.plugins.approve(pluginId, component);
-      await loadPlugins();
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught));
-    }
+    await managePlugin(pluginId, () => window.mcpx.plugins.approve(pluginId, component));
   }
 
   async function uninstall(plugin: ManagedPlugin) {
@@ -167,42 +156,20 @@ export const PluginsTab = forwardRef<PluginsTabHandle>(function PluginsTab(_prop
       message: `Uninstall plugin "${plugin.name}"? Plugin data will be kept.`,
       confirmLabel: "Uninstall",
       destructive: true,
-      action: async () => {
-        try {
-          await window.mcpx.plugins.uninstall(plugin.id, true);
-          await loadCatalog();
-        } catch (caught) {
-          setError(caught instanceof Error ? caught.message : String(caught));
-        }
-      },
+      action: async () => { await managePlugin(plugin.id, () => window.mcpx.plugins.uninstall(plugin.id, { keepData: true })); },
     });
   }
 
   async function update(plugin: ManagedPlugin) {
-    try {
-      await window.mcpx.plugins.update(plugin.id);
-      await loadPlugins();
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught));
-    }
+    await managePlugin(plugin.id, () => window.mcpx.plugins.update(plugin.id));
   }
 
   async function togglePin(plugin: ManagedPlugin) {
-    try {
-      await (plugin.pinned ? window.mcpx.plugins.unpin(plugin.id) : window.mcpx.plugins.pin(plugin.id));
-      await loadPlugins();
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught));
-    }
+    await managePlugin(plugin.id, () => plugin.pinned ? window.mcpx.plugins.unpin(plugin.id) : window.mcpx.plugins.pin(plugin.id));
   }
 
   async function rollback(plugin: ManagedPlugin) {
-    try {
-      await window.mcpx.plugins.rollback(plugin.id);
-      await loadPlugins();
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught));
-    }
+    await managePlugin(plugin.id, () => window.mcpx.plugins.rollback(plugin.id));
   }
 
   async function addMarketplace(event: React.FormEvent) {
@@ -210,8 +177,9 @@ export const PluginsTab = forwardRef<PluginsTabHandle>(function PluginsTab(_prop
     if (!marketplaceInput.trim()) return;
     setAddingMarketplace(true);
     try {
-      await window.mcpx.plugins.marketplaces.add(marketplaceInput.trim());
+      await window.mcpx.plugins.marketplaces.add(marketplaceInput.trim(), manifestPath.trim() || undefined);
       setMarketplaceInput("");
+      setManifestPath("");
       await loadCatalog();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
@@ -222,12 +190,24 @@ export const PluginsTab = forwardRef<PluginsTabHandle>(function PluginsTab(_prop
 
   async function refreshMarketplace(name: string) {
     try {
-      await window.mcpx.plugins.marketplaces.refresh(name);
+      const result = await window.mcpx.plugins.marketplaces.refresh(name);
       await loadCatalog();
+      if (result.errors.length) setError(result.errors.join("; "));
+      else setNotice(`Marketplace refreshed; ${result.updated.length} plugin update(s).`);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
       await loadMarketplaces();
     }
+  }
+
+  async function refreshCatalogs() {
+    setLoadingCatalog(true); setError(null);
+    try {
+      const results = await Promise.allSettled(marketplaces.map(marketplace => window.mcpx.plugins.marketplaces.refresh(marketplace.name)));
+      await loadCatalog();
+      const errors = results.flatMap(result => result.status === "rejected" ? [String(result.reason)] : result.value.errors);
+      if (errors.length) setError(errors.join("; "));
+    } finally { setLoadingCatalog(false); }
   }
 
   async function removeMarketplace(marketplace: ManagedMarketplace) {
@@ -264,53 +244,12 @@ export const PluginsTab = forwardRef<PluginsTabHandle>(function PluginsTab(_prop
     });
   }
 
-  function selectView(nextView: View): void {
-    if (nextView === view) return;
-    if (view === "skills" && skillsRef.current?.isDirty) {
-      setPendingView(nextView);
-      return;
-    }
-    setView(nextView);
-  }
-
-  const saveAndSelectView = async (): Promise<void> => {
-    if (!pendingView) return;
-    const nextView = pendingView;
-    const saved = await skillsRef.current?.save();
-    if (saved === false) return;
-    setPendingView(null);
-    setView(nextView);
-  };
-
-  const discardAndSelectView = (): void => {
-    if (!pendingView) return;
-    const nextView = pendingView;
-    skillsRef.current?.discard();
-    setPendingView(null);
-    setView(nextView);
-  };
-
-  useImperativeHandle(ref, () => ({
-    get isDirty() {
-      return Boolean(view === "skills" && skillsRef.current?.isDirty);
-    },
-    save: async () => {
-      const saved = await (skillsRef.current?.save() ?? Promise.resolve(true));
-      if (saved) setPendingView(null);
-      return saved;
-    },
-    discard: () => {
-      skillsRef.current?.discard();
-      setPendingView(null);
-    }
-  }), [view]);
-
-  const gatedComponents = ["hooks", "commands", "mcpServers"] as const;
+  const gatedComponents = ["mcpServers"] as const;
 
   return (
     <div className="plugins-tab">
       <div className="page-header page-header--split">
-        <h1 className="page-title">Plugins</h1>
+        <h1 className="page-title">Library</h1>
       </div>
       <ConfirmDialog
         open={confirmation !== null}
@@ -325,31 +264,22 @@ export const PluginsTab = forwardRef<PluginsTabHandle>(function PluginsTab(_prop
           if (action) void action();
         }}
       />
-      <ConfirmDialog
-        open={pendingView !== null}
-        title="Unsaved changes"
-        message="Save your changes before leaving Shared Skills?"
-        initialFocus="cancel"
-        confirmLabel="Save"
-        secondaryLabel="Discard"
-        onConfirm={() => void saveAndSelectView()}
-        onSecondary={discardAndSelectView}
-        onCancel={() => setPendingView(null)}
-      />
 
       <div className="plugin-view-tabs" role="tablist" aria-label="Plugin views">
         {(["discover", "installed", "marketplaces", "skills"] as View[]).map((item) => (
-          <button key={item} role="tab" aria-selected={view === item} className="plugin-view-tab" data-active={view === item} onClick={() => selectView(item)}>
+          <button key={item} role="tab" aria-selected={view === item} className="plugin-view-tab" data-active={view === item} onClick={() => setView(item)}>
             {item === "skills" ? "Shared Skills" : item[0].toUpperCase() + item.slice(1)}
             {item === "installed" && plugins.length > 0 ? ` (${plugins.length})` : ""}
           </button>
         ))}
       </div>
 
-      {error && <div className="feedback-message error">{error}</div>}
+      {error && <div className="feedback-message error" role="alert">{error}</div>}
+      {notice && <div className="feedback-message" role="status">{notice}</div>}
 
       {view === "discover" && (
         <section className="plugin-marketplace-view">
+          {marketplaces.some(marketplace => marketplace.error) && <div className="feedback-message" role="status">Some marketplaces could not be refreshed. <button className="btn btn-sm btn-secondary" onClick={() => setView("marketplaces")}>View marketplace errors</button></div>}
           <div className="plugin-browser-controls">
             <input className="glass-input" type="search" placeholder="Search plugins" value={query} onChange={(event) => setQuery(event.target.value)} />
             <select className="glass-input" aria-label="Marketplace" value={marketplaceFilter} onChange={(event) => setMarketplaceFilter(event.target.value)}>
@@ -360,7 +290,7 @@ export const PluginsTab = forwardRef<PluginsTabHandle>(function PluginsTab(_prop
               <option value="">All categories</option>
               {categories.map((category) => <option key={category} value={category}>{category}</option>)}
             </select>
-            <button className="btn btn-secondary" onClick={() => void loadCatalog()} disabled={loadingCatalog}>Refresh</button>
+            <button className="btn btn-secondary" onClick={() => void refreshCatalogs()} disabled={loadingCatalog}>Refresh catalogs</button>
           </div>
           {loadingCatalog ? <div className="loading-state">Refreshing marketplaces…</div> : (
             <div className="plugin-discovery-grid">
@@ -371,11 +301,12 @@ export const PluginsTab = forwardRef<PluginsTabHandle>(function PluginsTab(_prop
                     {listing.installed && <span className="plugin-badge plugin-badge--success">Installed</span>}
                   </div>
                   <p>{listing.description || "Inspect this plugin to see its capabilities."}</p>
+                  {listing.compatibilityError && <p className="marketplace-card__error">{listing.compatibilityError}</p>}
                   <div className="plugin-discovery-card__meta">
                     <span>{marketplaces.find((item) => item.name === listing.marketplace)?.displayName ?? listing.marketplace}</span>
                     {listing.category && <span>{listing.category}</span>}
                     <span className={`plugin-badge ${listing.compatible ? "plugin-badge--success" : "plugin-badge--warning"}`}>
-                      {listing.compatible ? "Compatible" : "Unsupported"}
+                      {listing.compatible ? listing.unsupportedCapabilities.length ? "Partial support" : "Compatible" : "Unsupported"}
                     </span>
                   </div>
                 </button>
@@ -415,13 +346,13 @@ export const PluginsTab = forwardRef<PluginsTabHandle>(function PluginsTab(_prop
           {plugins.length === 0 && <div className="empty-state"><p>No plugins installed.</p></div>}
           <div className="plugin-list">
             {plugins.map((plugin) => (
-              <div key={plugin.id} className="plugin-card">
+              <div key={plugin.id} className="plugin-card" aria-busy={busyPlugins.has(plugin.id)}>
                 <div className="plugin-card__header"><div className="plugin-card__title-row"><span className="plugin-card__name">{plugin.name}</span><span className="plugin-card__version">v{plugin.version}</span><span className={`plugin-card__status ${plugin.status === "error" ? "plugin-card__status--error" : ""}`}>{plugin.status}</span></div><div className="plugin-card__source">{plugin.marketplace ? `${plugin.marketplace.pluginName}@${plugin.marketplace.name}` : plugin.source}</div></div>
-                <div className="plugin-card__controls"><Toggle id={`plugin-enabled-${plugin.id}`} checked={plugin.enabled} onChange={() => void togglePlugin(plugin)} label={`${plugin.enabled ? "Disable" : "Enable"} ${plugin.name}`} /><button type="button" className="btn btn-sm btn-secondary" onClick={() => toggleExpanded(plugin.id)}>{expanded.has(plugin.id) ? "Less" : "More"}</button></div>
+                <div className="plugin-card__controls"><Toggle id={`plugin-enabled-${plugin.id}`} checked={plugin.enabled} disabled={busyPlugins.has(plugin.id)} onChange={() => void togglePlugin(plugin)} label={`${plugin.enabled ? "Disable" : "Enable"} ${plugin.name}`} /><button type="button" className="btn btn-sm btn-secondary" onClick={() => toggleExpanded(plugin.id)}>{expanded.has(plugin.id) ? "Less" : "More"}</button></div>
                 {expanded.has(plugin.id) && <div className="plugin-card__detail">
-                   <div className="plugin-card__components">{Object.entries(plugin.components).filter(([, enabled]) => enabled).map(([key]) => { const needsApproval = gatedComponents.includes(key as typeof gatedComponents[number]) && (plugin.approvals?.[key as PluginComponent] === false || (key === "hooks" && plugin.approvals?.[key as PluginComponent] !== true)); return <span key={key} className="plugin-component-chip">{key}{needsApproval && <button type="button" className="plugin-approve-btn" onClick={() => void approve(plugin.id, key)}>Approve</button>}</span>; })}</div>
+                   <div className="plugin-card__components">{Object.entries(plugin.components).filter(([, enabled]) => enabled).map(([key]) => { const needsApproval = gatedComponents.includes(key as typeof gatedComponents[number]) && (plugin.approvals?.[key as PluginComponent] === false); return <span key={key} className="plugin-component-chip">{key}{needsApproval && <button type="button" className="plugin-approve-btn" onClick={() => void approve(plugin.id, key)}>Approve</button>}</span>; })}</div>
                   {plugin.updateError && <div className="feedback-message error">Update failed: {plugin.updateError}</div>}
-                  <div className="plugin-card__footer"><button type="button" className="btn btn-sm btn-secondary" onClick={() => void update(plugin)}>Update</button><button type="button" className="btn btn-sm btn-secondary" onClick={() => void togglePin(plugin)}>{plugin.pinned ? "Unpin" : "Pin"}</button>{plugin.previous && <button type="button" className="btn btn-sm btn-secondary" onClick={() => void rollback(plugin)}>Rollback</button>}<button type="button" className="btn btn-sm btn-danger" onClick={() => void uninstall(plugin)}>Uninstall</button></div>
+                  <div className="plugin-card__footer"><button type="button" className="btn btn-sm btn-secondary" disabled={plugin.pinned || busyPlugins.has(plugin.id)} onClick={() => void update(plugin)}>Update</button><button type="button" className="btn btn-sm btn-secondary" disabled={busyPlugins.has(plugin.id)} onClick={() => void togglePin(plugin)}>{plugin.pinned ? "Unpin" : "Pin"}</button>{plugin.previous && <button type="button" className="btn btn-sm btn-secondary" disabled={busyPlugins.has(plugin.id)} onClick={() => void rollback(plugin)}>Rollback</button>}<button type="button" className="btn btn-sm btn-danger" disabled={busyPlugins.has(plugin.id)} onClick={() => void uninstall(plugin)}>Uninstall</button></div>
                 </div>}
               </div>
             ))}
@@ -431,8 +362,9 @@ export const PluginsTab = forwardRef<PluginsTabHandle>(function PluginsTab(_prop
 
       {view === "marketplaces" && (
         <section className="marketplaces-view">
-          <form className="plugin-install-row" onSubmit={addMarketplace}>
+          <form className="plugin-install-row marketplace-add-form" onSubmit={addMarketplace}>
             <input className="glass-input plugin-install-input" placeholder="GitHub owner/repo, git URL, local path, or marketplace.json URL" value={marketplaceInput} onChange={(event) => setMarketplaceInput(event.target.value)} />
+            <input className="glass-input" aria-label="Marketplace manifest path" placeholder="Manifest path (optional)" value={manifestPath} onChange={event => setManifestPath(event.target.value)} />
             <button className="btn btn-primary" disabled={addingMarketplace || !marketplaceInput.trim()}>{addingMarketplace ? "Adding…" : "Add marketplace"}</button>
           </form>
           <div className="marketplace-list">
@@ -446,9 +378,7 @@ export const PluginsTab = forwardRef<PluginsTabHandle>(function PluginsTab(_prop
         </section>
       )}
 
-      <div hidden={view !== "skills"}>
-        <SkillsTab ref={skillsRef} />
-      </div>
+      {view === "skills" && <SkillsTab />}
     </div>
   );
-});
+}

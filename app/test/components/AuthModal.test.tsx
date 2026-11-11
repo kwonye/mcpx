@@ -66,7 +66,21 @@ describe("AuthModal", () => {
 
     expect(screen.queryByText("Sign in with browser")).toBeNull();
     // Manual form is shown by default for stdio servers (no OAuth option to disclose behind).
-    expect(screen.getByLabelText(/Header name/)).toBeDefined();
+    expect(screen.getByLabelText(/Environment variable/)).toBeDefined();
+  });
+
+  it("saves stdio credentials as environment variables without a header or bearer prefix", async () => {
+    const onConfigured = vi.fn();
+    (window.mcpx.invoke as ReturnType<typeof vi.fn>).mockResolvedValue({ configured: true });
+    render(<AuthModal serverName="github" transport="stdio" onClose={vi.fn()} onConfigured={onConfigured} />);
+    expect((screen.getByText("Save token") as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText("Environment variable"), { target: { value: "GITHUB_TOKEN" } });
+    fireEvent.change(screen.getByLabelText("Auth value"), { target: { value: "private-token" } });
+    await act(async () => { fireEvent.click(screen.getByText("Save token")); });
+    expect(window.mcpx.invoke).toHaveBeenCalledWith(IPC.CONFIGURE_AUTH, {
+      serverName: "github", envName: "GITHUB_TOKEN", authValue: "private-token", secretName: undefined
+    });
+    expect(onConfigured).toHaveBeenCalledOnce();
   });
 
   it("calls startOauth when the browser sign-in button is clicked", async () => {

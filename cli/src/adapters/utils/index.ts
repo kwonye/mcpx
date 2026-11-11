@@ -1,3 +1,6 @@
+import fs from "node:fs";
+import TOML from "@iarna/toml";
+import YAML from "yaml";
 import type {
   ClientId,
   ClientImportScanResult,
@@ -27,15 +30,14 @@ export function pruneStaleManagedEntries(
   const managedNames = getManagedEntryNames(managedIndex, clientId);
   for (const name of managedNames) {
     if (!keep.has(name)) {
+      if (detectManagedEntryDrift(managedIndex, clientId, name, servers[name])) {
+        throw new Error(`Managed entry "${name}" was edited locally. Preserve it or explicitly reapply the managed version.`);
+      }
       delete servers[name];
     }
   }
 
-  for (const name of Object.keys(servers)) {
-    if (!keep.has(name) && name.endsWith(" (mcpx)")) {
-      delete servers[name];
-    }
-  }
+
 }
 
 export function ensureManagedEntryWritable(
@@ -50,6 +52,7 @@ export function ensureManagedEntryWritable(
   }
 
   if (isManagedEntry(managedIndex, clientId, entryName)) {
+    if (detectManagedEntryDrift(managedIndex, clientId, entryName, existingValue)) return `Managed entry "${entryName}" was edited locally; sync paused.`;
     return null;
   }
 
@@ -79,7 +82,9 @@ export function setManagedEntries(
   managedIndex: ManagedIndex,
   clientId: ClientId,
   configPath: string,
-  entries: Record<string, string>
+  entries: Record<string, string>,
+  /** The server map as re-read from disk after writing; read heuristically when omitted. */
+  nativeServers?: Record<string, unknown>
 ): void {
   if (!managedIndex.managed[clientId]) {
     managedIndex.managed[clientId] = {
@@ -89,9 +94,14 @@ export function setManagedEntries(
   }
 
   managedIndex.managed[clientId].configPath = configPath;
+  const native = nativeServers ?? (() => {
+    const text = fs.readFileSync(configPath, "utf8");
+    const doc = (configPath.endsWith(".toml") ? TOML.parse(text) : /\.ya?ml$/.test(configPath) ? YAML.parse(text) : JSON.parse(text)) as Record<string, any>;
+    return doc.mcpServers ?? doc.mcp_servers ?? doc.servers ?? doc.mcp?.servers ?? doc.mcp ?? {};
+  })() as Record<string, unknown>;
   managedIndex.managed[clientId].entries = Object.fromEntries(
-    Object.entries(entries).map(([entryName, serializedEntry]) => [entryName, {
-      fingerprint: sha256(serializedEntry),
+    Object.keys(entries).filter(name => native[name] !== undefined).map(entryName => [entryName, {
+      fingerprint: sha256(JSON.stringify(native[entryName])),
       lastSyncedAt: new Date().toISOString()
     }])
   );

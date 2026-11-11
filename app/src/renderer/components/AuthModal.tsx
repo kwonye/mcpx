@@ -30,9 +30,9 @@ export function AuthModal({ serverName, transport, oauthSupport: initialOauthSup
   const [now, setNow] = useState(() => Date.now());
 
   const [showManualForm, setShowManualForm] = useState(transport !== "http");
-  const [headerName, setHeaderName] = useState("Authorization");
+  const [headerName, setHeaderName] = useState(transport === "http" ? "Authorization" : "");
   const [authValue, setAuthValue] = useState("");
-  const [secretName, setSecretName] = useState(`auth_${serverName.toLowerCase().replace(/[^a-z0-9._-]/g, "_")}_header_authorization`);
+  const [secretName, setSecretName] = useState("");
   const [manualSubmitting, setManualSubmitting] = useState(false);
   const [manualError, setManualError] = useState<string | null>(null);
 
@@ -98,7 +98,9 @@ export function AuthModal({ serverName, transport, oauthSupport: initialOauthSup
   }, [oauthPhase, expiresAt]);
 
   async function handleOauthLogin() {
+    if (oauthRunning) return;
     setOauthError(null);
+    setOauthPhase("discovering");
     try {
       await window.mcpx.startOauth(serverName);
       onConfigured();
@@ -128,7 +130,7 @@ export function AuthModal({ serverName, transport, oauthSupport: initialOauthSup
     try {
       await window.mcpx.invoke(IPC.CONFIGURE_AUTH, {
         serverName,
-        headerName: headerName.trim(),
+        ...(transport === "http" ? { headerName: headerName.trim() } : { envName: headerName.trim() }),
         authValue: authValue.trim(),
         secretName: secretName.trim() || undefined
       });
@@ -243,12 +245,13 @@ export function AuthModal({ serverName, transport, oauthSupport: initialOauthSup
               {showManualForm && (
                 <div className="modal-form">
                   <div className="form-field">
-                    <label htmlFor="auth-header-name">Header name</label>
+                    <label htmlFor="auth-header-name">{transport === "http" ? "Header name" : "Environment variable"}</label>
                     <input
                       id="auth-header-name"
                       className="glass-input modal-input"
                       type="text"
                       value={headerName}
+                      placeholder={transport === "stdio" ? "e.g. GITHUB_TOKEN" : undefined}
                       onChange={(e) => setHeaderName(e.target.value)}
                       disabled={manualSubmitting}
                     />
@@ -297,7 +300,7 @@ export function AuthModal({ serverName, transport, oauthSupport: initialOauthSup
                 type="button"
                 className="btn btn-primary"
                 onClick={handleConfigure}
-                disabled={manualSubmitting || !authValue.trim()}
+                disabled={manualSubmitting || !authValue.trim() || !headerName.trim()}
               >
                 {manualSubmitting ? "Configuring..." : "Save token"}
               </button>

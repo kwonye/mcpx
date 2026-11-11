@@ -3,6 +3,7 @@ import { createInterface } from "node:readline/promises";
 import { loadConfig } from "../core/config.js";
 import { mutateConfig } from "../core/config-store.js";
 import { rotateGatewayToken } from "../core/registry.js";
+import { capture } from "../core/analytics.js";
 import { SecretsManager, readSecretValueFromStdin } from "../core/secrets.js";
 import {
   applyAuthReference,
@@ -132,7 +133,7 @@ export function registerAuth(program: Command, _ctx: CommandContext): void {
     .option("--value <value>", "Auth value/token (if omitted, read from stdin)")
     .option("--secret-name <name>", "Override stored secret name")
     .option("--raw", "Do not auto-prefix Authorization values with Bearer")
-    .description("Store auth as an encrypted secret and bind it to an upstream server")
+    .description("Store auth in the active secret backend and bind it to an upstream server")
     .action(async (server: string, options: AuthSetOptions) => {
       const config = loadConfig();
       const spec = getServerSpecOrThrow(config, server);
@@ -148,6 +149,7 @@ export function registerAuth(program: Command, _ctx: CommandContext): void {
         applyAuthReference(freshSpec, target, toSecretRef(secretName));
       });
 
+      capture("auth_configured", { target_kind: target.kind });
       process.stdout.write(`Configured auth for server "${server}" via ${target.kind} "${target.key}".\n`);
       process.stdout.write(`Stored secret: ${secretName}\n`);
     });
@@ -262,9 +264,11 @@ export function registerAuth(program: Command, _ctx: CommandContext): void {
       });
 
       if (options.json) {
-        process.stdout.write(`${JSON.stringify({ servers: entries }, null, 2)}\n`);
+        process.stdout.write(`${JSON.stringify({ secretBackend: secrets.backend, servers: entries }, null, 2)}\n`);
         return;
       }
+
+      process.stdout.write(`Secret backend: ${secrets.backend}\n`);
 
       if (entries.length === 0) {
         process.stdout.write("No upstream servers configured.\n");

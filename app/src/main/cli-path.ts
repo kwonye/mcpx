@@ -1,18 +1,21 @@
 import fs from "node:fs";
 import path from "node:path";
 
+type PathApi = Pick<typeof path, "join" | "resolve" | "dirname">;
+
 export function resolveCliDaemonPath(
   resourcesPath: string | undefined,
   appPath: string,
   exists: (candidate: string) => boolean = fs.existsSync,
+  paths: PathApi = path,
 ): string {
   const candidates: string[] = [];
-  if (resourcesPath) candidates.push(path.join(resourcesPath, "cli", "dist", "cli.js"));
+  if (resourcesPath) candidates.push(paths.join(resourcesPath, "cli", "dist", "cli.js"));
 
-  let current = path.resolve(appPath);
+  let current = paths.resolve(appPath);
   for (let depth = 0; depth < 5; depth += 1) {
-    candidates.push(path.join(current, "cli", "dist", "cli.js"));
-    const parent = path.dirname(current);
+    candidates.push(paths.join(current, "cli", "dist", "cli.js"));
+    const parent = paths.dirname(current);
     if (parent === current) break;
     current = parent;
   }

@@ -19,7 +19,7 @@ import type { HttpServerSpec, McpxConfig, UpstreamServerSpec } from "../types.js
 import { loadConfig } from "./config.js";
 import { mutateConfig } from "./config-store.js";
 import { SecretsManager } from "./secrets.js";
-import { syncAllClients, persistSyncState } from "./sync.js";
+import { synchronizeClients } from "./sync.js";
 import { UpstreamError } from "./errors.js";
 import { getOAuthLockPath, ensureDir } from "./paths.js";
 
@@ -466,7 +466,7 @@ function waitForAuthorizationCode(
   serverName: string,
   expectedState: string,
   options: { timeoutMs?: number; signal?: AbortSignal } = {}
-): Promise<string> {
+): Promise<OAuthAuthorizationResponse> {
   const timeoutMs = options.timeoutMs ?? OAUTH_LOGIN_TIMEOUT_MS;
   const { signal } = options;
 
@@ -523,6 +523,7 @@ function waitForAuthorizationCode(
       const code = url.searchParams.get("code");
       const state = url.searchParams.get("state");
       const error = url.searchParams.get("error");
+      const iss = url.searchParams.get("iss") ?? undefined;
 
       response.setHeader("content-type", "text/html; charset=utf-8");
 
@@ -547,7 +548,7 @@ function waitForAuthorizationCode(
       }
 
       response.end(renderCallbackPage("success"));
-      settle(() => resolve(code));
+      settle(() => resolve({ code, iss }));
     });
   });
 }
@@ -567,9 +568,15 @@ function bindOAuthReference(config: McpxConfig, serverName: string): void {
   };
 }
 
+/** RFC 9207: `iss` must reach the SDK so it can run its mix-up defense check. */
+export interface OAuthAuthorizationResponse {
+  code: string;
+  iss?: string;
+}
+
 export interface OAuthCodeReceiver {
   redirectUrl: string;
-  waitForCode: (expectedState: string, timeoutMs?: number) => Promise<string>;
+  waitForCode: (expectedState: string, timeoutMs?: number) => Promise<OAuthAuthorizationResponse>;
 }
 
 export type OAuthProgressEvent =
@@ -690,7 +697,7 @@ export async function runOAuthLogin(
     const state = crypto.randomUUID();
     let callbackServer: http.Server | undefined;
     let redirectUrl: string;
-    let codePromise: Promise<string>;
+    let codePromise: Promise<OAuthAuthorizationResponse>;
 
     if (codeReceiver) {
       redirectUrl = codeReceiver.redirectUrl;
@@ -727,12 +734,13 @@ export async function runOAuthLogin(
         throw new OAuthCancelledError(serverName);
       }
 
-      const authorizationCode = await codePromise;
+      const { code: authorizationCode, iss } = await codePromise;
 
       onProgress?.({ phase: "exchanging" });
       const result = await auth(provider, {
         serverUrl: spec.url,
-        authorizationCode
+        authorizationCode,
+        iss
       });
       if (result !== "AUTHORIZED") {
         throw new Error(`OAuth login did not authorize "${serverName}".`);
@@ -742,11 +750,7 @@ export async function runOAuthLogin(
       await mutateConfig((config) => {
         bindOAuthReference(config, serverName);
       }, configPath);
-      const config = loadConfig(configPath);
-      const summary = syncAllClients(config, secrets);
-      await mutateConfig((freshConfig) => {
-        persistSyncState(summary, freshConfig);
-      }, configPath);
+      await synchronizeClients({ configPath }, secrets);
 
       new McpxOAuthProvider(serverName, secrets).invalidateCredentials("verifier");
       return { serverName, authorized: true };
