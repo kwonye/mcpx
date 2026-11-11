@@ -1,26 +1,17 @@
-import { Tray, nativeImage, Menu, app, NativeImage } from "electron";
-import { join } from "node:path";
+import { Tray, nativeImage, Menu, type NativeImage } from "electron";
 import { hidePopover, togglePopover } from "./popover";
 import { getDesktopProductName, isDevDesktopApp } from "./app-flavor";
 import { quitApp } from "./app-control";
+import { navigateDashboard, openDashboard } from "./dashboard";
+import { resourcePath } from "./platform/resources";
+import { toDesktopPlatform } from "./platform/types";
+import { buildTrayMenuTemplate, trayBehaviorFor, trayIconFile, trayTooltip } from "./platform/tray-model";
 
 let tray: Tray | null = null;
 let daemonRunning = false;
 let onStartDaemonRequested: (() => void) | null = null;
 let onStopDaemonRequested: (() => void) | null = null;
-
-interface StatusIcons {
-  green: NativeImage;
-  red: NativeImage;
-}
-
-let cachedIcons: {
-  normal: StatusIcons | null;
-  dev: StatusIcons | null;
-} = {
-  normal: null,
-  dev: null
-};
+const iconCache = new Map<string, NativeImage>();
 
 export function setStartDaemonHandler(handler: () => void): void {
   onStartDaemonRequested = handler;
@@ -30,114 +21,71 @@ export function setStopDaemonHandler(handler: () => void): void {
   onStopDaemonRequested = handler;
 }
 
-function buildContextMenu(daemonRunning: boolean): Menu {
-  const template: Electron.MenuItemConstructorOptions[] = [];
-
-  if (daemonRunning) {
-    template.push(
-      {
-        label: "Stop Gateway",
-        click: () => {
-          onStopDaemonRequested?.();
-        }
+function buildContextMenu(running: boolean): Menu {
+  return Menu.buildFromTemplate(
+    buildTrayMenuTemplate(getDesktopProductName(), running, {
+      openDashboard: () => {
+        openDashboard();
       },
-      { type: "separator" }
-    );
-  } else {
-    template.push(
-      {
-        label: "Start Gateway",
-        click: () => {
-          onStartDaemonRequested?.();
-        }
-      },
-      { type: "separator" }
-    );
-  }
-
-  template.push({
-    label: "Quit",
-    click: quitApp
-  });
-
-  return Menu.buildFromTemplate(template);
-}
-
-function loadStatusIcons(): { normal: StatusIcons; dev: StatusIcons } {
-  if (process.platform !== "darwin") {
-    // Linux and Windows: use PNG icons (no template image support)
-    const icon = nativeImage.createFromPath(
-      join(__dirname, "../../resources/linux/tray-icon.png")
-    );
-    return {
-      normal: { green: icon, red: icon },
-      dev: { green: icon, red: icon }
-    };
-  }
-
-  const normalGreen = nativeImage.createFromPath(join(__dirname, "../../resources/trayIconTemplate-green.png"));
-  const normalRed = nativeImage.createFromPath(join(__dirname, "../../resources/trayIconTemplate-red.png"));
-  const devGreen = nativeImage.createFromPath(join(__dirname, "../../resources/trayIconDevTemplate-green.png"));
-  const devRed = nativeImage.createFromPath(join(__dirname, "../../resources/trayIconDevTemplate-red.png"));
-
-  if (process.platform === "darwin") {
-    normalGreen.setTemplateImage(true);
-    normalRed.setTemplateImage(true);
-    devGreen.setTemplateImage(true);
-    devRed.setTemplateImage(true);
-  }
-
-  return {
-    normal: { green: normalGreen, red: normalRed },
-    dev: { green: devGreen, red: devRed }
-  };
+      startGateway: () => onStartDaemonRequested?.(),
+      stopGateway: () => onStopDaemonRequested?.(),
+      openSettings: () => navigateDashboard("settings"),
+      quit: quitApp
+    })
+  );
 }
 
 function getStatusIcon(running: boolean): NativeImage {
-  const isDev = isDevDesktopApp();
-  const icons = cachedIcons[isDev ? 'dev' : 'normal'];
-  
-  if (running) {
-    return icons?.green || nativeImage.createFromPath(join(__dirname, "../../resources", isDev ? "trayIconDevTemplate-green.png" : "trayIconTemplate-green.png"));
-  } else {
-    return icons?.red || nativeImage.createFromPath(join(__dirname, "../../resources", isDev ? "trayIconDevTemplate-red.png" : "trayIconTemplate-red.png"));
+  const platform = toDesktopPlatform();
+  const file = trayIconFile(platform, running, isDevDesktopApp());
+  const cached = iconCache.get(file);
+  if (cached) {
+    return cached;
   }
+  const icon = nativeImage.createFromPath(resourcePath(...file.split("/")));
+  if (trayBehaviorFor(platform).templateImage) {
+    icon.setTemplateImage(true);
+  }
+  iconCache.set(file, icon);
+  return icon;
 }
 
 export function createTray(): Tray {
-  const productName = getDesktopProductName();
-  
-  if (!cachedIcons.normal) {
-    const icons = loadStatusIcons();
-    cachedIcons.normal = icons.normal;
-    cachedIcons.dev = icons.dev;
-  }
-  
-  const icon = getStatusIcon(daemonRunning);
-  const newTray = new Tray(icon);
+  const behavior = trayBehaviorFor(toDesktopPlatform());
+  const newTray = new Tray(getStatusIcon(daemonRunning));
   tray = newTray;
-  newTray.setToolTip(productName);
+  newTray.setToolTip(trayTooltip(getDesktopProductName(), daemonRunning));
 
-  newTray.on("click", (_event, bounds) => {
-    togglePopover(newTray, bounds);
-  });
+  if (behavior.attachContextMenu) {
+    newTray.setContextMenu(buildContextMenu(daemonRunning));
+  }
 
-  newTray.on("right-click", () => {
-    hidePopover();
-    newTray.popUpContextMenu(buildContextMenu(daemonRunning));
-  });
+  if (behavior.clickOpensPopover) {
+    newTray.on("click", (_event, bounds) => {
+      togglePopover(newTray, bounds);
+    });
+  }
+
+  if (behavior.rightClickOpensMenu) {
+    newTray.on("right-click", () => {
+      hidePopover();
+      newTray.popUpContextMenu(buildContextMenu(daemonRunning));
+    });
+  }
 
   return newTray;
 }
 
 export function updateTrayForDaemonStatus(running: boolean): void {
+  daemonRunning = running;
   if (!tray) return;
 
-  daemonRunning = running;
-  const productName = getDesktopProductName();
-  const icon = getStatusIcon(running);
-  tray.setImage(icon);
-  tray.setToolTip(`${productName} - ${running ? 'Gateway running' : 'Gateway stopped'}`);
+  tray.setImage(getStatusIcon(running));
+  tray.setToolTip(trayTooltip(getDesktopProductName(), running));
+  if (trayBehaviorFor(toDesktopPlatform()).attachContextMenu) {
+    // Linux hosts only read the menu that is attached, so rebuild it.
+    tray.setContextMenu(buildContextMenu(running));
+  }
 }
 
 export function hideTray(): void {

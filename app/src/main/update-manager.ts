@@ -6,12 +6,57 @@ import { getDesktopProductName, isDevDesktopApp } from "./app-flavor";
 
 const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 
+export type UpdateCheckStatus = "up-to-date" | "available" | "downloaded" | "error" | "unsupported";
+export interface UpdateCheckResult {
+  status: UpdateCheckStatus;
+  message: string;
+}
+
+/** Maps an electron-updater outcome to what a manual "Check for updates" reports. */
+export function updateCheckResult(
+  outcome: "update-available" | "update-not-available" | "update-downloaded",
+  version?: string
+): UpdateCheckResult {
+  const named = version ? `Update ${version}` : "An update";
+  switch (outcome) {
+    case "update-available":
+      return {
+        status: "available",
+        message: `${named} found. Downloading now and it will install on the next restart.`
+      };
+    case "update-not-available":
+      return { status: "up-to-date", message: "You're already on the latest version." };
+    case "update-downloaded":
+      return { status: "downloaded", message: `${named} is ready. Restart to install it.` };
+  }
+}
+
 let checkInterval: ReturnType<typeof setInterval> | null = null;
 let initialized = false;
-let pendingResolve: ((result: { status: string; message: string }) => void) | null = null;
+let pendingResolve: ((result: UpdateCheckResult) => void) | null = null;
 let pendingTimeout: ReturnType<typeof setTimeout> | null = null;
 let pendingUpdateVersion: string | undefined;
-let pendingCheck: Promise<{ status: string; message: string }> | null = null;
+let downloaded: { version?: string } | null = null;
+let pendingCheck: Promise<UpdateCheckResult> | null = null;
+let beforeQuitAndInstall: (() => void) | null = null;
+
+/**
+ * Registers the app's coordinated quit preparation (mark the app as quitting,
+ * stop the gateway that runs from the bundle being replaced). It runs right
+ * before electron-updater quits and installs.
+ */
+export function setBeforeQuitAndInstall(handler: (() => void) | null): void {
+  beforeQuitAndInstall = handler;
+}
+
+export function quitAndInstallUpdate(): void {
+  try {
+    beforeQuitAndInstall?.();
+  } catch (error) {
+    console.error("[update-manager] quit preparation failed:", error);
+  }
+  autoUpdater.quitAndInstall();
+}
 
 function currentVersion(): string | undefined {
   try {
@@ -51,7 +96,7 @@ function captureUpdate(action: "check" | "install" | "rollback", outcome: "succe
   }
 }
 
-function settlePending(result: { status: string; message: string }): void {
+function settlePending(result: UpdateCheckResult): void {
   if (pendingTimeout) clearTimeout(pendingTimeout);
   pendingTimeout = null;
   const resolve = pendingResolve;
@@ -95,16 +140,14 @@ function ensureInitialized(): void {
 
   autoUpdater.on("update-available", (info) => {
     pendingUpdateVersion = info.version;
-    const message = `Update ${info.version} found. Downloading now and it will install on the next restart.`;
     captureUpdate("check", "success", undefined, info.version);
-    settlePending({ status: "checking", message });
+    settlePending(updateCheckResult("update-available", info.version));
   });
 
   autoUpdater.on("update-not-available", () => {
     pendingUpdateVersion = undefined;
-    const message = "You're already on the latest version.";
     captureUpdate("check", "success");
-    settlePending({ status: "downloaded", message });
+    settlePending(updateCheckResult("update-not-available"));
   });
 
   autoUpdater.on("error", (error) => {
@@ -116,7 +159,9 @@ function ensureInitialized(): void {
   autoUpdater.on("update-downloaded", (info?: { version?: string }) => {
     const targetVersion = info?.version ?? pendingUpdateVersion;
     pendingUpdateVersion = undefined;
+    downloaded = { version: targetVersion };
     captureUpdate("install", "success", undefined, targetVersion);
+    settlePending(updateCheckResult("update-downloaded", targetVersion));
     void dialog.showMessageBox({
       type: "info",
       buttons: ["Restart now", "Later"],
@@ -127,7 +172,7 @@ function ensureInitialized(): void {
       detail: "Restart now to install the update."
     }).then((result) => {
       if (result.response === 0) {
-        autoUpdater.quitAndInstall();
+        quitAndInstallUpdate();
       }
     }).catch((error) => {
       console.error("[update-manager] failed to show update dialog:", error);
@@ -166,7 +211,7 @@ export function setAutoUpdateEnabled(enabled: boolean): void {
   startChecking();
 }
 
-export function checkForUpdatesNow(): Promise<{ status: string; message: string }> {
+export function checkForUpdatesNow(): Promise<UpdateCheckResult> {
   if (!app.isPackaged) {
     return Promise.resolve({
       status: "unsupported",
@@ -182,6 +227,10 @@ export function checkForUpdatesNow(): Promise<{ status: string; message: string 
   }
 
   ensureInitialized();
+
+  if (downloaded) {
+    return Promise.resolve(updateCheckResult("update-downloaded", downloaded.version));
+  }
 
   if (pendingCheck) {
     return pendingCheck;
@@ -209,5 +258,7 @@ export function disposeUpdateManager(): void {
     pendingTimeout = null;
   }
   pendingUpdateVersion = undefined;
+  downloaded = null;
+  beforeQuitAndInstall = null;
   initialized = false;
 }
