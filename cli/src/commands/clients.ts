@@ -12,6 +12,8 @@ export function registerClients(program: Command, _ctx: CommandContext): void {
     .action((options: { json?: boolean }) => {
       const payload = getAdapters().map((adapter) => ({
         id: adapter.id,
+        name: adapter.displayName ?? adapter.id,
+        installed: adapter.detectInstallation?.().installed ?? true,
         supportsHttp: adapter.supportsHttp(),
         configPath: adapter.detectConfigPath()
       }));
@@ -22,7 +24,7 @@ export function registerClients(program: Command, _ctx: CommandContext): void {
       }
 
       for (const client of payload) {
-        process.stdout.write(`- ${client.id}: ${client.supportsHttp ? "HTTP" : "NO_HTTP"} ${client.configPath ?? "(unknown path)"}\n`);
+        process.stdout.write(`- ${client.id}: ${client.supportsHttp ? "HTTP" : "NO_HTTP"} ${client.configPath ?? "(unknown path)"}${client.installed ? "" : " (not installed)"}\n`);
       }
     });
 }

@@ -35,6 +35,7 @@ import { registerSync } from "./commands/sync.js";
 import { registerStatus } from "./commands/status.js";
 import { registerDoctor } from "./commands/doctor.js";
 import { registerDaemon } from "./commands/daemon.js";
+import { registerService } from "./commands/service.js";
 import { registerSecret } from "./commands/secret.js";
 import { registerAuth } from "./commands/auth.js";
 import { registerClients } from "./commands/clients.js";
@@ -133,6 +134,7 @@ export async function runCli(argv = process.argv): Promise<void> {
   registerStatus(program, ctx);
   registerDoctor(program, ctx);
   registerDaemon(program, ctx);
+  registerService(program, ctx);
   registerSecret(program, ctx);
   registerAuth(program, ctx);
   registerClients(program, ctx);

@@ -1,7 +1,7 @@
 import { app } from "electron";
 import fs from "node:fs";
 import path from "node:path";
-import { getDaemonStatus, loadConfig, SecretsManager, startDaemon, stopDaemon } from "@mcpx/core";
+import { getDaemonStatus, loadConfig, SecretsManager, startDaemon, stopDaemon, stopDaemonAsync } from "@mcpx/core";
 import { resolveCliDaemonPath } from "./cli-path";
 import { updateTrayForDaemonStatus } from "./tray";
 
@@ -31,9 +31,9 @@ export async function startGateway(): Promise<void> {
   }
 }
 
-export function stopGateway(): void {
+export async function stopGateway(): Promise<void> {
   try {
-    stopDaemon();
+    await stopDaemonAsync();
   } catch (error) {
     console.error("[main] failed to stop gateway:", error);
   }
@@ -60,7 +60,13 @@ export function stopGatewayForUpdate(): void {
   } catch (error) {
     console.error("[main] failed to record gateway resume marker:", error);
   }
-  stopGateway();
+  // Synchronous on purpose: the installer runs right after this returns.
+  try {
+    stopDaemon();
+  } catch (error) {
+    console.error("[main] failed to stop gateway:", error);
+  }
+  refreshGatewayStatus();
 }
 
 /** True (and the marker is consumed) when an update stopped the gateway. */

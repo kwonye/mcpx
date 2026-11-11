@@ -226,7 +226,7 @@ async function startMainProcessImpl(): Promise<void> {
     void startGateway();
   });
   setStopDaemonHandler(() => {
-    stopGateway();
+    void stopGateway();
   });
 
   registerLifecycleHandlers({ app, openDashboard, isTrayAvailable, markQuitting });

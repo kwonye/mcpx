@@ -117,6 +117,11 @@ export function startBackgroundUpdateCheck(): void {
   if (process.env.MCPX_NO_UPDATE === "1") {
     return;
   }
+  // Inside the desktop app process.execPath is the GUI binary, so spawning it
+  // would launch a second app instead of the CLI updater. The app updates itself.
+  if (process.versions.electron && process.env.ELECTRON_RUN_AS_NODE !== "1") {
+    return;
+  }
   if (isUpdateInProgress()) {
     return;
   }
