@@ -6,7 +6,13 @@
  * runtime with the matching schemas in `ipc-schemas.ts`.
  */
 import type {
+  AdoptionPlan,
   DaemonStartResult,
+  HarnessInstallation,
+  ManagementSnapshot,
+  Operation,
+  SecretBackendSwitchResult,
+  SyncMode,
   ManagedMarketplace,
   ManagedPlugin,
   MarketplaceListing,
@@ -23,7 +29,7 @@ import type {
   UpstreamServerSpec
 } from "@mcpx/core";
 import type { IPC } from "./ipc-channels";
-import type { DesktopSettings, DesktopSettingsPatch, DesktopTab } from "./desktop-settings";
+import type { DesktopSettings, DesktopSettingsPatch } from "./desktop-settings";
 
 export interface PendingAuthEntry {
   serverName: string;
@@ -91,9 +97,14 @@ export interface AddServerResult extends AuthProbe {
   sync: SyncSummary;
 }
 
+export type SecretBackendKind = "file" | "keychain";
+
 export interface ConfigureAuthRequest {
   serverName: string;
-  headerName: string;
+  /** HTTP servers: the header to send (default Authorization). */
+  headerName?: string;
+  /** Local commands: the environment variable to set. */
+  envName?: string;
   authValue: string;
   secretName?: string;
   raw?: boolean;
@@ -157,6 +168,9 @@ export interface OpenDashboardRequest {
   route?: string;
 }
 
+/** Tabs the anonymous desktop_tab_viewed event may report. */
+export type TelemetryTab = "servers" | "projects" | "plugins" | "settings";
+
 type Ok<T extends object = object> = T & { success: true };
 
 /** Channel -> [argument tuple, result]. */
@@ -171,6 +185,15 @@ export interface IpcContract {
   [IPC.DAEMON_STOP]: [[], { stopped: boolean; message: string }];
   [IPC.DAEMON_RESTART]: [[], DaemonStartResult];
 
+  [IPC.MANAGEMENT_SNAPSHOT]: [[], ManagementSnapshot];
+  [IPC.ADOPTION_PLAN]: [[harnesses?: string[]], AdoptionPlan];
+  [IPC.ADOPTION_APPLY]: [[plan: AdoptionPlan, itemIds: string[]], Operation];
+  [IPC.OPERATION_ROLLBACK]: [[operationId: string], Operation];
+  [IPC.HARNESS_SET_MODE]: [[harnessId: string, mode: SyncMode], { id: string; mode: SyncMode }];
+
+  [IPC.GET_SECRET_BACKEND]: [[], SecretBackendKind];
+  [IPC.SET_SECRET_BACKEND]: [[backend: SecretBackendKind], SecretBackendSwitchResult];
+
   [IPC.GET_DESKTOP_SETTINGS]: [[], DesktopSettings];
   [IPC.UPDATE_DESKTOP_SETTINGS]: [[patch: DesktopSettingsPatch], DesktopSettings];
   [IPC.GET_TELEMETRY_STATUS]: [[], TelemetryStatus];
@@ -180,7 +203,7 @@ export interface IpcContract {
     TelemetryPreferences
   ];
   [IPC.RESET_TELEMETRY_ID]: [[], TelemetryPreferences];
-  [IPC.CAPTURE_DESKTOP_TAB_VIEWED]: [[tab: DesktopTab], void];
+  [IPC.CAPTURE_DESKTOP_TAB_VIEWED]: [[tab: TelemetryTab], void];
   [IPC.CHECK_FOR_UPDATES]: [[], UpdateCheckResult];
 
   [IPC.PARSE_SERVER_INPUT]: [[input: string], ParsedServerInput];
@@ -230,7 +253,7 @@ export interface IpcContract {
   [IPC.PLUGIN_RESET_PROJECT_OVERRIDE]: [[id: string, projectPath: string], Ok<{ name: string; projectPath: string }>];
 
   [IPC.MARKETPLACE_LIST]: [[], ManagedMarketplace[]];
-  [IPC.MARKETPLACE_ADD]: [[source: string], ManagedMarketplace];
+  [IPC.MARKETPLACE_ADD]: [[source: string, manifestPath?: string], ManagedMarketplace];
   [IPC.MARKETPLACE_REFRESH]: [[name: string], MarketplaceRefreshResult];
   [IPC.MARKETPLACE_REMOVE]: [[name: string], Ok<{ name: string }>];
   [IPC.MARKETPLACE_SET_AUTO_UPDATE]: [[name: string, enabled: boolean], ManagedMarketplace];
@@ -242,3 +265,5 @@ export interface IpcContract {
 export type InvokeChannel = keyof IpcContract;
 export type IpcArgs<C extends InvokeChannel> = IpcContract[C][0];
 export type IpcResult<C extends InvokeChannel> = IpcContract[C][1];
+
+export type { AdoptionPlan, HarnessInstallation, ManagementSnapshot, Operation, SyncMode };

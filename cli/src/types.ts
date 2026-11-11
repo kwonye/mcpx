@@ -1,8 +1,10 @@
-export type ClientId = "claude" | "claude-desktop" | "codex" | "cursor" | "cline" | "opencode" | "kiro" | "vscode" | "qwen" | "openclaw" | "hermes";
+/** Harness IDs come from the adapter registry, including project installations. */
+export type ClientId = string;
 
 export type PluginComponent = "mcpServers" | "skills" | "hooks" | "agents" | "commands";
 
 export interface HttpServerSpec {
+  scope?: string;
   transport: "http";
   url: string;
   headers?: Record<string, string>;
@@ -10,6 +12,7 @@ export interface HttpServerSpec {
 }
 
 export interface StdioServerSpec {
+  scope?: string;
   transport: "stdio";
   command: string;
   args?: string[];
@@ -25,6 +28,9 @@ export interface GatewayConfig {
   tokenRef: string;
   autoStart: boolean;
 }
+
+/** Where stored secrets live. `file` is the default encrypted file; `keychain` is opt-in. */
+export type SecretBackendKind = "file" | "keychain";
 
 export type ClientStatus = "SYNCED" | "UNSUPPORTED_HTTP" | "ERROR" | "SKIPPED";
 
@@ -48,6 +54,11 @@ export interface ProjectScope {
 
 export interface McpxConfig {
   schemaVersion: 1;
+  consumers?: Record<string, { tokenRef: string; projectPath?: string }>;
+  packages?: Record<string, { id: string; root: string; source: string; harness: string; fingerprint: string; pinned: boolean; name?: string; identity?: string; servers?: string[]; skills?: Array<{ id: string; path: string; projectionPath: string }>; scope?: string; previous?: { root: string; fingerprint: string } }>;
+  revision?: number;
+  harnesses?: Record<string, { mode: "observe" | "selected" | "automatic" }>;
+  origins?: Record<string, { id: string; kind: string; harness: string; source: string; nativeKey: string; fingerprint: string; operationId: string }>;
   name?: string;
   gateway: GatewayConfig;
   servers: Record<string, UpstreamServerSpec>;
@@ -55,6 +66,9 @@ export interface McpxConfig {
   projects?: Record<string, ProjectConfig>;
   plugins?: Record<string, ManagedPlugin>;
   marketplaces?: Record<string, ManagedMarketplace>;
+  secrets?: {
+    backend: SecretBackendKind;
+  };
 }
 
 export interface ManagedEntry {
@@ -140,6 +154,9 @@ export interface SyncResult {
 }
 
 export interface Skill {
+  projectionPath?: string;
+  scope?: string;
+  ownerHarness?: string;
   id: string;
   content: string;
   /** Canonical directory containing SKILL.md and optional resources. */
@@ -170,12 +187,24 @@ export interface PluginSyncResult {
   error?: string;
 }
 
+export interface HarnessDescriptor {
+  label?: string;
+  projectConfig?: string;
+  skillPath?: string;
+  projectSkills?: string;
+  skillLayout?: "dir" | "flat";
+  pluginComponents?: PluginComponent[];
+}
 export interface ClientAdapter {
+  descriptor?: HarnessDescriptor;
+  managedName?(serverName: string): string;
   id: ClientId;
   detectConfigPath(): string | null;
   supportsHttp(): boolean;
   scanForImports(config: McpxConfig, managedIndex: ManagedIndex): ClientImportScanResult;
   syncGateway(config: McpxConfig, options: SyncClientOptions): SyncResult;
+  skillDirectory?(): string;
+  additionalSkillDirectories?(): string[];
   syncSkills?(skills: Skill[]): void;
   syncPlugins?(plugins: PluginSyncInput[]): PluginSyncResult;
 }
@@ -268,6 +297,7 @@ export interface DiscoveredMcpServer {
   cwd?: string;
   url?: string;
   oauthResource?: string;
+  headers?: Record<string, string>;
 }
 
 export interface DiscoveredComponents {
@@ -296,7 +326,7 @@ export interface PluginManifest {
   declaredCapabilities?: string[];
 }
 
-export type MarketplaceFormat = "claude" | "codex";
+export type MarketplaceFormat = "claude" | "codex" | "cursor";
 export type MarketplaceSourceType = "github" | "git" | "local" | "hosted-json";
 
 export interface ManagedMarketplace {
@@ -333,6 +363,7 @@ export interface MarketplaceListing {
   compatible: boolean;
   installed: boolean;
   authentication?: string;
+  compatibilityError?: string;
 }
 
 export interface MarketplacePluginDetail extends MarketplaceListing {
@@ -368,7 +399,7 @@ export interface ManagedPlugin {
   };
   updateError?: string;
   pinned?: boolean;
-  previous?: { version: string; resolvedSha: string; root: string };
+  previous?: { version: string; resolvedSha: string; root: string; source?: string; sourceFingerprint?: string };
   projectOverrides?: Record<string, {
     enabled?: boolean;
     components?: Partial<Record<PluginComponent, boolean>>;

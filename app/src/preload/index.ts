@@ -77,6 +77,20 @@ const api = {
     restart: bind(IPC.DAEMON_RESTART)
   },
 
+  management: {
+    snapshot: bind(IPC.MANAGEMENT_SNAPSHOT),
+    planAdoption: bind(IPC.ADOPTION_PLAN),
+    applyAdoption: bind(IPC.ADOPTION_APPLY),
+    rollback: bind(IPC.OPERATION_ROLLBACK),
+    setHarnessMode: bind(IPC.HARNESS_SET_MODE),
+    onChange: (callback: () => void) => subscribe<unknown>(IPC.MANAGEMENT_EVENT, () => callback())
+  },
+
+  secrets: {
+    backend: bind(IPC.GET_SECRET_BACKEND),
+    setBackend: bind(IPC.SET_SECRET_BACKEND)
+  },
+
   settings: {
     get: bind(IPC.GET_DESKTOP_SETTINGS),
     update: bind(IPC.UPDATE_DESKTOP_SETTINGS)

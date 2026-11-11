@@ -1,43 +1,20 @@
 import type { ManagedMarketplace } from "../types.js";
 
-const BUILTIN_ADDED_AT = "1970-01-01T00:00:00.000Z";
+const defaults = [
+  ["claude-plugins-official", "Claude official", "anthropics/claude-plugins-official", ".claude-plugin/marketplace.json", "claude"],
+  ["openai-curated", "Codex official", "openai/plugins", ".agents/plugins/marketplace.json", "codex"],
+  ["cursor-plugins", "Cursor official", "cursor/plugins", ".cursor-plugin/marketplace.json", "cursor"],
+] as const;
 
-export const DEFAULT_MARKETPLACES: Record<string, ManagedMarketplace> = {
-  "claude-plugins-official": {
-    name: "claude-plugins-official",
-    displayName: "Claude official",
-    source: "anthropics/claude-plugins-official",
-    sourceType: "github",
-    manifestPath: ".claude-plugin/marketplace.json",
-    format: "claude",
-    builtIn: true,
-    autoUpdate: true,
-    addedAt: BUILTIN_ADDED_AT,
-    status: "unavailable",
-  },
-  "openai-curated": {
-    name: "openai-curated",
-    displayName: "Codex official",
-    source: "openai/plugins",
-    sourceType: "github",
-    manifestPath: ".agents/plugins/marketplace.json",
-    format: "codex",
-    builtIn: true,
-    autoUpdate: true,
-    addedAt: BUILTIN_ADDED_AT,
-    status: "unavailable",
-  },
-};
+export const DEFAULT_MARKETPLACES: Record<string, ManagedMarketplace> = Object.fromEntries(defaults.map(([name, displayName, source, manifestPath, format]) => [name, {
+  name, displayName, source, manifestPath, format, sourceType: "github", builtIn: true, autoUpdate: false,
+  addedAt: "1970-01-01T00:00:00.000Z", status: "unavailable",
+}]));
 
-export function ensureDefaultMarketplaces(
-  marketplaces: Record<string, ManagedMarketplace> | undefined,
-): Record<string, ManagedMarketplace> {
-  const result = { ...(marketplaces ?? {}) };
+export function ensureDefaultMarketplaces(marketplaces: Record<string, ManagedMarketplace> | undefined): Record<string, ManagedMarketplace> {
+  const result = { ...marketplaces };
   for (const [name, defaults] of Object.entries(DEFAULT_MARKETPLACES)) {
-    const existing = result[name];
-    result[name] = existing
-      ? { ...defaults, ...existing, name, source: defaults.source, sourceType: defaults.sourceType, manifestPath: defaults.manifestPath, format: defaults.format, builtIn: true }
-      : { ...defaults };
+    result[name] = { ...defaults, ...result[name], name, source: defaults.source, sourceType: defaults.sourceType, manifestPath: defaults.manifestPath, format: defaults.format, builtIn: true };
   }
   return result;
 }

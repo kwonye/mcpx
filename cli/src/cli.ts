@@ -2,6 +2,11 @@
 /**
  * mcpx CLI - HTTP-first Model Context Protocol gateway
  */
+import { controlRequest, ensureControlService } from "./core/control.js";
+import { runManagementTui } from "./core/tui.js";
+import { planSynchronization } from "./core/sync-plan.js";
+import { planAdoption, applyAdoption } from "./core/adoption.js";
+import type { AdoptionPlan } from "./core/adoption.js";
 import { Command } from "commander";
 import fs from "node:fs";
 import path from "node:path";
@@ -13,11 +18,12 @@ import { loadConfig, loadMergedConfig, resolveActiveConfig, loadProjectConfig, C
 import { mutateActiveConfig, mutateConfig, mutateProjectConfig } from "./core/config-store.js";
 import { addServer, removeServer, setServerEnabled, registerProject, unregisterProject, rotateGatewayToken } from "./core/registry.js";
 import { listSkills, getSkill, saveSkill, deleteSkill, customizeSkill, installSkillFromSource, pinSkill, unpinSkill, updateSkill, rollbackSkill } from "./core/skills.js";
-import { SecretsManager, readSecretValueFromStdin } from "./core/secrets.js";
+import { SecretsManager, readSecretValueFromStdin, describeSecretBackend, getSecretBackend, switchSecretBackend } from "./core/secrets.js";
+import type { SecretBackendKind } from "./types.js";
 import { probeHttpAuthRequirement } from "./core/auth-probe.js";
 import { fetchRegistryServerDetail, selectBestPackage, extractRequiredInputs, mapRegistryToSpec } from "./core/registry-client.js";
 import type { RequiredInput } from "./core/registry-client.js";
-import { syncAllClients, persistSyncState } from "./core/sync.js";
+import { syncAllClients, synchronizeClients } from "./core/sync.js";
 import { isServerEnabled, type ClientId, type ClientStatus, type HttpServerSpec, type McpxConfig, type StdioServerSpec, type UpstreamServerSpec, type PluginComponent } from "./types.js";
 import { parseCompatibilityArgs } from "./compat/index.js";
 import {
@@ -42,7 +48,7 @@ import {
 import { getConfigPath, getManagedIndexPath, getSecretsStorePath, findProjectConfigPath } from "./core/paths.js";
 import { exportEnvironment, importEnvironment } from "./core/share.js";
 import { loadManagedIndex } from "./core/managed-index.js";
-import { STATUS_CLIENTS, buildStatusReport, type StatusAuthBinding, type StatusReport, type StatusServerEntry } from "./core/status.js";
+import { buildStatusReport, type StatusAuthBinding, type StatusReport, type StatusServerEntry } from "./core/status.js";
 import { APP_VERSION } from "./version.js";
 import { getStagedCliPath, getStagedUpdate, clearStagedUpdate, checkForUpdates, shouldUseStagedCli } from "./core/update.js";
 import { performUpdate, performRollback, runBackgroundUpdate } from "./core/update-manager.js";
@@ -74,8 +80,9 @@ import {
   getOAuthCredentialStatus,
   type OAuthCredentialStatus
 } from "./core/oauth.js";
+import { capture, captureException, shutdown } from "./core/analytics.js";
+import { listHarnesses } from "./core/harnesses.js";
 
-const VALID_CLIENTS: ClientId[] = STATUS_CLIENTS;
 
 interface AddCommandOptions {
   transport?: string;
@@ -232,10 +239,10 @@ function parseClientList(values: string[] | undefined): ClientId[] | undefined {
 
   const normalized = values.flatMap((value) => value.split(",")).map((value) => value.trim()).filter(Boolean);
   const unique = Array.from(new Set(normalized));
-
+  const validClients = listHarnesses(loadConfig()).map(installation => installation.id);
   for (const client of unique) {
-    if (!VALID_CLIENTS.includes(client as ClientId)) {
-      throw new Error(`Unknown client: ${client}. Valid clients: ${VALID_CLIENTS.join(", ")}`);
+    if (!validClients.includes(client as ClientId)) {
+      throw new Error(`Unknown client: ${client}. Valid clients: ${validClients.join(", ")}`);
     }
   }
 
@@ -315,15 +322,8 @@ async function ensureDaemonIfEnabled(cliPath: string, secrets: SecretsManager): 
 async function autoSyncManagedEntries(cliPath: string): Promise<void> {
   const secrets = new SecretsManager();
   await ensureDaemonIfEnabled(cliPath, secrets);
-  // Reload fresh right before syncing (rather than trusting a snapshot the
-  // caller may have loaded before an earlier config mutation completed), and
-  // persist the resulting client-sync state through the config lock so this
-  // never clobbers a concurrent mutation's changes with a stale save.
-  const config = loadMergedConfig();
-  const summary = syncAllClients(config, secrets);
-  await mutateConfig((freshConfig) => {
-    persistSyncState(summary, freshConfig);
-  });
+  // Use the same locked transaction as desktop and plugin operations.
+  const summary = await synchronizeClients({}, secrets);
   printSyncSummary(summary, false);
   ensureExitCodeForSyncFailures(summary.hasErrors);
 }
@@ -471,11 +471,7 @@ async function performOAuthLogout(
 
   let sync: ReturnType<typeof syncAllClients> | undefined;
   if (removedBinding) {
-    const syncSourceConfig = loadConfig();
-    sync = syncAllClients(syncSourceConfig, secrets);
-    await mutateConfig((freshConfig) => {
-      persistSyncState(sync!, freshConfig);
-    });
+    sync = await synchronizeClients({}, secrets);
   }
 
   return { removedSecrets, removedBinding, sync };
@@ -679,7 +675,7 @@ function printStatusReportText(report: StatusReport): void {
   }
 
   process.stdout.write("Client sync states:\n");
-  for (const client of STATUS_CLIENTS) {
+  for (const client of new Set([...getAdapters().map(adapter => adapter.id), ...Object.keys(report.clients)])) {
     const state = report.clients[client];
     if (!state) {
       process.stdout.write(`- ${clientStatusEmoji("SKIPPED")} ${client}: SKIPPED\n`);
@@ -1030,10 +1026,7 @@ async function reconnectGatewayAndSync(cliPath: string): Promise<void> {
   const secrets = new SecretsManager();
   const restart = await restartDaemon(config, cliPath, secrets);
   process.stdout.write(`${restart.message} pid=${restart.pid} port=${restart.port}\n`);
-  const summary = syncAllClients(config, secrets);
-  await mutateConfig((freshConfig) => {
-    persistSyncState(summary, freshConfig);
-  });
+  const summary = await synchronizeClients({}, secrets);
   printSyncSummary(summary, false);
 }
 
@@ -1071,7 +1064,7 @@ async function setServerEnabledInteractively(
 
           if (handled) {
             process.stdout.write(`${enabled ? "Enabled" : "Disabled"} server: ${serverName}\n`);
-            process.stdout.write("Auto-syncing managed gateway entries across all supported clients...\n");
+            process.stdout.write("Syncing managed integrations to detected and selected harnesses...\n");
             await autoSyncManagedEntries(cliPath);
             return true;
           }
@@ -1084,7 +1077,7 @@ async function setServerEnabledInteractively(
     setServerEnabled(freshConfig, serverName, enabled);
   });
   process.stdout.write(`${enabled ? "Enabled" : "Disabled"} server: ${serverName}\n`);
-  process.stdout.write("Auto-syncing managed gateway entries across all supported clients...\n");
+  process.stdout.write("Syncing managed integrations to detected and selected harnesses...\n");
   await autoSyncManagedEntries(cliPath);
   return true;
 }
@@ -1296,7 +1289,8 @@ function registerEnabledCommand(parent: Command, enabled: boolean, cliPath: stri
       }
 
       process.stdout.write(`${enabled ? "Enabled" : "Disabled"} server: ${name} (${type} config)\n`);
-      process.stdout.write("Auto-syncing managed gateway entries across all supported clients...\n");
+      capture(enabled ? "server_enabled" : "server_disabled", { scope: type });
+      process.stdout.write("Syncing managed integrations to detected and selected harnesses...\n");
       await autoSyncManagedEntries(cliPath);
       captureTelemetryEvent({
         name: "operation_completed",
@@ -1393,6 +1387,7 @@ function registerAddCommand(parent: Command, cliPath: string): void {
         }
 
         process.stdout.write(`Added server: ${shortName} (${spec.transport}) from registry "${registryName}"${type === "project" ? ` (project: ${projectPath})` : ""}\n`);
+        capture("server_added", { transport: spec.transport, from_registry: true, registry_name: registryName, scope: type });
         if (authSetup.deferredOAuthLogin && spec.transport === "http") {
           await runDeferredOAuthLogin(shortName, spec, secrets, configPath);
         }
@@ -1411,12 +1406,13 @@ function registerAddCommand(parent: Command, cliPath: string): void {
         }
 
         process.stdout.write(`Added server: ${parsed.name} (${parsed.spec.transport})${type === "project" ? ` (project: ${projectPath})` : ""}\n`);
+        capture("server_added", { transport: parsed.spec.transport, from_registry: false, scope: type });
         if (authSetup.deferredOAuthLogin && parsed.spec.transport === "http") {
           await runDeferredOAuthLogin(parsed.name, parsed.spec, secrets, configPath);
         }
       }
 
-      process.stdout.write("Auto-syncing managed gateway entries across all supported clients...\n");
+      process.stdout.write("Syncing managed integrations to detected and selected harnesses...\n");
       await autoSyncManagedEntries(cliPath);
       markTelemetryMilestone("first_server_added");
       captureTelemetryEvent({
@@ -1448,7 +1444,8 @@ function registerRemoveCommand(parent: Command, cliPath: string): void {
       }
 
       process.stdout.write(`Removed server: ${name} ${type === "project" ? `from project: ${projectPath}` : "globally"}\n`);
-      process.stdout.write("Auto-syncing managed gateway entries across all supported clients...\n");
+      capture("server_removed", { scope: type });
+      process.stdout.write("Syncing managed integrations to detected and selected harnesses...\n");
       await autoSyncManagedEntries(cliPath);
       captureTelemetryEvent({
         name: "operation_completed",
@@ -1540,19 +1537,21 @@ function registerSyncCommand(program: Command, cliPath: string): void {
   program
     .command("sync [clients...]")
     .option("--client <id>", "Limit sync to specific client(s), comma-separated or repeated", (value, prev: string[] = []) => [...prev, value], [])
+    .option("--dry-run", "Preview synchronization without writing native configurations")
     .option("--import", "Also scan clients for unmanaged servers and adopt them into the mcpx catalog", false)
     .option("--json", "Output JSON")
     .description("Sync gateway configuration to supported clients (e.g. `mcpx sync claude`)")
-    .action(async (clients: string[], options: { client: string[]; json?: boolean; import?: boolean }) => {
+    .action(async (clients: string[], options: { client: string[]; json?: boolean; import?: boolean; dryRun?: boolean }) => {
       const startedAt = Date.now();
-      const config = loadConfig();
       const targetClients = parseClientList([...(clients ?? []), ...(options.client ?? [])]);
+      if (options.dryRun) { process.stdout.write(JSON.stringify(planSynchronization(targetClients), null, 2) + "\n"); return; }
       const secrets = new SecretsManager();
       await ensureDaemonIfEnabled(cliPath, secrets);
-      const summary = syncAllClients(config, secrets, { targetClients, importScan: options.import ?? false });
-      await mutateConfig((freshConfig) => {
-        persistSyncState(summary, freshConfig);
-      });
+      if (options.import && process.env.MCPX_CONTROL_CHILD === "1") {
+        const plan = planAdoption(targetClients);
+        if (plan.items.some(item => ["import", "reuse"].includes(item.action))) await applyAdoption(plan);
+      }
+      const summary = await synchronizeClients({ targetClients, importScan: options.import && process.env.MCPX_CONTROL_CHILD !== "1" }, secrets);
       printSyncSummary(summary, options.json ?? false);
       ensureExitCodeForSyncFailures(summary.hasErrors);
       if (!summary.hasErrors) markTelemetryMilestone("first_sync_succeeded");
@@ -1584,7 +1583,7 @@ function registerStatusCommand(program: Command, cliPath: string): void {
 
       const interactive = (options.interactive ?? true) && process.stdin.isTTY && process.stdout.isTTY;
       if (interactive) {
-        await runInteractiveStatusMenu(cliPath);
+        await runManagementTui(cliPath);
         return;
       }
 
@@ -1614,12 +1613,21 @@ function registerDoctorCommand(program: Command): void {
         details: getManagedIndexPath()
       });
 
-      // Check encrypted secrets store
+      // Check the active secret backend (encrypted file by default, OS keychain when opted in).
       try {
-        new SecretsManager().listSecretNames();
-        checks.push({ check: "secrets_store", status: "ok", details: getSecretsStorePath() });
-      } catch {
-        checks.push({ check: "secrets_store", status: "warn", details: "encrypted secrets store unavailable" });
+        const secrets = new SecretsManager();
+        secrets.listSecretNames();
+        checks.push({
+          check: "secrets_store",
+          status: "ok",
+          details: secrets.backend === "keychain" ? "keychain" : `file (${getSecretsStorePath()})`
+        });
+      } catch (err) {
+        checks.push({
+          check: "secrets_store",
+          status: "warn",
+          details: err instanceof Error ? err.message : "secrets store unavailable"
+        });
       }
 
       const daemon = getDaemonStatus(config);
@@ -1677,8 +1685,8 @@ function registerDaemonCommands(program: Command): void {
   daemon
     .command("stop")
     .description("Stop background daemon")
-    .action(() => {
-      const result = stopDaemon();
+    .action(async () => {
+      const result = await stopDaemon();
       process.stdout.write(`${result.message}\n`);
     });
 
@@ -1728,13 +1736,37 @@ function registerDaemonCommands(program: Command): void {
     });
 }
 
+function printSecretBackendSwitch(result: ReturnType<typeof switchSecretBackend>): void {
+  if (!result.changed) {
+    process.stdout.write(`Secret backend already ${result.backend}.\n`);
+    return;
+  }
+  process.stdout.write(`Secret backend: ${result.backend}\n`);
+  if (result.migrated.length === 0) {
+    process.stdout.write("No stored secrets to migrate.\n");
+  } else {
+    process.stdout.write(`Migrated ${result.migrated.length} secret(s): ${result.migrated.join(", ")}\n`);
+  }
+  if (result.preserved.length > 0) {
+    const where = result.backend === "keychain" ? "keychain" : "file store";
+    process.stdout.write(`Kept ${result.preserved.length} secret(s) already in the ${where}: ${result.preserved.join(", ")}\n`);
+  }
+  if (result.removedFrom && result.migrated.length > 0) {
+    process.stdout.write(
+      result.removedFrom === "file"
+        ? "Removed secrets from the file store.\n"
+        : "Removed secrets from the keychain.\n"
+    );
+  }
+}
+
 function registerSecretsCommands(program: Command): void {
-  const secret = program.command("secret").description("Manage encrypted secrets");
+  const secret = program.command("secret").description("Manage stored secrets");
 
   secret
     .command("set <name>")
     .option("--value <value>", "Secret value")
-    .description("Set an encrypted secret")
+    .description("Set a stored secret")
     .action((name: string, options: { value?: string }) => {
       const value = options.value ?? readSecretValueFromStdin();
       new SecretsManager().setSecret(name, value);
@@ -1743,7 +1775,7 @@ function registerSecretsCommands(program: Command): void {
 
   secret
     .command("rm <name>")
-    .description("Remove an encrypted secret")
+    .description("Remove a stored secret")
     .action((name: string) => {
       new SecretsManager().removeSecret(name);
       process.stdout.write(`Secret removed: ${name}\n`);
@@ -1751,9 +1783,11 @@ function registerSecretsCommands(program: Command): void {
 
   secret
     .command("ls")
-    .description("List secret names tracked by mcpx")
+    .description("List secret names tracked by mcpx and the active backend")
     .action(() => {
-      const names = new SecretsManager().listSecretNames();
+      const secrets = new SecretsManager();
+      process.stdout.write(`backend: ${secrets.backend}\n`);
+      const names = secrets.listSecretNames();
       if (names.length === 0) {
         process.stdout.write("No tracked secrets.\n");
         return;
@@ -1762,6 +1796,22 @@ function registerSecretsCommands(program: Command): void {
       for (const name of names) {
         process.stdout.write(`${name}\n`);
       }
+    });
+
+  secret
+    .command("backend [kind]")
+    .description("Show or switch the secret backend (file, or keychain on macOS and Linux)")
+    .action((kind?: string) => {
+      if (kind === undefined) {
+        const backend = getSecretBackend();
+        process.stdout.write(`Secret backend: ${backend}\n`);
+        process.stdout.write(`${describeSecretBackend(backend)}\n`);
+        return;
+      }
+      if (kind !== "file" && kind !== "keychain") {
+        throw new Error(`Unknown secret backend "${kind}". Use "file" or "keychain".`);
+      }
+      printSecretBackendSwitch(switchSecretBackend(kind as SecretBackendKind));
     });
 }
 
@@ -1880,7 +1930,7 @@ function registerAuthCommands(program: Command): void {
     .option("--value <value>", "Auth value/token (if omitted, read from stdin)")
     .option("--secret-name <name>", "Override stored secret name")
     .option("--raw", "Do not auto-prefix Authorization values with Bearer")
-    .description("Store auth as an encrypted secret and bind it to an upstream server")
+    .description("Store auth in the active secret backend and bind it to an upstream server")
     .action(async (server: string, options: AuthSetOptions) => {
       const config = loadConfig();
       const spec = getServerSpecOrThrow(config, server);
@@ -1896,6 +1946,7 @@ function registerAuthCommands(program: Command): void {
         applyAuthReference(freshSpec, target, toSecretRef(secretName));
       });
 
+      capture("auth_configured", { target_kind: target.kind });
       process.stdout.write(`Configured auth for server "${server}" via ${target.kind} "${target.key}".\n`);
       process.stdout.write(`Stored secret: ${secretName}\n`);
     });
@@ -2010,9 +2061,11 @@ function registerAuthCommands(program: Command): void {
       });
 
       if (options.json) {
-        process.stdout.write(`${JSON.stringify({ servers: entries }, null, 2)}\n`);
+        process.stdout.write(`${JSON.stringify({ secretBackend: secrets.backend, servers: entries }, null, 2)}\n`);
         return;
       }
+
+      process.stdout.write(`Secret backend: ${secrets.backend}\n`);
 
       if (entries.length === 0) {
         process.stdout.write("No upstream servers configured.\n");
@@ -2103,8 +2156,8 @@ function registerSkillsCommands(program: Command): void {
         return;
       }
       saveSkill(id, `---\nname: ${id}\ndescription: Instructions for using ${id}.\n---\n\nAdd your instructions here.`);
-      const summary = syncAllClients(loadConfig(), new SecretsManager());
-      await mutateConfig((config) => persistSyncState(summary, config));
+      const summary = await synchronizeClients();
+      ensureExitCodeForSyncFailures(summary.hasErrors);
       process.stdout.write(`Skill "${id}" created.\n`);
       captureTelemetryEvent({
         name: "operation_completed",
@@ -2124,8 +2177,8 @@ function registerSkillsCommands(program: Command): void {
         return;
       }
       deleteSkill(id);
-      const summary = syncAllClients(loadConfig(), new SecretsManager());
-      await mutateConfig((config) => persistSyncState(summary, config));
+      const summary = await synchronizeClients();
+      ensureExitCodeForSyncFailures(summary.hasErrors);
       process.stdout.write(`Skill "${id}" removed.\n`);
       captureTelemetryEvent({
         name: "operation_completed",
@@ -2149,8 +2202,8 @@ function registerSkillsCommands(program: Command): void {
     .action(async (source: string, options: { skill?: string }) => {
       try {
         const installed = await installSkillFromSource(source, options.skill);
-        const summary = syncAllClients(loadConfig(), new SecretsManager());
-        await mutateConfig((freshConfig) => persistSyncState(summary, freshConfig));
+        const summary = await synchronizeClients();
+        ensureExitCodeForSyncFailures(summary.hasErrors);
         process.stdout.write(`Skill installed: ${installed.id}\n`);
       } catch (error) {
         process.stderr.write(`Error: ${error instanceof Error ? error.message : String(error)}\n`);
@@ -2160,8 +2213,8 @@ function registerSkillsCommands(program: Command): void {
 
   skill.command("pin <id>").description("Pin an installed skill at its current revision").action((id: string) => { pinSkill(id); process.stdout.write(`Skill pinned: ${id}\n`); });
   skill.command("unpin <id>").description("Allow an installed skill to update").action((id: string) => { unpinSkill(id); process.stdout.write(`Skill unpinned: ${id}\n`); });
-  skill.command("update <id>").description("Update an installed skill from its source").action(async (id: string) => { const skill = await updateSkill(id); const summary = syncAllClients(loadConfig(), new SecretsManager()); await mutateConfig((freshConfig) => persistSyncState(summary, freshConfig)); process.stdout.write(`Skill updated: ${skill.id}\n`); });
-  skill.command("rollback <id>").description("Restore the previous installed skill revision").action(async (id: string) => { const skill = rollbackSkill(id); const summary = syncAllClients(loadConfig(), new SecretsManager()); await mutateConfig((freshConfig) => persistSyncState(summary, freshConfig)); process.stdout.write(`Skill rolled back: ${skill.id}\n`); });
+  skill.command("update <id>").description("Update an installed skill from its source").action(async (id: string) => { const skill = await updateSkill(id); const summary = await synchronizeClients(); ensureExitCodeForSyncFailures(summary.hasErrors); process.stdout.write(`Skill updated: ${skill.id}\n`); });
+  skill.command("rollback <id>").description("Restore the previous installed skill revision").action(async (id: string) => { const skill = rollbackSkill(id); const summary = await synchronizeClients(); ensureExitCodeForSyncFailures(summary.hasErrors); process.stdout.write(`Skill rolled back: ${skill.id}\n`); });
 }
 
 function registerShareCommands(program: Command): void {
@@ -2194,8 +2247,8 @@ function registerShareCommands(program: Command): void {
         const result = await importEnvironment(directory, { dryRun: options.dryRun, locked: options.locked, inputs: options.input });
         process.stdout.write(JSON.stringify(result, null, 2) + "\n");
         if (!options.dryRun) {
-          const summary = syncAllClients(loadConfig(), new SecretsManager());
-          await mutateConfig((freshConfig) => persistSyncState(summary, freshConfig));
+          const summary = await synchronizeClients();
+          ensureExitCodeForSyncFailures(summary.hasErrors);
         }
       } catch (error) {
         process.stderr.write(`Error: ${error instanceof Error ? error.message : String(error)}\n`);
@@ -2332,6 +2385,16 @@ function registerProjectCommands(program: Command, cliPath: string): void {
     .command("project")
     .description("Manage project-based MCP configurations");
 
+  projectCmd.command("instructions [target]")
+    .description("Read applicable AGENTS.md files, from project root to nearest scope")
+    .option("--root <directory>", "Project root", process.cwd())
+    .action(async (target: string | undefined, options: { root: string }) => {
+      const { readAgentInstructions } = await import("./core/agent-instructions.js");
+      for (const instruction of readAgentInstructions(options.root, target ?? options.root)) {
+        process.stdout.write(`# ${instruction.path}\n\n${instruction.content}\n`);
+      }
+    });
+
   projectCmd
     .command("init [name]")
     .description("Initialize a local .mcpx.json configuration in the current directory")
@@ -2405,7 +2468,7 @@ function registerProjectCommands(program: Command, cliPath: string): void {
       });
       process.stdout.write(`Unregistered project "${entry.name}" (${resolvedPath}) from the global configuration.\n`);
       
-      process.stdout.write("Auto-syncing managed gateway entries across all supported clients...\n");
+      process.stdout.write("Syncing managed integrations to detected and selected harnesses...\n");
       await autoSyncManagedEntries(cliPath);
       captureTelemetryEvent({
         name: "operation_completed",
@@ -2414,7 +2477,7 @@ function registerProjectCommands(program: Command, cliPath: string): void {
     });
 }
 
-const PLUGIN_COMPONENTS = ["mcpServers", "skills", "hooks", "agents", "commands"] as const;
+const PLUGIN_COMPONENTS = ["skills", "mcpServers"] as const;
 
 function registerPluginCommands(program: Command, _cliPath: string): void {
   const plugin = program.command("plugin").description("Manage plugins");
@@ -2465,7 +2528,7 @@ function registerPluginCommands(program: Command, _cliPath: string): void {
               rl.close();
             }
           }
-          p = await installMarketplacePlugin(source);
+          p = await installMarketplacePlugin(source, { enabled: options.enable !== false, name: options.name });
         } else {
           const { installPlugin } = await import("./core/plugin-manager.js");
           p = await installPlugin(source, { name: options.name, enabled: options.enable !== false });
@@ -2495,7 +2558,7 @@ function registerPluginCommands(program: Command, _cliPath: string): void {
   marketplace
     .command("add <source>")
     .option("--manifest <path>", "Marketplace manifest path inside the source")
-    .description("Add a Claude or Codex plugin marketplace")
+    .description("Add a Claude, Codex, or Cursor plugin marketplace")
     .action(async (source: string, options: { manifest?: string }) => {
       const startedAt = Date.now();
       try {
@@ -2525,6 +2588,7 @@ function registerPluginCommands(program: Command, _cliPath: string): void {
           const result = await refreshMarketplaceWithPlugins(marketplaceName);
           process.stdout.write(`Marketplace updated: ${marketplaceName} (${result.updated.length} plugin update(s))\n`);
           for (const error of result.errors) process.stderr.write(`Warning: ${error}\n`);
+          if (result.errors.length) process.exitCode = 1;
         }
         captureTelemetryEvent({
           name: "operation_completed",
@@ -2570,6 +2634,7 @@ function registerPluginCommands(program: Command, _cliPath: string): void {
 
   plugin
     .command("discover [query]")
+    .alias("browse")
     .option("--marketplace <name>", "Filter by marketplace")
     .option("--category <category>", "Filter by category")
     .description("Browse available marketplace plugins")
@@ -2776,13 +2841,8 @@ function registerPluginCommands(program: Command, _cliPath: string): void {
 }
 
 function registerPluginHostCommand(program: Command): void {
-  program
-    .command("plugin-host <plugin> <server>")
-    .description("Run a plugin MCP server under mcpx policy enforcement")
-    .action(async (plugin: string, server: string) => {
-      const { runPluginHost } = await import("./core/plugin-host.js");
-      runPluginHost(plugin, server);
-    });
+  program.command("plugin-host <plugin> <server>").description("Run a managed plugin MCP server")
+    .action(async (plugin, server) => { const { runPluginHost } = await import("./core/plugin-host.js"); await runPluginHost(plugin, server); });
 }
 
 function registerProxyCommand(program: Command): void {
@@ -3065,10 +3125,47 @@ export async function runCli(argv = process.argv): Promise<void> {
   registerProjectCommands(program, cliPath);
   registerPluginCommands(program, cliPath);
   registerTelemetryCommands(program);
+  program.command("tui").description("Open the integration control center").action(() => runManagementTui(cliPath));
+  program.command("harnesses").option("--json").description("Inspect harness installations and capabilities").action(async options => {
+    await ensureControlService(cliPath);
+    const snapshot = await controlRequest<any>("snapshot");
+    process.stdout.write(options.json ? JSON.stringify(snapshot.harnesses, null, 2) + "\n" : snapshot.harnesses.map((h: any) => `${h.label}  ${h.mode}  ${h.detected ? "detected" : "not detected"}  ${h.configPath ?? ""}`).join("\n") + "\n");
+  });
+  program.command("adopt").option("--dry-run", "Only preview native ownership transfers").option("--harness <id>", "Limit discovery to a harness installation").option("--apply <plan>", "Apply a previously saved JSON plan").option("--yes", "Apply supported discoveries").option("--json").description("Discover, preview, and adopt native integrations").action(async options => {
+    await ensureControlService(cliPath);
+    if (options.dryRun && (options.apply || options.yes)) throw new Error("--dry-run cannot be combined with --apply or --yes");
+    const plan = options.apply ? JSON.parse(fs.readFileSync(path.resolve(options.apply), "utf8")) : await controlRequest<AdoptionPlan>("adoption.plan", [options.harness ? [options.harness] : undefined]);
+    if (options.apply || options.yes) {
+      const result = await controlRequest("adoption.apply", [plan]);
+      process.stdout.write(JSON.stringify(result, null, 2) + "\n");
+    } else if (options.json) process.stdout.write(JSON.stringify(plan, null, 2) + "\n");
+    else {
+      for (const item of plan.items) process.stdout.write(`${item.action.padEnd(12)} ${item.harness} · ${item.kind} · ${item.name}${item.reason ? ` — ${item.reason}` : ""}\n`);
+      for (const error of plan.errors) process.stderr.write(error + "\n");
+      process.stdout.write("Review with mcpx tui, or save --json output and apply it with --apply <plan>.\n");
+    }
+  });
+  program.command("activity").option("--json").action(async options => {
+    await ensureControlService(cliPath);
+    const snapshot = await controlRequest<any>("snapshot");
+    process.stdout.write(options.json ? JSON.stringify(snapshot.operations, null, 2) + "\n" : snapshot.operations.map((op: any) => `${op.id}  ${op.phase}  ${op.label}`).join("\n") + "\n");
+  });
+  program.command("undo <id>").description("Undo an operation using its encrypted receipt").action(async id => { await ensureControlService(cliPath); process.stdout.write(JSON.stringify(await controlRequest("operation.rollback", [id]), null, 2) + "\n"); });
 
+  program.command("harness-mode <id> <mode>").description("Set observe, selected, or automatic synchronization").action(async (id, mode) => { await ensureControlService(cliPath); await controlRequest("harness.mode", [id, mode]); });
+
+  let lease: string | undefined;
+  let commandFailed = false;
+  const managedRoots = new Set(["add", "remove", "enable", "disable", "sync", "skill", "plugin", "project", "secret", "auth", "share"]);
+  if (managedRoots.has(argv[2]) && !argv.includes("--help") && !argv.includes("--dry-run") && process.env.MCPX_CONTROL_CHILD !== "1" && process.env.MCPX_SKIP_DAEMON_AUTOSTART !== "1") {
+    await ensureControlService(cliPath);
+    lease = await controlRequest<string>("lease.acquire", [process.pid, argv[2]]);
+    process.env.MCPX_CONTROL_CHILD = "1";
+  }
   try {
     await program.parseAsync(argv);
   } catch (error) {
+    commandFailed = true;
     const operation = telemetryOperation(rawArgs);
     if (operation) {
       captureTelemetryEvent({
@@ -3083,13 +3180,16 @@ export async function runCli(argv = process.argv): Promise<void> {
     });
     throw error;
   } finally {
+    if (lease) { delete process.env.MCPX_CONTROL_CHILD; await controlRequest("lease.release", [lease, !commandFailed && !process.exitCode]); }
     await flushTelemetry(150);
     await flushNodeErrorReporting(150);
+    await shutdown();
   }
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(fs.realpathSync(process.argv[1])).href) {
   void runCli().catch((error) => {
+    captureException(error);
     if (error instanceof ConfigLoadError) {
       process.stderr.write(`Config error: ${error.message}\n`);
       if (error.backupPath) {

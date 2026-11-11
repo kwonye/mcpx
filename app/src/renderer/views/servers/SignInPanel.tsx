@@ -39,7 +39,7 @@ export function SignInPanel({ serverName, transport, oauthSupport: initialSuppor
   const [expiresAt, setExpiresAt] = useState<number | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const [showToken, setShowToken] = useState(transport !== "http");
-  const [headerName, setHeaderName] = useState("Authorization");
+  const [headerName, setHeaderName] = useState(transport === "http" ? "Authorization" : "");
   const [token, setToken] = useState("");
   const [tokenError, setTokenError] = useState<string | null>(null);
   const [savingToken, setSavingToken] = useState(false);
@@ -105,13 +105,17 @@ export function SignInPanel({ serverName, transport, oauthSupport: initialSuppor
       return;
     }
     if (!headerName.trim()) {
-      setTokenError("Enter the header the server expects.");
+      setTokenError(transport === "http" ? "Enter the header the server expects." : "Enter the environment variable the server reads, like GITHUB_TOKEN.");
       return;
     }
     setSavingToken(true);
     setTokenError(null);
     try {
-      await api().auth.configure({ serverName, headerName: headerName.trim(), authValue: token.trim() });
+      await api().auth.configure({
+        serverName,
+        ...(transport === "http" ? { headerName: headerName.trim() } : { envName: headerName.trim() }),
+        authValue: token.trim()
+      });
       onSignedIn();
     } catch (error) {
       setTokenError(errorMessage(error, "Couldn't save the token."));
@@ -183,17 +187,18 @@ export function SignInPanel({ serverName, transport, oauthSupport: initialSuppor
             value={token}
             onChange={(event) => setToken(event.target.value)}
             placeholder="Paste it here"
-            hint="Stored encrypted on this computer. A bare token is sent as “Bearer …”."
+            hint={transport === "http" ? "Stored as a secret. A bare token is sent as “Bearer …”." : "Stored as a secret and passed to the server when it starts."}
             error={tokenError}
             leading={<KeyRound size={14} />}
             autoFocus={transport !== "http"}
           />
           <Input
-            label="Header"
+            label={transport === "http" ? "Header" : "Environment variable"}
             value={headerName}
             onChange={(event) => setHeaderName(event.target.value)}
+            placeholder={transport === "http" ? undefined : "GITHUB_TOKEN"}
             mono
-            hint="Most servers use Authorization."
+            hint={transport === "http" ? "Most servers use Authorization." : "The variable the server reads its token from."}
           />
           <div className="sign-in__row sign-in__row--end">
             {secondaryAction && <Button variant="ghost" onClick={secondaryAction.onClick} disabled={savingToken}>{secondaryAction.label}</Button>}

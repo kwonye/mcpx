@@ -10,6 +10,12 @@ import { ClientsView } from "./views/clients/ClientsView";
 import { AddonsView } from "./views/addons/AddonsView";
 import { ProjectsView } from "./views/projects/ProjectsView";
 import { SettingsView } from "./views/settings/SettingsView";
+import { useManagementEvents } from "./hooks/useManagement";
+
+function ManagementEvents() {
+  useManagementEvents();
+  return null;
+}
 
 export function isPopoverWindow(hash = window.location.hash): boolean {
   return hash.replace(/^#\/?/, "") === "popover";
@@ -20,6 +26,7 @@ export function App() {
   if (isPopoverWindow()) {
     return (
       <ToastProvider>
+        <ManagementEvents />
         <Popover />
       </ToastProvider>
     );
@@ -27,6 +34,7 @@ export function App() {
   return (
     <ToastProvider>
       <NavigationProvider>
+        <ManagementEvents />
         <Dashboard />
       </NavigationProvider>
     </ToastProvider>

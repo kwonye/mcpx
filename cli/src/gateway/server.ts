@@ -1,4 +1,9 @@
 import http from "node:http";
+import { WorkLimiter } from "../core/work-limiter.js";
+import { AsyncLocalStorage } from "node:async_hooks";
+import { z } from "zod";
+import { listServedSkills, getServedSkill, readServedSkill } from "../core/served-skills.js";
+import { resolveConsumer } from "../core/consumers.js";
 import { URL } from "node:url";
 import crypto from "node:crypto";
 import { Client, SdkHttpError } from "@modelcontextprotocol/client";
@@ -10,8 +15,8 @@ import {
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { createMcpHandler, ProtocolError, Server } from "@modelcontextprotocol/server";
 import { toWebRequest } from "@modelcontextprotocol/node";
-import { MCP_V2_PROTOCOL_VERSION } from "../core/mcp-v2.js";
-import { loadMergedConfig } from "../core/config.js";
+import { MCP_V2_PROTOCOL_VERSION, forwardedMcpParams } from "../core/mcp-v2.js";
+import { runtimeConfig as loadMergedConfig } from "../core/runtime-snapshot.js";
 import { buildEnrichedPath } from "../core/spawn-env.js";
 import { getOAuthAccessToken, isOAuthReference, oauthReferenceServerName, oauthSecretNames } from "../core/oauth.js";
 import { SecretsManager } from "../core/secrets.js";
@@ -28,7 +33,10 @@ import type {
   UpstreamTokenCount
 } from "../types.js";
 import { isServerEnabled } from "../types.js";
+import { captureException } from "../core/analytics.js";
 
+const requestScope = new AsyncLocalStorage<{ signal?: AbortSignal; identity?: string; meta?: Record<string, unknown> }>();
+function diagnosticKey(name: string) { const identity = requestScope.getStore()?.identity; return identity ? `${name}:${identity}` : name; }
 const SERVER_VERSION = APP_VERSION;
 const DEFAULT_UPSTREAM_TIMEOUT_MS = 60_000;
 const DEFAULT_CONNECT_TIMEOUT_MS = 10_000;
@@ -46,6 +54,7 @@ interface GatewayServerOptions {
 }
 
 interface UpstreamConnection {
+  limiter: WorkLimiter;
   fingerprint: string;
   client: Client;
   transport: StdioClientTransport | StreamableHTTPClientTransport;
@@ -288,6 +297,7 @@ function splitNamespacedName(value: string): { serverName: string; upstreamName:
 }
 
 function parseNamespacedUri(uri: string): { serverName: string; upstreamUri: string } | null {
+  if (uri.startsWith("ui://mcpx/")) uri = `mcpx://${uri.slice("ui://mcpx/".length)}`;
   if (uri.startsWith("mcpx://")) {
     const rest = uri.slice("mcpx://".length);
     const slashIndex = rest.indexOf("/");
@@ -307,6 +317,7 @@ function parseNamespacedUri(uri: string): { serverName: string; upstreamUri: str
     }
   }
 
+  if (/^[a-z][a-z0-9+.-]*:/i.test(uri)) return null;
   const nameSplit = splitNamespacedName(uri);
   if (!nameSplit) {
     return null;
@@ -316,6 +327,19 @@ function parseNamespacedUri(uri: string): { serverName: string; upstreamUri: str
     serverName: nameSplit.serverName,
     upstreamUri: nameSplit.upstreamName
   };
+}
+
+function gatewayResourceUri(serverName: string, uri: string): string {
+  return uri.startsWith("ui://")
+    ? `ui://mcpx/${serverName}/${encodeURIComponent(uri)}`
+    : `mcpx://${serverName}/${encodeURIComponent(uri)}`;
+}
+
+function gatewayUiMetadata(meta: unknown, serverName: string, flatten: boolean): unknown {
+  if (flatten || !meta || typeof meta !== "object") return meta;
+  const parsed = z.object({ ui: z.object({ resourceUri: z.string().optional() }).passthrough().optional() }).passthrough().safeParse(meta);
+  if (!parsed.success || !parsed.data.ui?.resourceUri) return meta;
+  return { ...parsed.data, ui: { ...parsed.data.ui, resourceUri: gatewayResourceUri(serverName, parsed.data.ui.resourceUri) } };
 }
 
 async function callUpstream(
@@ -372,9 +396,9 @@ export async function getUpstreamTokenCounts(
 
   for (const upstream of upstreams) {
     const fingerprint = specFingerprint(upstream.spec, secrets);
-    const cached = runtime.tokenCache.get(upstream.name);
+    const cached = runtime.tokenCache.get(diagnosticKey(upstream.name));
     if (cached?.fingerprint === fingerprint) {
-      const runtimeErr = runtime.upstreamErrors?.get(upstream.name);
+      const runtimeErr = runtime.upstreamErrors?.get(diagnosticKey(upstream.name));
       results[upstream.name] = runtimeErr
         ? { ...cached.count, runtimeError: runtimeErr.message, runtimeErrorCode: runtimeErr.code }
         : cached.count;
@@ -429,9 +453,9 @@ export async function getUpstreamTokenCounts(
     };
 
     if (errors.length === 0) {
-      runtime.tokenCache.set(upstream.name, { fingerprint, count: countObj });
+      runtime.tokenCache.set(diagnosticKey(upstream.name), { fingerprint, count: countObj });
     }
-    const runtimeErr = runtime.upstreamErrors?.get(upstream.name);
+    const runtimeErr = runtime.upstreamErrors?.get(diagnosticKey(upstream.name));
     results[upstream.name] = runtimeErr ? { ...countObj, runtimeError: runtimeErr.message, runtimeErrorCode: runtimeErr.code } : countObj;
   }
 
@@ -601,18 +625,18 @@ async function reconcileUpstreamConnections(config: McpxConfig, secrets: Secrets
   }
 }
 
-function invalidateUpstreamConnection(
+async function invalidateUpstreamConnection(
   upstreamName: string,
   passthroughAuthorizationHeader: string | undefined,
   runtime: GatewayRuntimeState
-): void {
+): Promise<void> {
   const key = passthroughAuthorizationHeader ? `${upstreamName}:${passthroughCacheSuffix(passthroughAuthorizationHeader)}` : upstreamName;
   const existing = runtime.upstreamConnections.get(key);
   if (!existing) {
     return;
   }
   runtime.upstreamConnections.delete(key);
-  void closeUpstreamConnection(existing);
+  await closeUpstreamConnection(existing);
 }
 
 async function getUpstreamConnection(
@@ -632,7 +656,7 @@ async function getUpstreamConnection(
         return existing.promise;
       }
       runtime.upstreamConnections.delete(cacheKey);
-      void closeUpstreamConnection(existing);
+      await closeUpstreamConnection(existing);
     }
   }
 
@@ -654,7 +678,7 @@ async function getUpstreamConnection(
           if (!runtime.lastWwwAuthenticate) {
             runtime.lastWwwAuthenticate = new Map();
           }
-          runtime.lastWwwAuthenticate.set(upstream.name, wwwAuth);
+          runtime.lastWwwAuthenticate.set(cacheKey, wwwAuth);
         }
         return response;
       };
@@ -668,12 +692,13 @@ async function getUpstreamConnection(
       { name: "mcpx", version: SERVER_VERSION },
       { versionNegotiation: { mode: { pin: MCP_V2_PROTOCOL_VERSION } } }
     );
-    await withTimeout(
+    try { await withTimeout(
       client.connect(transport),
       DEFAULT_CONNECT_TIMEOUT_MS,
       `Upstream ${upstream.name} failed to connect within ${DEFAULT_CONNECT_TIMEOUT_MS}ms.`
     );
-    return { fingerprint, client, transport };
+    } catch (error) { await transport.close(); throw error; }
+    return { fingerprint, client, transport, limiter: new WorkLimiter() };
   })();
 
   runtime.upstreamConnections.set(cacheKey, { fingerprint, promise });
@@ -705,31 +730,37 @@ async function callUpstreamOnce(
     });
 
     const timeoutMs = getConfiguredTimeoutMs();
-    const timeoutMessage = `Upstream ${upstream.name} timed out after ${timeoutMs}ms for method ${method}.`;
+    const timeoutMessage = `Upstream ${upstream.name} timed out after ${timeoutMs}ms for method ${method}.${method === "tools/call" ? " Outcome unknown; the operation was not replayed." : ""}`;
+    const signal = requestScope.getStore()?.signal;
+    const callOptions = { signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs), timeout: timeoutMs, cacheMode: "bypass" as const, allowInputRequired: true };
+    params = { ...(params as Record<string, unknown> ?? {}), _meta: { ...requestScope.getStore()?.meta, ...(params as { _meta?: Record<string, unknown> })?._meta } };
 
+
+    return await connection.limiter.run(callOptions.signal, async () => {
     if (method === "tools/list") {
-      return withTimeout(connection.client.listTools(params as never), timeoutMs, timeoutMessage);
+      return withTimeout(connection.client.listTools(params as never, callOptions), timeoutMs, timeoutMessage);
     }
     if (method === "resources/list") {
-      return withTimeout(connection.client.listResources(params as never), timeoutMs, timeoutMessage);
+      return withTimeout(connection.client.listResources(params as never, callOptions), timeoutMs, timeoutMessage);
     }
     if (method === "prompts/list") {
-      return withTimeout(connection.client.listPrompts(params as never), timeoutMs, timeoutMessage);
+      return withTimeout(connection.client.listPrompts(params as never, callOptions), timeoutMs, timeoutMessage);
     }
     if (method === "tools/call") {
-      return withTimeout(connection.client.callTool(params as never), timeoutMs, timeoutMessage);
+      return withTimeout(connection.client.callTool(params as never, callOptions), timeoutMs, timeoutMessage);
     }
     if (method === "resources/read") {
-      return withTimeout(connection.client.readResource(params as never), timeoutMs, timeoutMessage);
+      return withTimeout(connection.client.readResource(params as never, callOptions), timeoutMs, timeoutMessage);
     }
     if (method === "prompts/get") {
-      return withTimeout(connection.client.getPrompt(params as never), timeoutMs, timeoutMessage);
+      return withTimeout(connection.client.getPrompt(params as never, callOptions), timeoutMs, timeoutMessage);
     }
 
     throw new Error(`Unsupported method: ${method}`);
+    });
   } catch (error) {
     // Invalidate connection on any error so the next call reconnects cleanly.
-    invalidateUpstreamConnection(upstream.name, passthroughAuthorizationHeader, runtime);
+    await invalidateUpstreamConnection(upstream.name, passthroughAuthorizationHeader, runtime);
 
     // HTTP-specific: retry once with a refreshed OAuth token on 401/403.
     if (
@@ -742,7 +773,7 @@ async function callUpstreamOnce(
     }
 
     // Classify all errors through the structured taxonomy.
-    const wwwAuthenticate = runtime.lastWwwAuthenticate?.get(upstream.name);
+    const wwwAuthenticate = runtime.lastWwwAuthenticate?.get(passthroughAuthorizationHeader ? `${upstream.name}:${passthroughCacheSuffix(passthroughAuthorizationHeader)}` : upstream.name);
     throw classifyUpstreamError(upstream.name, error, wwwAuthenticate);
   }
 }
@@ -807,17 +838,18 @@ async function handleListTools(
       if (!runtime.tokenCache) {
         runtime.tokenCache = new Map();
       }
-      const cached = runtime.tokenCache.get(upstream.name);
+      const cached = runtime.tokenCache.get(diagnosticKey(upstream.name));
       const existing = cached?.fingerprint === specFingerprint(upstream.spec, secrets) ? cached.count : { tools: 0, resources: 0, prompts: 0, total: 0 };
       existing.tools = Math.ceil(JSON.stringify(result.tools ?? []).length / 4);
       existing.total = existing.tools + existing.resources + existing.prompts;
       delete existing.error;
-      runtime.tokenCache.set(upstream.name, { fingerprint: specFingerprint(upstream.spec, secrets), count: existing });
+      runtime.tokenCache.set(diagnosticKey(upstream.name), { fingerprint: specFingerprint(upstream.spec, secrets), count: existing });
 
       for (const tool of result.tools ?? []) {
         const name = typeof tool.name === "string" ? tool.name : "tool";
         tools.push({
           ...tool,
+          ...(tool._meta ? { _meta: gatewayUiMetadata(tool._meta, upstream.name, flattenNames) } : {}),
           name: flattenNames ? name : `${upstream.name}.${name}`
         });
       }
@@ -827,15 +859,16 @@ async function handleListTools(
       }
 
       const code = error instanceof UpstreamError ? error.code : "upstream_error";
-      runtime.upstreamErrors?.set(upstream.name, { code, message: error instanceof Error ? error.message : String(error) });
+      runtime.upstreamErrors?.set(diagnosticKey(upstream.name), { code, message: error instanceof Error ? error.message : String(error) });
     }
   }
 
   const failedUpstreams = upstreams
-    .filter((u) => runtime.upstreamErrors?.has(u.name))
-    .map((u) => ({ name: u.name, ...runtime.upstreamErrors!.get(u.name)! }));
+    .filter((u) => runtime.upstreamErrors?.has(diagnosticKey(u.name)))
+    .map((u) => ({ name: u.name, ...runtime.upstreamErrors!.get(diagnosticKey(u.name))! }));
 
   return {
+    resultType: "complete", ttlMs: 0, cacheScope: "private",
     tools,
     ...(failedUpstreams.length > 0 ? { _meta: { mcpxUpstreamErrors: failedUpstreams } } : {})
   };
@@ -869,12 +902,12 @@ async function handleListResources(
       if (!runtime.tokenCache) {
         runtime.tokenCache = new Map();
       }
-      const cached = runtime.tokenCache.get(upstream.name);
+      const cached = runtime.tokenCache.get(diagnosticKey(upstream.name));
       const existing = cached?.fingerprint === specFingerprint(upstream.spec, secrets) ? cached.count : { tools: 0, resources: 0, prompts: 0, total: 0 };
       existing.resources = Math.ceil(JSON.stringify(result.resources ?? []).length / 4);
       existing.total = existing.tools + existing.resources + existing.prompts;
       delete existing.error;
-      runtime.tokenCache.set(upstream.name, { fingerprint: specFingerprint(upstream.spec, secrets), count: existing });
+      runtime.tokenCache.set(diagnosticKey(upstream.name), { fingerprint: specFingerprint(upstream.spec, secrets), count: existing });
 
       for (const resource of result.resources ?? []) {
         const originalUri = typeof resource.uri === "string" ? resource.uri : "";
@@ -882,7 +915,7 @@ async function handleListResources(
         resources.push({
           ...resource,
           name: flattenNames ? originalName : `${upstream.name}.${originalName}`,
-          uri: flattenNames ? originalUri : `mcpx://${upstream.name}/${encodeURIComponent(originalUri)}`
+          uri: flattenNames ? originalUri : gatewayResourceUri(upstream.name, originalUri)
         });
       }
     } catch (error) {
@@ -891,15 +924,16 @@ async function handleListResources(
       }
 
       const code = error instanceof UpstreamError ? error.code : "upstream_error";
-      runtime.upstreamErrors?.set(upstream.name, { code, message: error instanceof Error ? error.message : String(error) });
+      runtime.upstreamErrors?.set(diagnosticKey(upstream.name), { code, message: error instanceof Error ? error.message : String(error) });
     }
   }
 
   const failedUpstreams = upstreams
-    .filter((u) => runtime.upstreamErrors?.has(u.name))
-    .map((u) => ({ name: u.name, ...runtime.upstreamErrors!.get(u.name)! }));
+    .filter((u) => runtime.upstreamErrors?.has(diagnosticKey(u.name)))
+    .map((u) => ({ name: u.name, ...runtime.upstreamErrors!.get(diagnosticKey(u.name))! }));
 
   return {
+    resultType: "complete", ttlMs: 0, cacheScope: "private",
     resources,
     ...(failedUpstreams.length > 0 ? { _meta: { mcpxUpstreamErrors: failedUpstreams } } : {})
   };
@@ -933,12 +967,12 @@ async function handleListPrompts(
       if (!runtime.tokenCache) {
         runtime.tokenCache = new Map();
       }
-      const cached = runtime.tokenCache.get(upstream.name);
+      const cached = runtime.tokenCache.get(diagnosticKey(upstream.name));
       const existing = cached?.fingerprint === specFingerprint(upstream.spec, secrets) ? cached.count : { tools: 0, resources: 0, prompts: 0, total: 0 };
       existing.prompts = Math.ceil(JSON.stringify(result.prompts ?? []).length / 4);
       existing.total = existing.tools + existing.resources + existing.prompts;
       delete existing.error;
-      runtime.tokenCache.set(upstream.name, { fingerprint: specFingerprint(upstream.spec, secrets), count: existing });
+      runtime.tokenCache.set(diagnosticKey(upstream.name), { fingerprint: specFingerprint(upstream.spec, secrets), count: existing });
 
       for (const prompt of result.prompts ?? []) {
         const name = typeof prompt.name === "string" ? prompt.name : "prompt";
@@ -953,15 +987,16 @@ async function handleListPrompts(
       }
 
       const code = error instanceof UpstreamError ? error.code : "upstream_error";
-      runtime.upstreamErrors?.set(upstream.name, { code, message: error instanceof Error ? error.message : String(error) });
+      runtime.upstreamErrors?.set(diagnosticKey(upstream.name), { code, message: error instanceof Error ? error.message : String(error) });
     }
   }
 
   const failedUpstreams = upstreams
-    .filter((u) => runtime.upstreamErrors?.has(u.name))
-    .map((u) => ({ name: u.name, ...runtime.upstreamErrors!.get(u.name)! }));
+    .filter((u) => runtime.upstreamErrors?.has(diagnosticKey(u.name)))
+    .map((u) => ({ name: u.name, ...runtime.upstreamErrors!.get(diagnosticKey(u.name))! }));
 
   return {
+    resultType: "complete", ttlMs: 0, cacheScope: "private",
     prompts,
     ...(failedUpstreams.length > 0 ? { _meta: { mcpxUpstreamErrors: failedUpstreams } } : {})
   };
@@ -1011,14 +1046,14 @@ async function routeNamespacedCall(
 
     try {
       const result = await callUpstream(upstream, method, upstreamParams, id, secrets, runtime, clientAuthorizationHeader);
-      runtime.upstreamErrors?.delete(upstream.name);
+      runtime.upstreamErrors?.delete(diagnosticKey(upstream.name));
       return makeResult(id, result);
     } catch (error) {
       if (isAuthChallenge(error)) {
         throw error;
       }
       const errCode = error instanceof UpstreamError ? error.code : "upstream_error";
-      runtime.upstreamErrors?.set(upstream.name, { code: errCode, message: (error as Error).message });
+      runtime.upstreamErrors?.set(diagnosticKey(upstream.name), { code: errCode, message: (error as Error).message });
       return makeError(id, -32000, (error as Error).message, { mcpxCode: errCode, upstream: upstream.name });
     }
   }
@@ -1049,14 +1084,14 @@ async function routeNamespacedCall(
 
     try {
       const result = await callUpstream(upstream, method, upstreamParams, id, secrets, runtime, clientAuthorizationHeader);
-      runtime.upstreamErrors?.delete(upstream.name);
+      runtime.upstreamErrors?.delete(diagnosticKey(upstream.name));
       return makeResult(id, result);
     } catch (error) {
       if (isAuthChallenge(error)) {
         throw error;
       }
       const errCode = error instanceof UpstreamError ? error.code : "upstream_error";
-      runtime.upstreamErrors?.set(upstream.name, { code: errCode, message: (error as Error).message });
+      runtime.upstreamErrors?.set(diagnosticKey(upstream.name), { code: errCode, message: (error as Error).message });
       return makeError(id, -32000, (error as Error).message, { mcpxCode: errCode, upstream: upstream.name });
     }
   }
@@ -1085,15 +1120,19 @@ async function routeNamespacedCall(
   };
 
   try {
-    const result = await callUpstream(upstream, method, upstreamParams, id, secrets, runtime, clientAuthorizationHeader);
-    runtime.upstreamErrors?.delete(upstream.name);
+    let result = await callUpstream(upstream, method, upstreamParams, id, secrets, runtime, clientAuthorizationHeader);
+    if (!flattenedUpstream && result && typeof result === "object" && "contents" in result) {
+      const resourceResult = result as { contents: Array<Record<string, unknown>> };
+      result = { ...resourceResult, contents: resourceResult.contents.map(content => ({ ...content, ...(typeof content.uri === "string" ? { uri: gatewayResourceUri(upstream.name, content.uri) } : {}) })) };
+    }
+    runtime.upstreamErrors?.delete(diagnosticKey(upstream.name));
     return makeResult(id, result);
   } catch (error) {
     if (isAuthChallenge(error)) {
       throw error;
     }
     const errCode = error instanceof UpstreamError ? error.code : "upstream_error";
-    runtime.upstreamErrors?.set(upstream.name, { code: errCode, message: (error as Error).message });
+    runtime.upstreamErrors?.set(diagnosticKey(upstream.name), { code: errCode, message: (error as Error).message });
     return makeError(id, -32000, (error as Error).message, { mcpxCode: errCode, upstream: upstream.name });
   }
 }
@@ -1109,6 +1148,7 @@ function getClientAuthorizationFromWebRequest(request: Request | undefined, expe
     return undefined;
   }
 
+  if (resolveConsumer(loadMergedConfig(), token)) return undefined;
   return authHeader;
 }
 
@@ -1119,11 +1159,18 @@ async function prepareGatewayRequest(
   secrets: SecretsManager,
   upstreamFilter: string | undefined
 ): Promise<{ config: McpxConfig; clientAuthorizationHeader?: string }> {
-  const config = loadMergedConfig();
+  const fullConfig = loadMergedConfig();
+  await reconcileUpstreamConnections(fullConfig, secrets, runtime);
+  const auth = request?.headers.get("authorization")?.replace(/^Bearer /, "") ?? "";
+  const consumer = resolveConsumer(fullConfig, auth, secrets);
+  const config = { ...fullConfig, servers: Object.fromEntries(Object.entries(fullConfig.servers).filter(([name, spec]) => {
+    if (spec.scope && spec.scope !== consumer?.projectPath) return false;
+    const disabled = consumer?.projectPath ? Object.values(fullConfig.projects ?? {}).find(project => project.path === consumer.projectPath)?.disabledServers : undefined;
+    return !disabled?.includes(name);
+  })) };
   if (upstreamFilter && listUpstreams(config, upstreamFilter).length === 0) {
     throw new ProtocolError(-32602, `Unknown upstream: ${upstreamFilter}`);
   }
-  await reconcileUpstreamConnections(config, secrets, runtime);
   return {
     config,
     clientAuthorizationHeader: getClientAuthorizationFromWebRequest(request, expectedToken)
@@ -1184,15 +1231,16 @@ function createGatewayMcpHandler(
           capabilities: {
             tools: {},
             resources: {},
-            prompts: {}
+            prompts: {},
+            extensions: { "io.modelcontextprotocol/skills": {}, "io.modelcontextprotocol/ui": { mimeTypes: ["text/html;profile=mcp-app"] } }
           },
           supportedProtocolVersions: [MCP_V2_PROTOCOL_VERSION]
         }
       );
 
-      const recordSuccessOrFailure = async <T>(method: string, work: () => Promise<T>): Promise<T> => {
+      const recordSuccessOrFailure = async <T>(method: string, meta: Record<string, unknown> | undefined, work: () => Promise<T>): Promise<T> => {
         try {
-          const result = await work();
+          const result = await requestScope.run({ signal: request?.signal, meta, identity: clientAuthorizationHeader ? passthroughCacheSuffix(clientAuthorizationHeader) : undefined }, work);
           recordGatewayCall(runtime, method, null);
           return result;
         } catch (error) {
@@ -1209,40 +1257,50 @@ function createGatewayMcpHandler(
         }
       };
 
+      const skillProject = () => resolveConsumer(loadMergedConfig(), request?.headers.get("authorization")?.replace(/^Bearer /, "") ?? "", options.secrets)?.projectPath;
+      server.setRequestHandler("skills/list", { params: z.object({ cursor: z.string().optional() }).passthrough(), result: z.object({ skills: z.array(z.unknown()) }).passthrough() }, async params => listServedSkills(loadMergedConfig(), skillProject(), params.cursor));
+      server.setRequestHandler("skills/get", { params: z.object({ uri: z.string() }).passthrough(), result: z.object({ skill: z.unknown() }).passthrough() }, async params => {
+        try { return getServedSkill(loadMergedConfig(), params.uri, skillProject()); }
+        catch { throw new ProtocolError(-32602, "Unknown skill URI"); }
+      });
       server.setRequestHandler("tools/list", async (_request, _context) => {
-        return recordSuccessOrFailure("tools/list", async () => {
+        return recordSuccessOrFailure("tools/list", { ..._context.mcpReq._meta, ..._context.mcpReq.envelope }, async () => {
           const { config } = await prepareGatewayRequest(request, options.expectedToken, runtime, options.secrets, upstreamFilter);
           return handleListTools(config, options.secrets, runtime, upstreamFilter, clientAuthorizationHeader);
         }) as Promise<any>;
       });
       server.setRequestHandler("resources/list", async (_request, _context) => {
-        return recordSuccessOrFailure("resources/list", async () => {
+        return recordSuccessOrFailure("resources/list", { ..._context.mcpReq._meta, ..._context.mcpReq.envelope }, async () => {
           const { config } = await prepareGatewayRequest(request, options.expectedToken, runtime, options.secrets, upstreamFilter);
           return handleListResources(config, options.secrets, runtime, upstreamFilter, clientAuthorizationHeader);
         }) as Promise<any>;
       });
       server.setRequestHandler("prompts/list", async (_request, _context) => {
-        return recordSuccessOrFailure("prompts/list", async () => {
+        return recordSuccessOrFailure("prompts/list", { ..._context.mcpReq._meta, ..._context.mcpReq.envelope }, async () => {
           const { config } = await prepareGatewayRequest(request, options.expectedToken, runtime, options.secrets, upstreamFilter);
           return handleListPrompts(config, options.secrets, runtime, upstreamFilter, clientAuthorizationHeader);
         }) as Promise<any>;
       });
       server.setRequestHandler("tools/call", async (request, context) => {
-        return recordSuccessOrFailure("tools/call", async () => {
+        return recordSuccessOrFailure("tools/call", { ...context.mcpReq._meta, ...context.mcpReq.envelope }, async () => {
           const { config } = await prepareGatewayRequest(context.http?.req, options.expectedToken, runtime, options.secrets, upstreamFilter);
-          return routeGatewayCall(config, "tools/call", request.params as Record<string, unknown> | undefined, options.secrets, runtime, upstreamFilter, clientAuthorizationHeader) as Promise<any>;
+          return routeGatewayCall(config, "tools/call", forwardedMcpParams(request.params as Record<string, unknown> | undefined, context), options.secrets, runtime, upstreamFilter, clientAuthorizationHeader) as Promise<any>;
         });
       });
       server.setRequestHandler("resources/read", async (request, context) => {
-        return recordSuccessOrFailure("resources/read", async () => {
+        return recordSuccessOrFailure("resources/read", { ...context.mcpReq._meta, ...context.mcpReq.envelope }, async () => {
           const { config } = await prepareGatewayRequest(context.http?.req, options.expectedToken, runtime, options.secrets, upstreamFilter);
-          return routeGatewayCall(config, "resources/read", request.params as Record<string, unknown> | undefined, options.secrets, runtime, upstreamFilter, clientAuthorizationHeader) as Promise<any>;
+          if (String(request.params.uri).startsWith("skill://mcpx/")) {
+            try { return readServedSkill(config, String(request.params.uri), skillProject()); }
+            catch { throw new ProtocolError(-32602, "Unknown skill resource"); }
+          }
+          return routeGatewayCall(config, "resources/read", forwardedMcpParams(request.params as Record<string, unknown> | undefined, context), options.secrets, runtime, upstreamFilter, clientAuthorizationHeader) as Promise<any>;
         });
       });
       server.setRequestHandler("prompts/get", async (request, context) => {
-        return recordSuccessOrFailure("prompts/get", async () => {
+        return recordSuccessOrFailure("prompts/get", { ...context.mcpReq._meta, ...context.mcpReq.envelope }, async () => {
           const { config } = await prepareGatewayRequest(context.http?.req, options.expectedToken, runtime, options.secrets, upstreamFilter);
-          return routeGatewayCall(config, "prompts/get", request.params as Record<string, unknown> | undefined, options.secrets, runtime, upstreamFilter, clientAuthorizationHeader) as Promise<any>;
+          return routeGatewayCall(config, "prompts/get", forwardedMcpParams(request.params as Record<string, unknown> | undefined, context), options.secrets, runtime, upstreamFilter, clientAuthorizationHeader) as Promise<any>;
         });
       });
 
@@ -1452,6 +1510,8 @@ export function createGatewayServer(options: GatewayServerOptions): http.Server 
     let requestUrl = new URL(request.url ?? "/", `http://${request.headers.host ?? "127.0.0.1"}`);
     try {
       requestUrl = new URL(request.url ?? "/", `http://${request.headers.host ?? "127.0.0.1"}`);
+      const origin = request.headers.origin;
+      if (origin && !/^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/.test(origin)) { response.writeHead(403); response.end("Forbidden origin"); return; }
       if (debug) {
         console.error(`[mcpx gateway] ${request.method ?? "?"} ${requestUrl.pathname} auth=${request.headers.authorization ? "yes" : "no"} accept=${request.headers.accept ?? ""}`);
         // Redact credential-bearing headers -- MCPX_GATEWAY_DEBUG dumps every
@@ -1477,7 +1537,7 @@ export function createGatewayServer(options: GatewayServerOptions): http.Server 
         }
         response.statusCode = 200;
         response.setHeader("content-type", "application/json");
-        response.end(JSON.stringify({ ok: true, server: "mcpx", protocolVersion: MCP_V2_PROTOCOL_VERSION }));
+        response.end(JSON.stringify({ ok: true, pid: process.pid, server: "mcpx", protocolVersion: MCP_V2_PROTOCOL_VERSION }));
         return;
       }
 
@@ -1516,7 +1576,8 @@ export function createGatewayServer(options: GatewayServerOptions): http.Server 
         return;
       }
 
-      if (!authHeaderIsValid(request, options.expectedToken)) {
+      const consumerAuth = request.headers.authorization?.replace(/^Bearer /, "");
+      if (!authHeaderIsValid(request, options.expectedToken) && !(consumerAuth && resolveConsumer(loadMergedConfig(), consumerAuth, options.secrets))) {
         response.statusCode = 401;
         response.setHeader("content-type", "application/json");
         response.end(JSON.stringify({ error: "unauthorized" }));
@@ -1549,6 +1610,7 @@ export function createGatewayServer(options: GatewayServerOptions): http.Server 
         return;
       }
 
+      captureException(error, { context: "gateway_request" });
       response.statusCode = 500;
       response.setHeader("content-type", "application/json");
       response.end(JSON.stringify(makeError(null, -32000, (error as Error).message)));

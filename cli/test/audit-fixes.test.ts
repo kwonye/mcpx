@@ -33,71 +33,17 @@ function setupTempEnv(prefix: string) {
   };
 }
 
-describe("PLUG-02: Skill ID sanitization", () => {
-  let env: ReturnType<typeof setupTempEnv>;
-
-  beforeEach(() => {
-    env = setupTempEnv("mcpx-plug02-");
-  });
-
-  afterEach(() => {
-    env.restore();
-  });
-
-  it("sanitizes skill IDs containing path traversal sequences", () => {
-    const pluginRoot = path.join(env.root, "evil-plugin");
-    fs.mkdirSync(path.join(pluginRoot, "skills", "malicious"), { recursive: true });
-    fs.writeFileSync(
-      path.join(pluginRoot, "skills", "malicious", "SKILL.md"),
-      "---\nname: ../../../etc/evil\ndescription: Malicious skill\n---\n# Evil"
-    );
-
-    const components = discoverComponents(pluginRoot);
-    expect(components.skills).toHaveLength(1);
-    // Path separators are replaced with underscores, preventing traversal
-    expect(components.skills[0].id).not.toContain("/");
-    expect(components.skills[0].id).not.toContain("\\");
-    // The sanitized ID should be safe for use as a directory name
-    expect(components.skills[0].id).toBe("_.._.._etc_evil");
-  });
-
-  it("sanitizes skill IDs with backslashes", () => {
-    const pluginRoot = path.join(env.root, "evil-plugin");
-    fs.mkdirSync(path.join(pluginRoot, "skills", "malicious"), { recursive: true });
-    fs.writeFileSync(
-      path.join(pluginRoot, "skills", "malicious", "SKILL.md"),
-      "---\nname: ..\\..\\windows\\evil\ndescription: Malicious\n---\n# Evil"
-    );
-
-    const components = discoverComponents(pluginRoot);
-    expect(components.skills[0].id).not.toContain("\\");
-    expect(components.skills[0].id).not.toContain("/");
-    // Backslashes are replaced with underscores
-    expect(components.skills[0].id).toBe("_.._windows_evil");
-  });
-
-  it("sanitizes skill IDs with leading dots", () => {
-    const pluginRoot = path.join(env.root, "evil-plugin");
-    fs.mkdirSync(path.join(pluginRoot, "skills", "malicious"), { recursive: true });
-    fs.writeFileSync(
-      path.join(pluginRoot, "skills", "malicious", "SKILL.md"),
-      "---\nname: ....hidden\ndescription: Hidden\n---\n# Hidden"
-    );
-
-    const components = discoverComponents(pluginRoot);
-    expect(components.skills[0].id).not.toMatch(/^\./);
-  });
-
-  it("preserves legitimate skill IDs", () => {
-    const pluginRoot = path.join(env.root, "good-plugin");
-    fs.mkdirSync(path.join(pluginRoot, "skills", "normal"), { recursive: true });
-    fs.writeFileSync(
-      path.join(pluginRoot, "skills", "normal", "SKILL.md"),
-      "---\nname: my-awesome-skill\ndescription: Normal skill\n---\n# Normal"
-    );
-
-    const components = discoverComponents(pluginRoot);
-    expect(components.skills[0].id).toBe("my-awesome-skill");
+describe("PLUG-02: Invalid skill names", () => {
+  it("rejects traversal names rather than silently rewriting metadata", () => {
+    const env = setupTempEnv("invalid-skill-");
+    try {
+      const directory = path.join(env.root, "skills/review");
+      fs.mkdirSync(directory, { recursive: true });
+      for (const name of ["../../../etc/evil", "....hidden", "a--b"]) {
+        fs.writeFileSync(path.join(directory, "SKILL.md"), `---\nname: ${name}\ndescription: Review\n---\n`);
+        expect(() => discoverComponents(env.root)).toThrow();
+      }
+    } finally { env.restore(); }
   });
 });
 
@@ -141,7 +87,7 @@ describe("PLUG-02: Projection containment checks", () => {
     }]);
 
     // The sanitized ID should be safe and stay within the base directory
-    const codexSkillsDir = path.join(env.root, ".codex", "skills");
+    const codexSkillsDir = path.join(env.root, ".agents", "skills");
     if (fs.existsSync(codexSkillsDir)) {
       const projectedPath = path.join(codexSkillsDir, maliciousSkillId);
       const resolvedBase = path.resolve(codexSkillsDir);
@@ -208,7 +154,7 @@ describe("GW-03: Managed-index locking", () => {
     saveManagedIndex({ schemaVersion: 1, managed: {} }, indexPath);
 
     // Create a stale lock file (older than 5 seconds)
-    fs.writeFileSync(lockPath, `${process.pid}\n`);
+    fs.writeFileSync(lockPath, "999999999\n");
     const oldTime = Date.now() - 10000; // 10 seconds ago
     fs.utimesSync(lockPath, oldTime / 1000, oldTime / 1000);
 
@@ -314,20 +260,16 @@ describe("SYNC-03: Drift detection", () => {
   });
 });
 
-describe("GW-05: Proxy bridge version pinning", () => {
-  it("uses APP_VERSION instead of @latest in proxy fallback", async () => {
+describe("GW-05: Claude Desktop proxy runtime", () => {
+  it("uses the installed CLI and per-consumer proxy token", async () => {
     // This test verifies the fix is in place by checking the source code
     const claudeDesktopPath = path.join(process.cwd(), "src/adapters/claude-desktop.ts");
     const source = fs.readFileSync(claudeDesktopPath, "utf8");
-    
-    // Should contain APP_VERSION import
-    expect(source).toContain("APP_VERSION");
-    
-    // Should use APP_VERSION in the fallback
-    expect(source).toContain("@kwonye/mcpx@${APP_VERSION}");
-    
-    // Should NOT contain @latest
-    expect(source).not.toContain("@kwonye/mcpx@latest");
+
+    expect(source).toContain("localCliCommand");
+    expect(source).toContain("MCPX_CLI_ENTRY");
+    expect(source).toContain("MCPX_PROXY_TOKEN");
+    expect(source).not.toContain("@kwonye/mcpx@");
   });
 });
 
@@ -441,9 +383,9 @@ describe("SYNC-01: Adapter disable/enable fixes", () => {
   });
 
   it("opencode uses enabled-only names", async () => {
-    const opencodePath = path.join(process.cwd(), "src/adapters/opencode.ts");
+    const opencodePath = path.join(process.cwd(), "src/adapters/json.ts");
     const source = fs.readFileSync(opencodePath, "utf8");
-    expect(source).toContain("enabledManagedNames");
+    expect(source).toContain("managedEntries.filter(e => e.enabled)");
   });
 
   it("kiro uses enabled-only names", async () => {
@@ -620,16 +562,13 @@ describe("PLUG-04: Plugin project overrides", () => {
   });
 });
 
-describe("PLUG-03: Path traversal guard", () => {
-  it("uses path.resolve before checking containment", async () => {
-    // This test verifies the fix is in place by checking the source code
-    const pluginHostPath = path.join(process.cwd(), "src/core/plugin-host.ts");
-    const source = fs.readFileSync(pluginHostPath, "utf8");
-    
-    // Should use path.resolve on the path
-    expect(source).toContain("path.resolve");
-    
-    // Should check with path.sep suffix to prevent prefix attacks
-    expect(source).toContain("path.sep");
+describe("PLUG-03: Managed plugin host", () => {
+  it("rejects an unknown plugin before executing a subprocess", async () => {
+    const env = setupTempEnv("plugin-host-unknown-");
+    try {
+      const proc = Bun.spawn(["node", path.join(process.cwd(), "dist/cli.js"), "plugin-host", "missing", "server"], { env: process.env, stdout: "pipe", stderr: "pipe" });
+      expect(await proc.exited).toBe(1);
+      expect(await new Response(proc.stderr).text()).toContain("not found");
+    } finally { env.restore(); }
   });
 });

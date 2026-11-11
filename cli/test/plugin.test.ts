@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
@@ -38,6 +39,12 @@ function setupTempEnv(prefix: string) {
   };
 }
 
+function standardCollection(root: string, name = "review"): void {
+  const directory = path.join(root, "skills", name);
+  fs.mkdirSync(directory, { recursive: true });
+  fs.writeFileSync(path.join(directory, "SKILL.md"), `---\nname: ${name}\ndescription: Review code\n---\nBody`);
+}
+
 describe("plugin source parsing", () => {
   it("parses github sources", () => {
     const s1 = parseSource("obra/superpowers");
@@ -62,6 +69,10 @@ describe("plugin source parsing", () => {
 
     const s3 = parseSource("../other");
     expect(s3.type).toBe("local");
+
+    expect(parseSource("C:\\Users\\test\\plugin").type).toBe("local");
+    expect(parseSource("C:/Users/test/plugin").type).toBe("local");
+    expect(parseSource("\\\\server\\share\\plugin").type).toBe("local");
   });
 
   it("parses npm sources", () => {
@@ -72,121 +83,25 @@ describe("plugin source parsing", () => {
   });
 });
 
-describe("plugin manifest parsing", () => {
-  let env: ReturnType<typeof setupTempEnv>;
-
-  beforeEach(() => {
-    env = setupTempEnv("mcpx-parse-test-");
+describe("standard collection discovery", () => {
+  it("reads distribution metadata without loading hooks, commands, or subagents", () => {
+    const env = setupTempEnv("standard-collection-");
+    try {
+      for (const file of [".claude-plugin/plugin.json", ".codex-plugin/plugin.json", "plugin.json", ".mcp.json", "hooks/hooks.json", "commands/run.md", "agents/reviewer.md"]) {
+        fs.mkdirSync(path.dirname(path.join(env.root, file)), { recursive: true });
+        fs.writeFileSync(path.join(env.root, file), "{}");
+      }
+      expect(hasManifest(env.root)).toBe(true);
+      expect(readManifest(env.root)).not.toBeNull();
+      expect(discoverComponents(env.root)).toEqual({ skills: [], hooks: [], commands: [], agents: [], mcpServers: [] });
+    } finally { env.restore(); }
   });
-
-  afterEach(() => {
-    env.restore();
-  });
-
-  it("reads manifest from .claude-plugin/plugin.json", () => {
-    const pluginRoot = path.join(env.root, "test-plugin");
-    fs.mkdirSync(path.join(pluginRoot, ".claude-plugin"), { recursive: true });
-    fs.writeFileSync(
-      path.join(pluginRoot, ".claude-plugin", "plugin.json"),
-      JSON.stringify({ name: "test-plugin", version: "1.0.0", description: "A test" })
-    );
-
-    const manifest = readManifest(pluginRoot);
-    expect(manifest).not.toBeNull();
-    expect(manifest?.name).toBe("test-plugin");
-    expect(manifest?.version).toBe("1.0.0");
-    expect(manifest?.description).toBe("A test");
-  });
-
-  it("reads the Agent Plugins v1 root manifest and mcp.json", () => {
-    const pluginRoot = path.join(env.root, "agent-plugin");
-    fs.mkdirSync(pluginRoot, { recursive: true });
-    fs.writeFileSync(
-      path.join(pluginRoot, "plugin.json"),
-      JSON.stringify({
-        $schema: "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
-        name: "agent-plugin",
-        version: "1.0.0",
-        description: "An Agent Plugins v1 package"
-      })
-    );
-    fs.writeFileSync(
-      path.join(pluginRoot, "mcp.json"),
-      JSON.stringify({
-        $schema: "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
-        mcpServers: {
-          remote: { type: "streamable-http", url: "https://example.com/mcp" }
-        }
-      })
-    );
-
-    expect(hasManifest(pluginRoot)).toBe(true);
-    expect(readManifest(pluginRoot)?.name).toBe("agent-plugin");
-    expect(discoverComponents(pluginRoot).mcpServers).toMatchObject([
-      { id: "remote", transport: "http", url: "https://example.com/mcp" }
-    ]);
-  });
-
-  it("returns null for missing manifest", () => {
-    expect(readManifest(env.root)).toBeNull();
-  });
-
-  it("discovers skills from skills/*/SKILL.md", () => {
-    const pluginRoot = path.join(env.root, "test-plugin");
-    fs.mkdirSync(path.join(pluginRoot, "skills", "my-skill"), { recursive: true });
-    fs.writeFileSync(
-      path.join(pluginRoot, "skills", "my-skill", "SKILL.md"),
-      "---\nname: My Skill\ndescription: A skill\n---\n# Content"
-    );
-
-    const components = discoverComponents(pluginRoot);
-    expect(components.skills).toHaveLength(1);
-    expect(components.skills[0].id).toBe("My Skill");
-    expect(components.skills[0].type).toBe("skills");
-  });
-
-  it("discovers mcp servers from .mcp.json", () => {
-    const pluginRoot = path.join(env.root, "test-plugin");
-    fs.mkdirSync(pluginRoot, { recursive: true });
-    fs.writeFileSync(
-      path.join(pluginRoot, ".mcp.json"),
-      JSON.stringify({
-        mcpServers: {
-          "my-server": { command: "node", args: ["server.js"] }
-        }
-      })
-    );
-
-    const components = discoverComponents(pluginRoot);
-    expect(components.mcpServers).toHaveLength(1);
-    expect(components.mcpServers[0].id).toBe("my-server");
-    expect(components.mcpServers[0].command).toBe("node");
-  });
-
-  it("discovers hooks from hooks/hooks.json", () => {
-    const pluginRoot = path.join(env.root, "test-plugin");
-    fs.mkdirSync(path.join(pluginRoot, "hooks"), { recursive: true });
-    fs.writeFileSync(
-      path.join(pluginRoot, "hooks", "hooks.json"),
-      JSON.stringify({ hooks: [{ id: "pre-tool", description: "Runs before tool calls" }] })
-    );
-
-    const components = discoverComponents(pluginRoot);
-    expect(components.hooks).toHaveLength(1);
-    expect(components.hooks[0].id).toBe("pre-tool");
-  });
-
-  it("discovers commands from commands/*.md", () => {
-    const pluginRoot = path.join(env.root, "test-plugin");
-    fs.mkdirSync(path.join(pluginRoot, "commands"), { recursive: true });
-    fs.writeFileSync(
-      path.join(pluginRoot, "commands", "test-cmd.md"),
-      "---\nname: Test Command\ndescription: A command\n---\n# Content"
-    );
-
-    const components = discoverComponents(pluginRoot);
-    expect(components.commands).toHaveLength(1);
-    expect(components.commands[0].id).toBe("Test Command");
+  it("discovers complete standard skills without a vendor manifest", () => {
+    const env = setupTempEnv("standard-discovery-");
+    try {
+      standardCollection(env.root, "review");
+      expect(discoverComponents(env.root).skills[0].id).toBe("review");
+    } finally { env.restore(); }
   });
 });
 
@@ -225,6 +140,26 @@ describe("plugin cache", () => {
     expect(cached2.root).toBe(cached.root);
   });
 
+  it("keeps a local cache directory short when the source path is long", async () => {
+    const pluginRoot = path.join(env.root, "nested", "a".repeat(180), "plugin");
+    fs.mkdirSync(path.join(pluginRoot, ".claude-plugin"), { recursive: true });
+    fs.writeFileSync(
+      path.join(pluginRoot, ".claude-plugin", "plugin.json"),
+      JSON.stringify({ name: "deep-plugin", version: "1.0.0" })
+    );
+
+    const cache = new PluginCache();
+    const source = parseSource(pluginRoot);
+    source.resolvedSha = await cache.resolveSha(source);
+    const cached = await cache.fetch(source, "deep-plugin");
+    const sourceDirName = path.basename(path.dirname(cached.root));
+    const expected = `local_${crypto.createHash("sha256").update(path.resolve(pluginRoot)).digest("hex").slice(0, 32)}`;
+
+    expect(sourceDirName).toBe(expected);
+    expect(sourceDirName.length).toBeLessThan(40);
+    expect(sourceDirName.includes("a".repeat(20))).toBe(false);
+  });
+
   it("lists cached plugins", async () => {
     const cache = new PluginCache();
     const plugins = cache.listCached();
@@ -254,7 +189,7 @@ describe("plugin projections", () => {
     fs.mkdirSync(path.join(pluginRoot, "skills", "my-skill"), { recursive: true });
     fs.writeFileSync(
       path.join(pluginRoot, "skills", "my-skill", "SKILL.md"),
-      "# My Skill\n\nContent"
+      "---\nname: my-skill\ndescription: A skill\n---\n# My Skill\n\nContent"
     );
     fs.writeFileSync(
       path.join(pluginRoot, ".mcp.json"),
@@ -279,7 +214,7 @@ describe("plugin projections", () => {
     expect(result.projectedDirs.length).toBeGreaterThan(0);
 
     // Verify Claude skills dir was created
-    const claudeSkillsDir = path.join(env.root, ".claude", "skills", "test-plugin");
+    const claudeSkillsDir = path.join(env.root, ".claude", "skills", "test-plugin", "my-skill");
     expect(fs.existsSync(claudeSkillsDir)).toBe(true);
 
     // .mcp.json should NOT be in the Claude projection (stripped)
@@ -363,6 +298,7 @@ describe("plugin manager basic", () => {
       JSON.stringify({ name: "reset-plugin", version: "1.0.0" })
     );
 
+    standardCollection(pluginRoot);
     const manager = new PluginManager();
     const plugin = await manager.installPlugin(pluginRoot);
     const firstProject = path.join(env.root, "first-project");
@@ -460,6 +396,7 @@ describe("plugin manager concurrency", () => {
         }
       })
     );
+    standardCollection(pluginRoot, name);
     return pluginRoot;
   }
 
@@ -567,6 +504,7 @@ describe("plugin cache hash", () => {
       })
     );
 
+    standardCollection(pluginRoot);
     const info = await inspectPlugin(pluginRoot);
 
     // The empty SHA256 hash - this was the bug (hash of empty input)
@@ -596,6 +534,7 @@ describe("plugin cache hash", () => {
     );
 
     // Get initial hash
+    standardCollection(pluginRoot);
     const info1 = await inspectPlugin(pluginRoot);
     const sha1 = info1.sha;
 

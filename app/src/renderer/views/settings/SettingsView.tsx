@@ -3,7 +3,7 @@ import { Copy, Download, RotateCw } from "lucide-react";
 import type { TelemetryStatus } from "@mcpx/core";
 import { Button, IconButton, InlineAlert, Section, SettingRow, SkeletonList, StatusLabel, Switch, useToast } from "../../components/ui";
 import type { DesktopSettings } from "../../../shared/desktop-settings";
-import type { UpdateCheckResult } from "../../../shared/ipc-contract";
+import type { SecretBackendKind, UpdateCheckResult } from "../../../shared/ipc-contract";
 import { DESKTOP_PRODUCT_NAME } from "../../../shared/build-constants";
 import { api } from "../../lib/api";
 import { errorMessage } from "../../lib/errors";
@@ -31,6 +31,7 @@ export function SettingsView() {
         {settings.loading ? <SkeletonList rows={3} label="Loading settings" /> : settings.data && (
           <>
             <GeneralSection settings={settings.data} />
+            <SecretsSection />
             <PrivacySection status={telemetry.data} />
             <UpdatesSection settings={settings.data} />
             <AdvancedSection />
@@ -75,6 +76,52 @@ function GeneralSection({ settings }: { settings: DesktopSettings }) {
       </SettingRow>
     </Section>
   );
+}
+
+const SECRET_BACKEND_KEY = "secret-backend";
+
+function SecretsSection() {
+  const toast = useToast();
+  const backend = useQuery<SecretBackendKind>(SECRET_BACKEND_KEY, () => api().secrets.backend());
+  const change = useMutation(async (useKeychain: boolean) => {
+    const result = await api().secrets.setBackend(useKeychain ? "keychain" : "file");
+    setQueryData<SecretBackendKind>(SECRET_BACKEND_KEY, () => result.backend);
+    if (result.changed) {
+      toast.success(
+        result.backend === "keychain" ? "Secrets moved to the system keychain" : "Secrets moved to the encrypted file",
+        result.migrated.length > 0 ? `${result.migrated.length} moved.` : undefined
+      );
+    }
+  });
+  const store = platformStoreName();
+
+  return (
+    <Section title="Secrets">
+      <SettingRow
+        label={`Use ${store}`}
+        description={`Keep tokens and API keys in ${store}, which protects them with your login and may ask for permission. Off keeps them in an encrypted file on this computer that needs no prompts.`}
+        control={
+          <Switch
+            checked={backend.data === "keychain"}
+            disabled={backend.data === undefined}
+            busy={change.pending}
+            label={`Use ${store}`}
+            onCheckedChange={(value) => void change.run(value)}
+          />
+        }
+      >
+        {Boolean(backend.error) && <InlineAlert tone="warning">Couldn't read where secrets are stored: {errorMessage(backend.error)}</InlineAlert>}
+        {change.error && <InlineAlert tone="danger" onDismiss={change.reset}>{change.error}</InlineAlert>}
+      </SettingRow>
+    </Section>
+  );
+}
+
+function platformStoreName(): string {
+  const value = window.mcpx?.platform;
+  if (value === "darwin") return "the macOS Keychain";
+  if (value === "win32") return "the system credential store";
+  return "the system keyring";
 }
 
 function PrivacySection({ status }: { status: TelemetryStatus | undefined }) {

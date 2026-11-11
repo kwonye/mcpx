@@ -58,8 +58,11 @@ export class CodexAdapter implements ClientAdapter {
   }
 
   syncSkills(skills: Skill[]): void {
-    projectSkillsToDir(path.join(homeDir(), ".codex", "skills"), skills, "dir");
+    projectSkillsToDir(this.skillDirectory(), skills, "dir");
   }
+
+  skillDirectory(): string { return path.join(homeDir(), ".agents", "skills"); }
+  additionalSkillDirectories(): string[] { return [path.join(homeDir(), ".codex", "skills")]; }
 
   scanForImports(_config: McpxConfig, managedIndex: ManagedIndex) {
     const configPath = this.detectConfigPath();

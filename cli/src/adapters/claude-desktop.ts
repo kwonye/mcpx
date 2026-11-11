@@ -1,11 +1,11 @@
-import { execFileSync } from "node:child_process";
 import { homeDir } from "../core/paths.js";
 import path from "node:path";
 import { z } from "zod";
 import type { ClientAdapter, ManagedIndex, ManagedGatewayEntry, McpxConfig, Skill, SyncClientOptions, SyncResult, PluginSyncInput, PluginSyncResult } from "../types.js";
 import { syncPluginsToClient } from "../core/plugin-projections.js";
 import { projectSkillsToDir } from "../core/skill-projections.js";
-import { readJsonFile, writeJsonAtomic } from "../util/fs.js";
+import { localCliCommand } from "../core/runtime-entry.js";
+import { readJsonStrict as readJsonFile, writeJsonAtomic } from "../util/fs.js";
 import {
   buildImportSkip,
   detectManagedEntryDrift,
@@ -39,15 +39,19 @@ const claudeDesktopEntrySchema = z.object({
 // still wire its gateway in via this bridge (returning false would make
 // sync.ts skip the client as UNSUPPORTED_HTTP).
 // See https://modelcontextprotocol.io/quickstart/user
-import { APP_VERSION } from "../version.js";
-
-function buildProxyEntry(entry: ManagedGatewayEntry): { command: string; args: string[] } {
+function buildProxyEntry(entry: ManagedGatewayEntry): { command: string; args: string[]; env: Record<string, string> } {
   const upstreamName = entry.name.replace(/ \(mcpx\)$/, "");
-  try {
-    const mcpxPath = execFileSync("which", ["mcpx"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
-    if (mcpxPath) return { command: mcpxPath, args: ["proxy", upstreamName] };
-  } catch {}
-  return { command: "npx", args: ["-y", `@kwonye/mcpx@${APP_VERSION}`, "proxy", upstreamName] };
+  const cli = localCliCommand(["proxy", upstreamName]);
+  const proxyToken = /^Bearer\s+(.+)$/i.exec(entry.headers.Authorization)?.[1];
+  return {
+    command: cli.command,
+    args: cli.args,
+    env: {
+      ...cli.env,
+      ...(cli.args[0] ? { MCPX_CLI_ENTRY: cli.args[0] } : {}),
+      ...(proxyToken ? { MCPX_PROXY_TOKEN: proxyToken } : {})
+    }
+  };
 }
 
 export class ClaudeDesktopAdapter implements ClientAdapter {
@@ -151,8 +155,8 @@ export class ClaudeDesktopAdapter implements ClientAdapter {
       const enabledEntries = options.managedEntries.filter((entry) => entry.enabled);
       const serverEntries = Object.fromEntries(
         enabledEntries.map((entry) => {
-          const { command, args } = buildProxyEntry(entry);
-          return [entry.name, { command, args }];
+          const { command, args, env } = buildProxyEntry(entry);
+          return [entry.name, { command, args, env }];
         })
       ) as Record<string, unknown>;
       const enabledManagedNames = enabledEntries.map((entry) => entry.name);
@@ -189,8 +193,8 @@ export class ClaudeDesktopAdapter implements ClientAdapter {
         configPath,
         Object.fromEntries(
           enabledEntries.map((entry) => {
-            const { command, args } = buildProxyEntry(entry);
-            return [entry.name, JSON.stringify({ command, args })];
+            const { command, args, env } = buildProxyEntry(entry);
+            return [entry.name, JSON.stringify({ command, args, env })];
           })
         )
       );

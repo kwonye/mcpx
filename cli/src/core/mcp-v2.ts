@@ -16,3 +16,16 @@ export function mcpV2Headers(method: string, headers: Record<string, string> = {
     "mcp-method": method
   };
 }
+
+/** Restore wire fields lifted into the SDK request context before forwarding. */
+export function forwardedMcpParams(params: Record<string, unknown> | undefined, context: {
+  mcpReq: { _meta?: Record<string, unknown>; envelope?: object; inputResponses?: Record<string, unknown>; requestState: () => unknown };
+}): Record<string, unknown> {
+  const state = context.mcpReq.requestState();
+  return {
+    ...params,
+    _meta: { ...context.mcpReq._meta, ...context.mcpReq.envelope },
+    ...(context.mcpReq.inputResponses ? { inputResponses: context.mcpReq.inputResponses } : {}),
+    ...(typeof state === "string" ? { requestState: state } : {}),
+  };
+}

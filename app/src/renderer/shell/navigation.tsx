@@ -1,12 +1,14 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { DASHBOARD_ROUTES, type DashboardRoute } from "../../shared/ipc-channels";
 import type { DesktopTab } from "../../shared/desktop-settings";
+import type { TelemetryTab } from "../../shared/ipc-contract";
 import { api } from "../lib/api";
 
 export type Route = DashboardRoute;
 
 export type Intent =
   | { type: "add-server" }
+  | { type: "find-existing" }
   | { type: "sign-in"; serverName: string };
 
 interface NavigationState {
@@ -26,8 +28,9 @@ interface NavigationState {
 const NavigationContext = createContext<NavigationState | null>(null);
 
 /** Desktop settings persist the last tab; it predates Clients/Add-ons naming. */
-const ROUTE_TO_TAB: Partial<Record<Route, DesktopTab>> = { servers: "servers", projects: "projects", addons: "plugins", settings: "settings" };
-const TAB_TO_ROUTE: Record<string, Route> = { servers: "servers", projects: "projects", plugins: "addons", skills: "addons", settings: "settings" };
+const ROUTE_TO_TAB: Record<Route, DesktopTab> = { servers: "servers", clients: "harnesses", projects: "projects", addons: "plugins", settings: "settings" };
+const TAB_TO_ROUTE: Record<string, Route> = { overview: "servers", servers: "servers", harnesses: "clients", activity: "clients", projects: "projects", plugins: "addons", skills: "addons", settings: "settings" };
+const TELEMETRY_TABS: Partial<Record<Route, TelemetryTab>> = { servers: "servers", projects: "projects", addons: "plugins", settings: "settings" };
 
 export function isRoute(value: string): value is Route {
   return (DASHBOARD_ROUTES as readonly string[]).includes(value);
@@ -56,11 +59,9 @@ export function NavigationProvider({ children, initialRoute = "servers" }: { chi
   const go = useCallback((next: Route) => {
     setRoute(next);
     setServerName(null);
-    const tab = ROUTE_TO_TAB[next];
-    if (tab) {
-      void api().telemetry.captureTabViewed(tab).catch(() => {});
-      void api().settings.update({ activeTab: tab }).catch(() => {});
-    }
+    const telemetryTab = TELEMETRY_TABS[next];
+    if (telemetryTab) void api().telemetry.captureTabViewed(telemetryTab).catch(() => {});
+    void api().settings.update({ activeTab: ROUTE_TO_TAB[next] }).catch(() => {});
   }, []);
 
   // Restore the last tab once.

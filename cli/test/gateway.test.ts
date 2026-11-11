@@ -379,7 +379,7 @@ describe("gateway passthrough", () => {
     const config = defaultConfig();
     config.servers.next_devtools = {
       transport: "stdio",
-      command: process.execPath,
+      command: "node",
       args: [fixturePath]
     };
     saveConfig(config);
@@ -440,7 +440,7 @@ describe("gateway passthrough", () => {
     const config = defaultConfig();
     config.servers.next_devtools = {
       transport: "stdio",
-      command: process.execPath,
+      command: "node",
       args: [fixturePath]
     };
     saveConfig(config);
@@ -927,14 +927,15 @@ describe("gateway passthrough", () => {
     const env = setupTempEnv("mcpx-gateway-auth-rewrite-");
     cleanups.push(env.restore);
 
-    const upstream = await startServer(async (_req, res) => {
-      res.statusCode = 401;
-      res.setHeader("content-type", "application/json");
-      res.setHeader(
-        "www-authenticate",
-        'Bearer error="invalid_token", resource_metadata="https://mcp.vercel.com/.well-known/oauth-protected-resource"'
-      );
-      res.end(JSON.stringify({ error: "invalid_token" }));
+    const upstream = await startServer(async (req, res) => {
+      for await (const _chunk of req) {
+        // Read the request body before responding.
+      }
+      res.writeHead(401, {
+        "content-type": "application/json",
+        "www-authenticate": 'Bearer error="invalid_token", resource_metadata="https://mcp.vercel.com/.well-known/oauth-protected-resource"'
+      });
+      res.end(JSON.stringify({ error: "invalid_token", error_description: "No authorization provided" }));
     });
     cleanups.push(() => closeServer(upstream.server));
 
@@ -967,7 +968,8 @@ describe("gateway passthrough", () => {
       body: modernRpcBody("tools/list", 1)
     });
 
-    expect(response.status).toBe(401);
+    const body = await response.text();
+    expect(response.status, body).toBe(401);
     expect(response.headers.get("www-authenticate")).toContain(
       `resource_metadata="http://127.0.0.1:${gatewayAddress.port}/.well-known/oauth-protected-resource"`
     );
@@ -1211,7 +1213,7 @@ describe("gateway passthrough", () => {
     const config = defaultConfig();
     config.servers.Railway = {
       transport: "stdio",
-      command: process.execPath,
+      command: "node",
       args: [fixturePath],
       env: { MOCK_CALL_FAIL_FLAG: flagPath }
     };

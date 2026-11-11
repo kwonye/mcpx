@@ -1,5 +1,4 @@
 import { app, type BrowserWindow } from "electron";
-import { stopDaemon } from "@mcpx/core";
 import { hidePopover } from "./popover";
 
 let dashboard: BrowserWindow | null = null;
@@ -39,7 +38,6 @@ export function hideDashboard(): void {
 
 export function quitApp(): void {
   hidePopover();
-  stopDaemon();
   const window = getDashboardWindow();
   if (window) {
     window.destroy();

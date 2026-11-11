@@ -6,7 +6,7 @@ import { z } from "zod";
 import type { ClientAdapter, ManagedIndex, McpxConfig, Skill, SyncClientOptions, SyncResult, PluginSyncInput, PluginSyncResult } from "../types.js";
 import { syncPluginsToClient } from "../core/plugin-projections.js";
 import { projectSkillsToDir } from "../core/skill-projections.js";
-import { readJsonFile, writeJsonAtomic } from "../util/fs.js";
+import { readJsonStrict as readJsonFile, writeJsonAtomic } from "../util/fs.js";
 import {
   buildImportSkip,
   detectManagedEntryDrift,
@@ -183,6 +183,6 @@ export class KiroAdapter implements ClientAdapter {
   }
 
   syncSkills(skills: Skill[]): void {
-    projectSkillsToDir(path.join(homeDir(), ".kiro", "skills"), skills, "flat");
+    projectSkillsToDir(path.join(homeDir(), ".kiro", "skills"), skills, "dir");
   }
 }

@@ -7,7 +7,7 @@ test.describe("render", () => {
     let app: ElectronApplication | undefined;
 
     try {
-      app = await electron.launch({ args: [mainPath], env: sandbox.env });
+      app = await electron.launch({ args: [...sandbox.launchArgs, mainPath], env: sandbox.env });
       const window = await openDashboardWindow(app);
 
       // Verify #root element exists
@@ -34,7 +34,7 @@ test.describe("render", () => {
     let app: ElectronApplication | undefined;
 
     try {
-      app = await electron.launch({ args: [mainPath], env: sandbox.env });
+      app = await electron.launch({ args: [...sandbox.launchArgs, mainPath], env: sandbox.env });
       const window = await openDashboardWindow(app);
 
       // Verify dashboard container renders

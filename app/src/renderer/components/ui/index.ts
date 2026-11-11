@@ -15,3 +15,4 @@ export { Menu, type MenuItem } from "./Menu";
 export { Spinner } from "./Spinner";
 export { InlineAlert } from "./InlineAlert";
 export { Section, SettingRow } from "./Section";
+export { Checkbox } from "./Checkbox";

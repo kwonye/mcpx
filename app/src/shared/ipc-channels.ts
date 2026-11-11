@@ -21,6 +21,19 @@ export const IPC = {
   DAEMON_STOP: "mcpx:daemon-stop",
   DAEMON_RESTART: "mcpx:daemon-restart",
 
+  // Local management service (harnesses, adoption, activity)
+  MANAGEMENT_SNAPSHOT: "mcpx:management-snapshot",
+  ADOPTION_PLAN: "mcpx:adoption-plan",
+  ADOPTION_APPLY: "mcpx:adoption-apply",
+  OPERATION_ROLLBACK: "mcpx:operation-rollback",
+  HARNESS_SET_MODE: "mcpx:harness-set-mode",
+  /** event: main -> all windows when the management service reports a change. */
+  MANAGEMENT_EVENT: "mcpx:management-event",
+
+  // Secrets storage
+  GET_SECRET_BACKEND: "mcpx:get-secret-backend",
+  SET_SECRET_BACKEND: "mcpx:set-secret-backend",
+
   // Desktop settings + telemetry
   GET_DESKTOP_SETTINGS: "mcpx:get-desktop-settings",
   UPDATE_DESKTOP_SETTINGS: "mcpx:update-desktop-settings",

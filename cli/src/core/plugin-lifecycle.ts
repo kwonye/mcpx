@@ -20,6 +20,7 @@ export class PluginLifecycle {
     const dataDir = path.join(getPluginDataRoot(), pluginId);
     ensureDir(dataDir);
 
+    try {
     // Check for package.json
     const pkgJsonPath = path.join(pluginRoot, "package.json");
     if (fs.existsSync(pkgJsonPath)) {
@@ -33,7 +34,7 @@ export class PluginLifecycle {
           });
         }
       } catch {
-        // npm install may fail; continue
+        throw new Error("Plugin npm dependencies could not be prepared");
       }
     }
 
@@ -41,15 +42,22 @@ export class PluginLifecycle {
     const reqPath = path.join(pluginRoot, "requirements.txt");
     if (fs.existsSync(reqPath)) {
       try {
-        await execFileAsync("pip", ["install", "-r", reqPath], {
+        const venv = path.join(dataDir, "venv");
+        await execFileAsync("python3", ["-m", "venv", venv], { timeout: 120000 });
+        const python = path.join(venv, process.platform === "win32" ? "Scripts/python.exe" : "bin/python");
+        await execFileAsync(python, ["-m", "pip", "install", "-r", reqPath], {
           timeout: 120000,
         });
       } catch {
-        // pip may fail; continue
+        throw new Error("Plugin Python dependencies could not be prepared");
       }
     }
 
     await this.dataManager.updateStatus(pluginId, "healthy");
+    } catch (error) {
+      await this.dataManager.updateStatus(pluginId, "error");
+      throw error;
+    }
   }
 
   async removeData(pluginId: string): Promise<void> {

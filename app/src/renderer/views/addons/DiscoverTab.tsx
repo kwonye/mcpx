@@ -27,6 +27,12 @@ export function DiscoverTab({ onManageSources }: { onManageSources: () => void }
       return [entry.name, entry.displayName, entry.description, entry.category, ...entry.tags].some((value) => value?.toLowerCase().includes(needle));
     });
   }, [all, query, source, category]);
+  const refreshAll = useMutation(async () => {
+    const results = await Promise.allSettled((sources.data ?? []).map((item) => api().marketplaces.refresh(item.name)));
+    await refreshAddons();
+    const errors = results.flatMap((result) => (result.status === "rejected" ? [errorMessage(result.reason)] : result.value.errors));
+    if (errors.length > 0) throw new Error(errors.join("; "));
+  });
   const sourceName = (name: string) => sources.data?.find((item) => item.name === name)?.displayName ?? name;
 
   return (
@@ -43,8 +49,9 @@ export function DiscoverTab({ onManageSources }: { onManageSources: () => void }
             {categories.map((item) => <option key={item} value={item}>{item}</option>)}
           </Select>
         )}
-        <IconButton icon={RotateCw} label="Refresh catalog" variant="secondary" loading={listings.fetching} onClick={() => void listings.refetch()} />
+        <IconButton icon={RotateCw} label="Check sources for new plugins" variant="secondary" loading={refreshAll.pending || listings.fetching} onClick={() => void refreshAll.run()} />
       </div>
+      {refreshAll.error && <InlineAlert tone="warning" title="Some sources couldn't be refreshed" onDismiss={refreshAll.reset}>{refreshAll.error}</InlineAlert>}
 
       {listings.error && !listings.data ? (
         <InlineAlert tone="danger" title="Couldn't load the catalog" action={<Button size="sm" onClick={() => void listings.refetch()}>Try again</Button>}>{errorMessage(listings.error)}</InlineAlert>

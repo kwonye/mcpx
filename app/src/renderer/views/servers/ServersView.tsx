@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Plus, RotateCw, Server } from "lucide-react";
+import { Plus, RotateCw, ScanSearch, Server } from "lucide-react";
 import { Button, ConfirmDialog, EmptyState, InlineAlert, List, SkeletonList, useToast } from "../../components/ui";
 import { api } from "../../lib/api";
 import { errorMessage } from "../../lib/errors";
@@ -13,7 +13,7 @@ import { ServerDetail } from "./ServerDetail";
 import { ServerRow } from "./ServerRow";
 
 export function ServersView() {
-  const { serverName, openServer, intent, clearIntent } = useNavigation();
+  const { serverName, openServer, intent, clearIntent, go, request } = useNavigation();
   const { status, servers, tokens, gatewayRunning } = useServers();
   const toast = useToast();
   const [adding, setAdding] = useState(false);
@@ -92,7 +92,12 @@ export function ServersView() {
             icon={Server}
             title="Add your first server"
             description="Servers give your AI apps new tools, like your issue tracker, files or database. Add one here and mcpx connects it to Claude, Cursor, VS Code and the rest."
-            actions={<Button variant="primary" icon={Plus} onClick={() => setAdding(true)}>Add server</Button>}
+            actions={
+              <>
+                <Button variant="primary" icon={Plus} onClick={() => setAdding(true)}>Add server</Button>
+                <Button icon={ScanSearch} onClick={() => { go("clients"); request({ type: "find-existing" }); }}>Find servers your apps already use</Button>
+              </>
+            }
           />
         ) : (
           <div className="view-stack">

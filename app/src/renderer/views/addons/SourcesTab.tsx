@@ -20,11 +20,13 @@ export function SourcesTab() {
   const sources = useMarketplaces();
   const toast = useToast();
   const [input, setInput] = useState("");
+  const [manifestPath, setManifestPath] = useState("");
   const [removing, setRemoving] = useState<ManagedMarketplace | null>(null);
 
   const add = useMutation(async () => {
-    const source = await api().marketplaces.add(input.trim());
+    const source = await api().marketplaces.add(input.trim(), manifestPath.trim() || undefined);
     setInput("");
+    setManifestPath("");
     await refreshAddons();
     toast.success(`Added ${source.displayName}`);
   });
@@ -42,6 +44,15 @@ export function SourcesTab() {
           mono
           leading={<Plus size={14} />}
           error={add.error}
+        />
+        <Input
+          label="Catalog file"
+          hideLabel
+          className="ui-field--narrow"
+          placeholder="Catalog path (optional)"
+          value={manifestPath}
+          onChange={(event) => setManifestPath(event.target.value)}
+          mono
         />
         <Button type="submit" loading={add.pending} disabled={!input.trim()}>Add source</Button>
       </form>

@@ -11,7 +11,7 @@ function isHttpUrl(value: string): boolean {
 }
 
 function isClientInternalCommand(command: string): boolean {
-  return /\.app\/Contents\//.test(command);
+  return /\.app\/Contents\//.test(command) && !/mcpx(?:-dev)?\.app\/Contents\//.test(command);
 }
 
 function repairServerSpec(spec: UpstreamServerSpec): UpstreamServerSpec | null {

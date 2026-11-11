@@ -46,6 +46,12 @@ describe("server auth helpers", () => {
     expect(spec.headers).toBeUndefined();
   });
 
+  it("replaces an existing HTTP credential regardless of header casing", () => {
+    const spec: HttpServerSpec = { transport: "http", url: "https://example.com/mcp", headers: { authorization: "old", "X-Account": "keep" } };
+    applyAuthReference(spec, resolveAuthTarget(spec), "secret://new");
+    expect(spec.headers).toEqual({ Authorization: "secret://new", "X-Account": "keep" });
+  });
+
   it("prefixes Bearer for Authorization unless value is already schemed or not token68", () => {
     const target = { kind: "header" as const, key: "Authorization" };
     // Bare token68 → Bearer prefix

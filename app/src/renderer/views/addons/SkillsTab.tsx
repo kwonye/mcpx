@@ -7,7 +7,8 @@ import { errorMessage } from "../../lib/errors";
 import { useMutation } from "../../lib/query";
 import { refreshAddons, useSkills } from "../../hooks/useAddons";
 
-const SKILL_ID = /^[a-z0-9][a-z0-9._-]*$/;
+// Agent Skills naming: lowercase words joined by single hyphens, at most 64 characters.
+const SKILL_ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 export function normalizeSkillName(name: string): string {
   return name.trim().toLowerCase().replace(/\s+/g, "-");
@@ -16,7 +17,8 @@ export function normalizeSkillName(name: string): string {
 export function validateSkillName(name: string, existing: string[]): string | null {
   const id = normalizeSkillName(name);
   if (!id) return "Give the skill a name.";
-  if (!SKILL_ID.test(id)) return "Use lowercase letters, numbers, dots, dashes or underscores, starting with a letter or number.";
+  if (id.length > 64) return "Keep the name to 64 characters or fewer.";
+  if (!SKILL_ID.test(id)) return "Use lowercase letters and numbers, with single hyphens between words.";
   if (existing.includes(id)) return `A skill named "${id}" already exists.`;
   return null;
 }

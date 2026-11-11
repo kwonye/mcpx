@@ -33,7 +33,23 @@ export const serverSpecSchema = z.discriminatedUnion("transport", [httpSpecSchem
 
 const secretsSchema = z.record(secretName, z.string()).optional();
 const pluginComponent = z.enum(["mcpServers", "skills", "hooks", "agents", "commands"]);
-const desktopTab = z.enum(["servers", "projects", "plugins", "settings"]);
+const desktopTab = z.enum(["overview", "harnesses", "activity", "servers", "projects", "plugins", "settings"]);
+const telemetryTab = z.enum(["servers", "projects", "plugins", "settings"]);
+
+const adoptionItemShape = z.object({
+  id: z.string(),
+  harness: z.string(),
+  kind: z.enum(["mcp", "skill", "package"]),
+  name: z.string(),
+  path: z.string(),
+  nativeKey: z.string(),
+  fingerprint: z.string(),
+  action: z.enum(["import", "reuse", "conflict", "unsupported"]),
+  canonicalId: z.string(),
+  reason: z.string().optional(),
+  reload: z.string()
+});
+const adoptionPlanShape = z.object({ id: z.string(), createdAt: z.string(), configHash: z.string(), items: z.array(adoptionItemShape), errors: z.array(z.string()) });
 
 const none = z.tuple([]);
 const one = <T extends z.ZodType>(schema: T) => z.tuple([schema]);
@@ -49,6 +65,16 @@ export const ipcSchemas = {
   [IPC.DAEMON_STOP]: none,
   [IPC.DAEMON_RESTART]: none,
 
+  [IPC.MANAGEMENT_SNAPSHOT]: none,
+  [IPC.ADOPTION_PLAN]: z.tuple([z.array(nonEmpty).optional()]),
+  // The management service re-validates the full plan; here we only check its shape.
+  [IPC.ADOPTION_APPLY]: z.tuple([adoptionPlanShape, z.array(nonEmpty)]),
+  [IPC.OPERATION_ROLLBACK]: one(nonEmpty),
+  [IPC.HARNESS_SET_MODE]: z.tuple([nonEmpty, z.enum(["observe", "selected", "automatic"])]),
+
+  [IPC.GET_SECRET_BACKEND]: none,
+  [IPC.SET_SECRET_BACKEND]: one(z.enum(["file", "keychain"])),
+
   [IPC.GET_DESKTOP_SETTINGS]: none,
   [IPC.UPDATE_DESKTOP_SETTINGS]: one(z.object({
     autoUpdateEnabled: z.boolean().optional(),
@@ -63,7 +89,7 @@ export const ipcSchemas = {
     errorReportingEnabled: z.boolean().optional()
   }).strict()),
   [IPC.RESET_TELEMETRY_ID]: none,
-  [IPC.CAPTURE_DESKTOP_TAB_VIEWED]: one(desktopTab),
+  [IPC.CAPTURE_DESKTOP_TAB_VIEWED]: one(telemetryTab),
   [IPC.CHECK_FOR_UPDATES]: none,
 
   [IPC.PARSE_SERVER_INPUT]: one(z.string().trim().min(1, "Paste a URL or command").max(8192)),
@@ -79,7 +105,8 @@ export const ipcSchemas = {
 
   [IPC.CONFIGURE_AUTH]: one(z.object({
     serverName: name,
-    headerName: z.string().trim().min(1, "Header name is required"),
+    headerName: z.string().trim().min(1, "Header name is required").optional(),
+    envName: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/, "Use letters, numbers and underscores for the variable name").optional(),
     authValue: z.string().min(1, "Token is required"),
     secretName: secretName.optional(),
     raw: z.boolean().optional()
@@ -134,7 +161,7 @@ export const ipcSchemas = {
   [IPC.PLUGIN_RESET_PROJECT_OVERRIDE]: z.tuple([name, path]),
 
   [IPC.MARKETPLACE_LIST]: none,
-  [IPC.MARKETPLACE_ADD]: one(z.string().trim().min(1, "Enter a source to add")),
+  [IPC.MARKETPLACE_ADD]: z.tuple([z.string().trim().min(1, "Enter a source to add"), z.string().trim().min(1).optional()]),
   [IPC.MARKETPLACE_REFRESH]: one(name),
   [IPC.MARKETPLACE_REMOVE]: one(name),
   [IPC.MARKETPLACE_SET_AUTO_UPDATE]: z.tuple([name, z.boolean()]),

@@ -68,8 +68,8 @@ export {
 export type { DaemonStatus, DaemonStartResult } from "./daemon.js";
 
 // Sync
-export { syncAllClients, getGatewayUrl, getGatewayInternalUrl, persistSyncState } from "./sync.js";
-export type { SyncSummary } from "./sync.js";
+export { synchronizeClients, syncAllClients, getGatewayUrl, getGatewayInternalUrl, persistSyncState } from "./sync.js";
+export type { SyncOptions, SyncSummary } from "./sync.js";
 
 // Registry (server add/remove)
 export { addServer, removeServer, updateServer, setServerEnabled, setProjectServerEnabled, registerProject, unregisterProject, ensureGatewayToken, rotateGatewayToken } from "./registry.js";
@@ -80,7 +80,8 @@ export { exportEnvironment, importEnvironment } from "./share.js";
 export type { ShareEnvironment, ShareLock } from "./share.js";
 
 // Secrets
-export { SecretsManager } from "./secrets.js";
+export { SecretsManager, describeSecretBackend, getSecretBackend, switchSecretBackend } from "./secrets.js";
+export type { SecretBackendSwitchResult } from "./secrets.js";
 
 // Server Auth
 export {
@@ -156,6 +157,7 @@ export type {
   HttpServerSpec,
   StdioServerSpec,
   GatewayConfig,
+  SecretBackendKind,
   ClientSyncState,
   ManagedIndex,
   ManagedEntry,
@@ -186,3 +188,14 @@ export type {
   PluginSyncResult,
   Skill
 } from "../types.js";
+
+// Local management service and shared presentation contracts.
+export { controlRequest, ensureControlService, subscribeControlEvents } from "./control.js";
+export { getManagementSnapshot } from "./management.js";
+export type { ManagementSnapshot } from "./management.js";
+export type { AdoptionPlan, AdoptionItem } from "./adoption.js";
+export type { HarnessInstallation, SyncMode } from "./harnesses.js";
+export type { Operation } from "./operations.js";
+export { registerHarness } from "../adapters/index.js";
+export { readAgentInstructions } from "./agent-instructions.js";
+export { parseAgentSkill, agentSkillFrontmatterSchema, agentSkillNameSchema } from "./agent-skills.js";

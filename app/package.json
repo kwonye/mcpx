@@ -54,6 +54,9 @@
       ]
     },
     "asar": true,
+    "asarUnpack": [
+      "resources/**"
+    ],
     "files": [
       "out/**",
       "!out/**/*.map",
@@ -93,6 +96,9 @@
   },
   "dependencies": {
     "@iarna/toml": "2.2.5",
+    "@modelcontextprotocol/client": "2.0.0",
+    "@modelcontextprotocol/node": "2.0.0",
+    "@modelcontextprotocol/server": "2.0.0",
     "@sentry/electron": "^7.16.0",
     "electron-updater": "^6.6.2",
     "lucide-react": "0.468.0",
@@ -117,5 +123,10 @@
     "vite": "^6.4.2",
     "vitest": "^4.1.2"
   },
-  "trustedDependencies": ["electron", "electron-builder", "app-builder-bin", "dmg-license"]
+  "trustedDependencies": [
+    "electron",
+    "electron-builder",
+    "app-builder-bin",
+    "dmg-license"
+  ]
 }

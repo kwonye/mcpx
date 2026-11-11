@@ -10,8 +10,13 @@ import {
   startDaemon,
   stopDaemon,
   restartDaemon,
-  syncAllClients,
-  persistSyncState,
+  synchronizeClients,
+  getSecretBackend,
+  switchSecretBackend,
+  defaultAuthSecretName,
+  controlRequest,
+  ensureControlService,
+  subscribeControlEvents,
   addServer,
   removeServer,
   setServerEnabled,
@@ -192,7 +197,8 @@ function handle<C extends InvokeChannel>(channel: C, fn: Handler<C>, operation?:
   ipcMain.handle(channel, async (_event, ...raw: unknown[]) => {
     const startedAt = Date.now();
     try {
-      const result = await fn(...parseArgs(channel, raw));
+      const args = parseArgs(channel, raw);
+      const result = await (useControlService ? viaControlService(channel, args, fn) : fn(...args));
       if (operation) {
         safeCaptureTelemetryEvent({
           name: "operation_completed",
@@ -210,6 +216,118 @@ function handle<C extends InvokeChannel>(channel: C, fn: Handler<C>, operation?:
       }
       throw error;
     }
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Local management service routing
+// ---------------------------------------------------------------------------
+
+/**
+ * When the management service is enabled (the desktop app's normal mode),
+ * every mutation is executed by the daemon-owned control service so the CLI,
+ * the dashboard and the popover never write configuration concurrently.
+ * Each entry maps a channel's validated arguments to the service method's.
+ */
+type ControlRoute = { method: string; args?: (args: unknown[]) => unknown[] };
+const CONTROL_ROUTES: Partial<Record<InvokeChannel, ControlRoute>> = {
+  [IPC.ADD_SERVER]: { method: "server.add", args: ([request]) => { const { name, spec, secrets } = request as { name: string; spec: unknown; secrets?: Record<string, string> }; return [name, spec, secrets]; } },
+  [IPC.UPDATE_SERVER]: { method: "server.update" },
+  [IPC.REMOVE_SERVER]: { method: "server.remove" },
+  [IPC.SET_SERVER_ENABLED]: { method: "server.enabled" },
+  [IPC.CONFIGURE_AUTH]: { method: "auth.configure" },
+  [IPC.PROJECT_SET_SERVER_ENABLED]: { method: "project.enabled" },
+  [IPC.PROJECT_INIT]: { method: "project.add" },
+  [IPC.PROJECT_REMOVE]: { method: "project.remove" },
+  [IPC.SYNC_ALL]: { method: "sync" },
+  [IPC.SAVE_SKILL]: { method: "skill.save" },
+  [IPC.DELETE_SKILL]: { method: "skill.delete" },
+  [IPC.INSTALL_SKILL]: { method: "skill.install" },
+  [IPC.CUSTOMIZE_SKILL]: { method: "skill.customize" },
+  [IPC.PIN_SKILL]: { method: "skill.pin" },
+  [IPC.UNPIN_SKILL]: { method: "skill.unpin" },
+  [IPC.UPDATE_SKILL]: { method: "skill.update" },
+  [IPC.ROLLBACK_SKILL]: { method: "skill.rollback" },
+  [IPC.PLUGIN_INSTALL]: { method: "plugin.install" },
+  [IPC.PLUGIN_UPDATE]: { method: "plugin.update" },
+  [IPC.PLUGIN_PIN]: { method: "plugin.pin" },
+  [IPC.PLUGIN_UNPIN]: { method: "plugin.unpin" },
+  [IPC.PLUGIN_ROLLBACK]: { method: "plugin.rollback" },
+  [IPC.PLUGIN_UNINSTALL]: { method: "plugin.uninstall", args: ([id, keepData]) => [id, { keepData: keepData === true }] },
+  [IPC.PLUGIN_ENABLE]: { method: "plugin.enable" },
+  [IPC.PLUGIN_DISABLE]: { method: "plugin.disable" },
+  [IPC.PLUGIN_APPROVE]: { method: "plugin.approve" },
+  [IPC.PLUGIN_SET_PROJECT_OVERRIDE]: { method: "plugin.project" },
+  [IPC.PLUGIN_RESET_PROJECT_OVERRIDE]: { method: "plugin.resetProject" },
+  [IPC.MARKETPLACE_ADD]: { method: "marketplace.add" },
+  [IPC.MARKETPLACE_REFRESH]: { method: "marketplace.refresh" },
+  [IPC.MARKETPLACE_REMOVE]: { method: "marketplace.remove" },
+  [IPC.MARKETPLACE_SET_AUTO_UPDATE]: { method: "marketplace.automatic" },
+  [IPC.MARKETPLACE_INSTALL_PLUGIN]: { method: "marketplace.install" },
+  [IPC.SHARE_IMPORT]: { method: "share.import" }
+};
+
+let useControlService = false;
+
+async function viaControlService<C extends InvokeChannel>(channel: C, args: IpcArgs<C>, fn: Handler<C>): Promise<IpcResult<C>> {
+  const route = CONTROL_ROUTES[channel];
+  if (route) {
+    await ensureControlService(getCliDaemonPath());
+    const result = await controlRequest<IpcResult<C> & AuthProbe & { added?: string }>(route.method, route.args ? route.args(args) : args);
+    if (result?.authRequired && result.added) {
+      queuePendingAuth({ serverName: result.added, oauthLikely: result.oauthLikely, oauthSupport: result.oauthSupport, status: result.authStatus });
+    }
+    if (channel === IPC.CONFIGURE_AUTH) dismissPendingAuth((args[0] as { serverName: string }).serverName);
+    if (channel === IPC.REMOVE_SERVER) dismissPendingAuth(args[0] as string);
+    void refreshTokenCountsSoon();
+    return result;
+  }
+  // Browser sign-in stays in Electron, under a daemon-owned writer lease.
+  if (channel === IPC.START_OAUTH) {
+    await ensureControlService(getCliDaemonPath());
+    const lease = await controlRequest<string>("lease.acquire", [process.pid, "OAuth login"]);
+    let succeeded = false;
+    try {
+      const result = await fn(...args);
+      succeeded = true;
+      return result;
+    } finally {
+      await controlRequest("lease.release", [lease, succeeded]);
+    }
+  }
+  return fn(...args);
+}
+
+/** Management commands always go to the service; only "snapshot" may run without starting it. */
+async function management<T>(method: string, args: unknown[] = []): Promise<T> {
+  if (method !== "snapshot") await ensureControlService(getCliDaemonPath());
+  return controlRequest<T>(method, args);
+}
+
+function connectManagementEvents(): void {
+  let unsubscribe: (() => void) | undefined;
+  let initial = true;
+  let stopped = false;
+  const retry = () => {
+    if (!stopped) setTimeout(() => void connect(), 2000).unref();
+  };
+  const connect = async () => {
+    if (stopped) return;
+    try {
+      if (initial) {
+        initial = false;
+        if (loadConfig().gateway.autoStart) await ensureControlService(getCliDaemonPath());
+      }
+      unsubscribe?.();
+      unsubscribe = subscribeControlEvents((event) => broadcast(IPC.MANAGEMENT_EVENT, event), retry);
+    } catch {
+      retry();
+    }
+  };
+  void connect();
+  app.once("before-quit", () => {
+    stopped = true;
+    unsubscribe?.();
   });
 }
 
@@ -248,10 +366,7 @@ async function refreshTokenCountsSoon(): Promise<void> {
  * recount context cost in the background.
  */
 async function syncAndPersist(secrets: SecretsManager = new SecretsManager()): Promise<SyncSummary> {
-  const summary = syncAllClients(loadConfig(), secrets);
-  await mutateConfig((freshConfig) => {
-    persistSyncState(summary, freshConfig);
-  });
+  const summary = await synchronizeClients({}, secrets);
   void refreshTokenCountsSoon();
   return summary;
 }
@@ -294,10 +409,6 @@ function requireServer(serverName: string) {
   const spec = loadConfig().servers[serverName];
   if (!spec) throw new Error(`Server "${serverName}" not found.`);
   return spec;
-}
-
-function slug(value: string): string {
-  return value.toLowerCase().replace(/[^a-z0-9._-]/g, "_");
 }
 
 export function parseServerInput(input: string): ParsedServerInput {
@@ -418,7 +529,11 @@ async function probeAuth(name: string, spec: { transport: string }, secrets: Sec
 // Registration
 // ---------------------------------------------------------------------------
 
-export function registerIpcHandlers(): void {
+export function registerIpcHandlers(options: { controlService?: boolean } = {}): void {
+  // Embedded hosts and tests may keep the in-process bridge; the desktop app routes through the service.
+  useControlService = options.controlService ?? false;
+  if (useControlService) connectManagementEvents();
+
   // App + window --------------------------------------------------------------
   handle(IPC.OPEN_DASHBOARD, (request) => openDashboardAt(request?.route));
   handle(IPC.QUIT_APP, () => quitApp());
@@ -461,8 +576,8 @@ export function registerIpcHandlers(): void {
     return result;
   });
 
-  handle(IPC.DAEMON_STOP, () => {
-    const result = stopDaemon();
+  handle(IPC.DAEMON_STOP, async () => {
+    const result = await stopDaemon();
     updateTrayForDaemonStatus(false);
     return result;
   });
@@ -473,6 +588,17 @@ export function registerIpcHandlers(): void {
     if (!result.started) throw new Error(result.message);
     return result;
   });
+
+  // Local management service ----------------------------------------------
+  handle(IPC.MANAGEMENT_SNAPSHOT, () => management("snapshot"));
+  handle(IPC.ADOPTION_PLAN, (harnesses) => management("adoption.plan", [harnesses]));
+  handle(IPC.ADOPTION_APPLY, (plan, itemIds) => management("adoption.apply", [plan, itemIds]));
+  handle(IPC.OPERATION_ROLLBACK, (operationId) => management("operation.rollback", [operationId]));
+  handle(IPC.HARNESS_SET_MODE, (harnessId, mode) => management("harness.mode", [harnessId, mode]));
+
+  // Secrets storage ------------------------------------------------------------
+  handle(IPC.GET_SECRET_BACKEND, () => getSecretBackend());
+  handle(IPC.SET_SECRET_BACKEND, (backend) => switchSecretBackend(backend));
 
   // Desktop settings + telemetry --------------------------------------------
   handle(IPC.GET_DESKTOP_SETTINGS, () => loadDesktopSettings());
@@ -563,11 +689,11 @@ export function registerIpcHandlers(): void {
   }, "server_toggle");
 
   // Auth ----------------------------------------------------------------------
-  handle(IPC.CONFIGURE_AUTH, async ({ serverName, headerName, authValue, secretName, raw }) => {
+  handle(IPC.CONFIGURE_AUTH, async ({ serverName, headerName, envName, authValue, secretName, raw }) => {
     const spec = requireServer(serverName);
     const secrets = new SecretsManager();
-    const resolvedSecretName = secretName ?? `auth_${slug(serverName)}_header_${slug(headerName)}`;
-    const target = resolveAuthTarget(spec, headerName);
+    const target = resolveAuthTarget(spec, headerName, envName);
+    const resolvedSecretName = secretName ?? defaultAuthSecretName(serverName, target);
     secrets.setSecret(resolvedSecretName, maybePrefixBearer(target, authValue, raw ?? false));
     await mutateConfig((freshConfig) => {
       const freshSpec = freshConfig.servers[serverName];
@@ -726,7 +852,7 @@ export function registerIpcHandlers(): void {
 
   // Marketplaces --------------------------------------------------------------
   handle(IPC.MARKETPLACE_LIST, () => listMarketplaces());
-  handle(IPC.MARKETPLACE_ADD, (source) => addMarketplace(source), "marketplace_add");
+  handle(IPC.MARKETPLACE_ADD, (source, manifestPath) => addMarketplace(source, manifestPath), "marketplace_add");
   handle(IPC.MARKETPLACE_REFRESH, (name) => refreshMarketplaceWithPlugins(name), "marketplace_refresh");
   handle(IPC.MARKETPLACE_REMOVE, async (name) => { await removeMarketplace(name); return ok({ name }); }, "marketplace_remove");
   handle(IPC.MARKETPLACE_SET_AUTO_UPDATE, (name, enabled) => setMarketplaceAutoUpdate(name, enabled));

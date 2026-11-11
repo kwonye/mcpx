@@ -11,7 +11,7 @@ const build = await Bun.build({
   format: "esm",
   splitting: true,
   sourcemap: "external",
-  // Bundle every dependency: the desktop app ships dist/ without node_modules.
+  // The desktop ships cli/dist without node_modules; the CLI must be self-contained.
   external: [],
   define: {
     "process.env.MCPX_POSTHOG_PROJECT_TOKEN": JSON.stringify(process.env.MCPX_POSTHOG_PROJECT_TOKEN ?? ""),

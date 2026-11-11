@@ -7,6 +7,7 @@ const mainPath = resolve(__dirname, "../out/main/index.js");
 
 interface Sandbox {
   env: NodeJS.ProcessEnv;
+  launchArgs: string[];
   stateHome: string;
   dirs: string[];
 }
@@ -28,12 +29,17 @@ function createSandbox(): Sandbox {
   writeFileSync(join(configDir, "config.json"), JSON.stringify({ gateway: { port: 38773, autoStart: false } }));
 
   return {
+    launchArgs: [
+      `--user-data-dir=${join(home, "electron-data")}`,
+      ...(process.platform === "linux" && process.getuid?.() === 0 ? ["--no-sandbox"] : [])
+    ],
     env: {
       ...process.env,
       HOME: home,
       MCPX_CONFIG_HOME: configHome,
       MCPX_DATA_HOME: dataHome,
       MCPX_STATE_HOME: stateHome,
+      MCPX_TELEMETRY_DISABLED: "1",
       MCPX_NO_UPDATE: "1"
     },
     stateHome,
@@ -193,7 +199,7 @@ test.describe("daemon control", () => {
     let app: ElectronApplication | undefined;
 
     try {
-      app = await electron.launch({ args: [mainPath], env: sandbox.env });
+      app = await electron.launch({ args: [...sandbox.launchArgs, mainPath], env: sandbox.env });
       const window = await openDashboardWindow(app);
 
       const title = window.locator(".daemon-panel__title");
