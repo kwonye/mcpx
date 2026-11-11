@@ -127,7 +127,14 @@ export class SecretsManager {
   }
 
   removeSecret(name: string): void {
-    const map = this.readStore() ?? {};
+    if (!fs.existsSync(this.storePath)) {
+      return;
+    }
+
+    const map = this.readStore();
+    if (map === null) {
+      throw new Error(`Cannot remove secret "${name}": the secrets store at ${this.storePath} could not be decrypted or is corrupt.`);
+    }
     delete map[name];
     const envelope = buildEnvelope(this.keyPath, { secrets: map });
     writeJsonAtomic(this.storePath, envelope);

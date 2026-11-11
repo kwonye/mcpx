@@ -7,9 +7,12 @@ interface DaemonControlsProps {
 
 export function DaemonControls({ daemon, onRefresh }: DaemonControlsProps) {
   const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
 
   async function handleToggle(): Promise<void> {
+    if (busy) return;
     setError(null);
+    setBusy(true);
     try {
       if (daemon.running) {
         await window.mcpx.daemonStop();
@@ -27,6 +30,8 @@ export function DaemonControls({ daemon, onRefresh }: DaemonControlsProps) {
       } catch {
         // Preserve the original operation error for the user.
       }
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -46,8 +51,9 @@ export function DaemonControls({ daemon, onRefresh }: DaemonControlsProps) {
       <button
         className={`btn ${daemon.running ? "btn-secondary btn-stop" : "btn-primary"}`}
         onClick={handleToggle}
+        disabled={busy}
       >
-        {daemon.running ? (
+        {busy ? "Working…" : daemon.running ? (
           <>
             <span className="material-symbols-outlined">stop_circle</span>
             Stop

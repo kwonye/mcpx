@@ -152,15 +152,19 @@ export async function mutateActiveConfig<T>(
       const globalConfig = loadConfig(globalPath);
 
       const result = await mutateProjectConfig(localPath, async (projectConfig) => {
+        const originalLocalServers = { ...projectConfig.servers };
         const mergedConfig: McpxConfig = {
           ...globalConfig,
-          servers: { ...globalConfig.servers, ...projectConfig.servers }
+          servers: { ...globalConfig.servers, ...originalLocalServers }
         };
         const mutatorResult = await mutator(mergedConfig, { type: "project", projectPath });
 
         const localServers: Record<string, UpstreamServerSpec> = {};
         for (const [name, spec] of Object.entries(mergedConfig.servers)) {
-          if (!(name in globalConfig.servers)) {
+          // A project entry can intentionally override a global server with
+          // the same name. Preserve that ownership across unrelated local
+          // mutations; only inherited global entries should be omitted.
+          if (name in originalLocalServers || !(name in globalConfig.servers)) {
             localServers[name] = spec;
           }
         }

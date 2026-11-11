@@ -10,6 +10,9 @@ import type {
   MarketplacePluginDetail,
   DaemonStartResult,
   SyncSummary,
+  UpstreamServerSpec,
+  exportEnvironment,
+  importEnvironment,
 } from "@mcpx/core";
 import { IPC } from "../shared/ipc-channels";
 import type { DesktopSettingsPatch } from "../shared/desktop-settings";
@@ -34,8 +37,8 @@ const api = {
   getDesktopSettings: () => invokeIpc<DesktopSettings>(IPC.GET_DESKTOP_SETTINGS),
   getTelemetryStatus: () => invokeIpc<TelemetryStatus>(IPC.GET_TELEMETRY_STATUS),
   acknowledgeTelemetryNotice: () => invokeIpc<TelemetryPreferences>(IPC.ACKNOWLEDGE_TELEMETRY_NOTICE),
-  addServer: (name: string, spec: unknown) => invokeIpc(IPC.ADD_SERVER, name, spec),
-  updateServer: (name: string, spec: unknown, resolvedSecrets?: Record<string, string>) => invokeIpc(IPC.UPDATE_SERVER, name, spec, resolvedSecrets),
+  addServer: (name: string, spec: UpstreamServerSpec, options?: { force?: boolean }) => invokeIpc(IPC.ADD_SERVER, name, spec, options),
+  updateServer: (name: string, spec: UpstreamServerSpec, resolvedSecrets?: Record<string, string>) => invokeIpc(IPC.UPDATE_SERVER, name, spec, resolvedSecrets),
   removeServer: (name: string) => invokeIpc(IPC.REMOVE_SERVER, name),
   setServerEnabled: (name: string, enabled: boolean) => invokeIpc(IPC.SET_SERVER_ENABLED, name, enabled),
   updateDesktopSettings: (patch: DesktopSettingsPatch) => invokeIpc<DesktopSettings>(IPC.UPDATE_DESKTOP_SETTINGS, patch),
@@ -86,12 +89,14 @@ const api = {
     customize: (id: string, name?: string) => invokeIpc(IPC.CUSTOMIZE_SKILL, id, name),
     pin: (id: string) => invokeIpc(IPC.PIN_SKILL, id),
     unpin: (id: string) => invokeIpc(IPC.UNPIN_SKILL, id),
-    update: (id: string) => invokeIpc(IPC.UPDATE_SKILL, id),
-    rollback: (id: string) => invokeIpc(IPC.ROLLBACK_SKILL, id)
+    update: (id: string) => invokeIpc<Skill>(IPC.UPDATE_SKILL, id),
+    rollback: (id: string) => invokeIpc<Skill>(IPC.ROLLBACK_SKILL, id)
   },
   share: {
-    export: (directory: string, options?: unknown) => invokeIpc(IPC.SHARE_EXPORT, directory, options),
-    import: (directory: string, options?: unknown) => invokeIpc(IPC.SHARE_IMPORT, directory, options)
+    export: (directory: string, options?: Parameters<typeof exportEnvironment>[1]) =>
+      invokeIpc<ReturnType<typeof exportEnvironment>>(IPC.SHARE_EXPORT, directory, options),
+    import: (directory: string, options?: Parameters<typeof importEnvironment>[1]) =>
+      invokeIpc<Awaited<ReturnType<typeof importEnvironment>>>(IPC.SHARE_IMPORT, directory, options)
   },
   plugins: {
     inspect: (source: string) => invokeIpc(IPC.PLUGIN_INSPECT, source),

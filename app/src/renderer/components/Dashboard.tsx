@@ -1,11 +1,11 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import logoSvg from "../assets/logo.svg";
 import { useStatus } from "../hooks/useMcpx";
 import { ServerCard } from "./ServerCard";
 import { ServerDetail } from "./ServerDetail";
 import { AuthModal } from "./AuthModal";
-import { SkillsTab } from "./SkillsTab";
-import { PluginsTab } from "./PluginsTab";
+import { PluginsTab, type PluginsTabHandle } from "./PluginsTab";
+import { ConfirmDialog } from "./ConfirmDialog";
 import { DaemonControls } from "./DaemonControls";
 import { SettingsPanel } from "./SettingsPanel";
 import { CliCommandInput } from "./CliCommandInput";
@@ -27,6 +27,8 @@ export function Dashboard() {
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(() => new Set());
   const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [pendingAuth, setPendingAuth] = useState<PendingAuthEntry[]>([]);
+  const [pendingTab, setPendingTab] = useState<DesktopTab | null>(null);
+  const pluginsRef = useRef<PluginsTabHandle>(null);
 
   useEffect(() => {
     const pendingAuthPromise = window.mcpx.getPendingAuth?.();
@@ -63,7 +65,7 @@ export function Dashboard() {
     loadSettings();
   }, []);
 
-  const handleTabChange = async (newTab: DesktopTab) => {
+  const commitTabChange = async (newTab: DesktopTab) => {
     setTab(newTab);
     setSelectedServer(null);
     void window.mcpx.captureDesktopTabViewed?.(newTab);
@@ -72,6 +74,32 @@ export function Dashboard() {
     } catch {
       // Ignore persistence errors
     }
+  };
+
+  const handleTabChange = async (newTab: DesktopTab) => {
+    if (newTab === tab) return;
+    if (tab === "plugins" && newTab !== "plugins" && pluginsRef.current?.isDirty) {
+      setPendingTab(newTab);
+      return;
+    }
+    await commitTabChange(newTab);
+  };
+
+  const saveAndChangeTab = async (): Promise<void> => {
+    if (!pendingTab) return;
+    const nextTab = pendingTab;
+    const saved = await pluginsRef.current?.save();
+    if (saved === false) return;
+    setPendingTab(null);
+    await commitTabChange(nextTab);
+  };
+
+  const discardAndChangeTab = (): void => {
+    if (!pendingTab) return;
+    const nextTab = pendingTab;
+    pluginsRef.current?.discard();
+    setPendingTab(null);
+    void commitTabChange(nextTab);
   };
 
   if (loading || !status || !settingsLoaded) {
@@ -274,9 +302,9 @@ export function Dashboard() {
                 </>
               )}
 
-              {tab === "plugins" && (
-                <PluginsTab />
-              )}
+              <div hidden={tab !== "plugins"}>
+                <PluginsTab ref={pluginsRef} />
+              </div>
 
               {tab === "settings" && (
                 <>
@@ -306,6 +334,18 @@ export function Dashboard() {
           }}
         />
       )}
+
+      <ConfirmDialog
+        open={pendingTab !== null}
+        title="Unsaved changes"
+        message="Save your changes before leaving Shared Skills?"
+        initialFocus="cancel"
+        confirmLabel="Save"
+        secondaryLabel="Discard"
+        onConfirm={() => void saveAndChangeTab()}
+        onSecondary={discardAndChangeTab}
+        onCancel={() => setPendingTab(null)}
+      />
     </div>
   );
 }

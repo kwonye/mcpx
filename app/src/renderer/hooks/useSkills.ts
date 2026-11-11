@@ -53,12 +53,12 @@ export function useSkills() {
   };
 
   const updateSkill = async (id: string) => {
-    try { await window.mcpx.skills.update(id); await refresh(); return true; }
+    try { const result = await window.mcpx.skills.update(id); await refresh(); return result; }
     catch (e) { setError(e instanceof Error ? e.message : String(e)); return false; }
   };
 
   const rollbackSkill = async (id: string) => {
-    try { await window.mcpx.skills.rollback(id); await refresh(); return true; }
+    try { const result = await window.mcpx.skills.rollback(id); await refresh(); return result; }
     catch (e) { setError(e instanceof Error ? e.message : String(e)); return false; }
   };
 

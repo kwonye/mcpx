@@ -176,6 +176,30 @@ describe("SecretsManager with encrypted file store", () => {
     expect(sm.listSecretNames()).toEqual([]);
   });
 
+  it("refuses to remove a secret from an unreadable store without overwriting it", () => {
+    const env = setupTempEnv("mcpx-secrets-remove-corrupt-");
+    cleanups.push(env.restore);
+
+    const sm = new SecretsManager();
+    sm.setSecret("protected", "value");
+    const storePath = getSecretsStorePath();
+    const keyPath = getSecretsKeyPath();
+    const before = fs.readFileSync(storePath);
+    fs.writeFileSync(keyPath, Buffer.alloc(32, 7).toString("base64") + "\n");
+
+    expect(() => sm.removeSecret("protected")).toThrow("could not be decrypted");
+    expect(fs.readFileSync(storePath)).toEqual(before);
+  });
+
+  it("does not create a secrets store when removing a missing secret", () => {
+    const env = setupTempEnv("mcpx-secrets-remove-missing-");
+    cleanups.push(env.restore);
+
+    const sm = new SecretsManager();
+    sm.removeSecret("missing");
+    expect(fs.existsSync(getSecretsStorePath())).toBe(false);
+  });
+
   it("regenerates key and store when key file is deleted", () => {
     const env = setupTempEnv("mcpx-secrets-");
     cleanups.push(env.restore);

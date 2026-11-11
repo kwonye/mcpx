@@ -212,6 +212,49 @@ describe("EditServerForm", () => {
   });
 
   describe("stdio transport", () => {
+    it("round-trips typed arguments, cwd, and disabled state without parsing the display target", () => {
+      const onSubmit = vi.fn();
+      render(
+        <EditServerForm
+          serverName="typed-server"
+          transport="stdio"
+          target={'npx "server with space" (cwd: /wrong/display)'}
+          spec={{ transport: "stdio", command: "/opt/My Tool/mcp", args: ["server with space", "--verbose"], cwd: "/work/project", enabled: false }}
+          authBindings={[]}
+          onSubmit={onSubmit}
+          onCancel={vi.fn()}
+        />
+      );
+
+      fireEvent.submit(screen.getByRole("button", { name: "Save Changes" }).closest("form")!);
+      const [spec] = onSubmit.mock.calls[0];
+      expect(spec).toMatchObject({
+        transport: "stdio",
+        command: "/opt/My Tool/mcp",
+        args: ["server with space", "--verbose"],
+        cwd: "/work/project",
+        enabled: false
+      });
+    });
+
+    it("preserves an intentionally empty argument", () => {
+      const onSubmit = vi.fn();
+      render(
+        <EditServerForm
+          serverName="empty-arg-server"
+          transport="stdio"
+          target="node"
+          spec={{ transport: "stdio", command: "node", args: ["", "--inspect"] }}
+          authBindings={[]}
+          onSubmit={onSubmit}
+          onCancel={vi.fn()}
+        />
+      );
+
+      fireEvent.submit(screen.getByRole("button", { name: "Save Changes" }).closest("form")!);
+      expect(onSubmit.mock.calls[0][0]).toMatchObject({ args: ["", "--inspect"] });
+    });
+
     it("renders a stdio spec variant correctly", () => {
       const onSubmit = vi.fn();
       const onCancel = vi.fn();
@@ -254,8 +297,10 @@ describe("EditServerForm", () => {
       const commandInput = screen.getByDisplayValue("python") as HTMLInputElement;
       fireEvent.change(commandInput, { target: { value: "python3" } });
 
-      const argsInput = screen.getByPlaceholderText("e.g., -y @openai/stitch-mcp") as HTMLInputElement;
-      fireEvent.change(argsInput, { target: { value: "script.py --verbose" } });
+      fireEvent.click(screen.getByRole("button", { name: "+ Add argument" }));
+      fireEvent.click(screen.getByRole("button", { name: "+ Add argument" }));
+      fireEvent.change(screen.getByLabelText("Argument 1"), { target: { value: "script.py" } });
+      fireEvent.change(screen.getByLabelText("Argument 2"), { target: { value: "--verbose" } });
 
       const form = commandInput.closest("form")!;
       fireEvent.submit(form);

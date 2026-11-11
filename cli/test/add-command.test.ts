@@ -97,6 +97,11 @@ describe("add command parsing", () => {
     });
   });
 
+  it("preserves explicit overwrite intent without forcing ordinary adds", () => {
+    expect(parseCliAddCommand("mcpx add service https://example.com/mcp").force).toBeUndefined();
+    expect(parseCliAddCommand("mcpx add service https://example.com/mcp --force")).toMatchObject({ force: true });
+  });
+
   it("rejects unrecognized prose instead of silently misparsing it as a server", () => {
     expect(() => parseCliAddCommand("definitely not valid")).toThrow("Unrecognized command");
   });

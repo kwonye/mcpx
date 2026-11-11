@@ -76,6 +76,23 @@ describe("SettingsPanel", () => {
     expect(await screen.findByText("save failed")).toBeDefined();
   });
 
+  it("renders settings when optional telemetry loading fails", async () => {
+    mockMcpx.getDesktopSettings.mockResolvedValue({ autoUpdateEnabled: true, startOnLoginEnabled: true });
+    mockMcpx.getTelemetryStatus = vi.fn().mockRejectedValue(new Error("telemetry unavailable"));
+
+    render(<SettingsPanel />);
+    expect(await screen.findByText("General Settings")).toBeDefined();
+    expect(screen.queryByText("Loading settings...")).toBeNull();
+  });
+
+  it("offers retry when settings loading fails", async () => {
+    mockMcpx.getDesktopSettings.mockRejectedValue(new Error("settings unavailable"));
+
+    render(<SettingsPanel />);
+    expect(await screen.findByText("settings unavailable")).toBeDefined();
+    expect(screen.getByRole("button", { name: "Retry" })).toBeDefined();
+  });
+
   it("checks for updates on demand and shows the result", async () => {
     mockMcpx.getDesktopSettings.mockResolvedValue({
       autoUpdateEnabled: true,

@@ -1,8 +1,14 @@
-import { useEffect, useRef, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { useSkills } from "../hooks/useSkills";
 import { ConfirmDialog } from "./ConfirmDialog";
 
-export function SkillsTab() {
+export interface SkillsTabHandle {
+  isDirty: boolean;
+  save: () => Promise<boolean>;
+  discard: () => void;
+}
+
+export const SkillsTab = forwardRef<SkillsTabHandle>(function SkillsTab(_props, ref) {
   const { skills, loading, error, refresh, saveSkill, deleteSkill, customizeSkill, updateSkill, rollbackSkill } = useSkills();
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [selectedSkillId, setSelectedSkillId] = useState<string | null>(null);
@@ -10,6 +16,8 @@ export function SkillsTab() {
   const [newSkillName, setNewSkillName] = useState("");
   const [content, setContent] = useState("");
   const [saving, setSaving] = useState(false);
+  const [dirty, setDirty] = useState(false);
+  const [pendingSelectionId, setPendingSelectionId] = useState<string | null>(null);
   const [shareMessage, setShareMessage] = useState<string | null>(null);
   const lastSelectedId = useRef<string | null>(null);
 
@@ -22,9 +30,20 @@ export function SkillsTab() {
     }
     if (selectedSkill && lastSelectedId.current !== selectedSkill.id) {
       setContent(selectedSkill.content);
+      setDirty(false);
       lastSelectedId.current = selectedSkill.id;
     }
   }, [selectedSkill, skills]);
+
+  useEffect(() => {
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!dirty) return;
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [dirty]);
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -43,11 +62,69 @@ export function SkillsTab() {
     }
   };
 
-  const handleSave = async () => {
-    if (!selectedSkill) return;
+  const handleSave = async (): Promise<boolean> => {
+    if (!selectedSkill) return false;
     setSaving(true);
-    if (!selectedSkill.readOnly) await saveSkill(selectedSkill.id, content);
+    let success = true;
+    if (!selectedSkill.readOnly) {
+      success = await saveSkill(selectedSkill.id, content);
+      if (success) setDirty(false);
+    }
     setSaving(false);
+    return success;
+  };
+
+  const selectSkill = (id: string) => {
+    if (id === selectedSkillId) return;
+    if (dirty) {
+      setPendingSelectionId(id);
+      return;
+    }
+    setSelectedSkillId(id);
+  };
+
+  const discardDraftAndSelect = () => {
+    if (!pendingSelectionId) return;
+    const nextId = pendingSelectionId;
+    setPendingSelectionId(null);
+    setDirty(false);
+    setSelectedSkillId(nextId);
+  };
+
+  const saveDraftAndSelect = async () => {
+    if (!pendingSelectionId || !selectedSkill || selectedSkill.readOnly) return;
+    const nextId = pendingSelectionId;
+    const success = await handleSave();
+    if (!success) return;
+    setDirty(false);
+    setPendingSelectionId(null);
+    setSelectedSkillId(nextId);
+  };
+
+  const handleContentChange = (value: string) => {
+    setContent(value);
+    setDirty(true);
+  };
+
+  useImperativeHandle(ref, () => ({
+    isDirty: dirty,
+    save: async () => {
+      const success = await handleSave();
+      if (success) setPendingSelectionId(null);
+      return success;
+    },
+    discard: () => {
+      if (selectedSkill) setContent(selectedSkill.content);
+      setDirty(false);
+      setPendingSelectionId(null);
+    }
+  }), [dirty, selectedSkill, content]);
+
+  const refreshSelectedContent = (result: unknown) => {
+    if (result && typeof result === "object" && "content" in result && typeof (result as { content?: unknown }).content === "string") {
+      setContent((result as { content: string }).content);
+      setDirty(false);
+    }
   };
 
   const handleDelete = async (id: string) => {
@@ -129,7 +206,7 @@ export function SkillsTab() {
               key={skill.id}
               className="skill-list-item"
               data-active={skill.id === selectedSkillId}
-              onClick={() => setSelectedSkillId(skill.id)}
+              onClick={() => selectSkill(skill.id)}
             >
               <span className="material-symbols-outlined">psychology</span>
               <span>{skill.id}</span>
@@ -149,13 +226,13 @@ export function SkillsTab() {
                 <h2>{selectedSkill.id}</h2>
                 <div className="skill-editor-actions">
                   {selectedSkill.readOnly && <button className="btn btn-secondary btn-sm" onClick={() => void customizeSkill(selectedSkill.id)}>Customize</button>}
-                  {selectedSkill.readOnly && <button className="btn btn-secondary btn-sm" onClick={() => void updateSkill(selectedSkill.id)}>Update</button>}
-                  {selectedSkill.readOnly && <button className="btn btn-secondary btn-sm" onClick={() => void rollbackSkill(selectedSkill.id)}>Rollback</button>}
+                  {selectedSkill.readOnly && <button className="btn btn-secondary btn-sm" onClick={async () => refreshSelectedContent(await updateSkill(selectedSkill.id))}>Update</button>}
+                  {selectedSkill.readOnly && <button className="btn btn-secondary btn-sm" onClick={async () => refreshSelectedContent(await rollbackSkill(selectedSkill.id))}>Rollback</button>}
                   <button className="btn btn-secondary btn-sm" onClick={() => handleDelete(selectedSkill.id)}>
                     <span className="material-symbols-outlined font-icon-sm">delete</span>
                     Delete
                   </button>
-                  <button className="btn btn-primary btn-sm" onClick={handleSave} disabled={saving}>
+                  <button className="btn btn-primary btn-sm" onClick={() => void handleSave()} disabled={saving}>
                     {saving ? "Saving..." : "Save"}
                   </button>
                 </div>
@@ -163,7 +240,7 @@ export function SkillsTab() {
               <textarea
                 className="skill-textarea"
                 value={content}
-                onChange={(e) => setContent(e.target.value)}
+                onChange={(e) => handleContentChange(e.target.value)}
                 readOnly={selectedSkill.readOnly}
                 placeholder="Enter skill instructions..."
               />
@@ -177,6 +254,17 @@ export function SkillsTab() {
       </div>
     </div>
     <ConfirmDialog
+      open={pendingSelectionId !== null}
+      title="Unsaved changes"
+      message="Save your changes before switching skills?"
+      initialFocus="cancel"
+      confirmLabel="Save"
+      secondaryLabel="Discard"
+      onConfirm={() => void saveDraftAndSelect()}
+      onSecondary={discardDraftAndSelect}
+      onCancel={() => setPendingSelectionId(null)}
+    />
+    <ConfirmDialog
       open={confirmDeleteId !== null}
       title="Delete skill?"
       message={confirmDeleteId ? `Delete skill "${confirmDeleteId}"?` : ""}
@@ -186,4 +274,4 @@ export function SkillsTab() {
       onCancel={() => setConfirmDeleteId(null)}
     /></>
   );
-}
+});

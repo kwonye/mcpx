@@ -11,6 +11,7 @@ interface ServerDetailProps {
     enabled: boolean;
     transport: string;
     target: string;
+    spec?: UpstreamServerSpec;
     authBindings: StatusAuthBinding[];
     clients: Array<{ clientId: string; status: string; managed: boolean }>;
   };
@@ -70,6 +71,9 @@ export function ServerDetail({ server, onBack, onRefresh }: ServerDetailProps) {
           serverName={server.name}
           transport={server.transport}
           target={server.target}
+          spec={server.spec ?? (server.transport === "stdio"
+            ? { transport: "stdio", command: server.target, enabled: server.enabled }
+            : { transport: "http", url: server.target, enabled: server.enabled })}
           authBindings={server.authBindings}
           onSubmit={handleEditSubmit}
           onCancel={handleEditCancel}

@@ -29,7 +29,7 @@ export class PluginCache {
     const key = source.type === "github"
       ? `github_${source.original.split("@")[0].replace(/[^a-zA-Z0-9_/-]/g, "_")}`
       : source.type === "npm"
-      ? `npm_${source.original.replace(/^npm:/, "").split("@")[0].replace(/[^a-zA-Z0-9_/-]/g, "_")}`
+      ? `npm_${(source.packageName ?? source.original.replace(/^npm:/, "").split("@")[0]).replace(/[^a-zA-Z0-9_/-]/g, "_")}`
       : source.type === "local"
       ? `local_${source.original.replace(/[^a-zA-Z0-9_/-]/g, "_")}`
       : source.type === "git-subdir"
@@ -76,7 +76,7 @@ export class PluginCache {
     }
 
     if (source.type === "npm") {
-      const pkg = source.original.replace(/^npm:/, "");
+      const pkg = source.packageName ?? source.original.replace(/^npm:/, "").replace(source.ref ? `@${source.ref}` : "", "");
       const spec = source.ref ? `${pkg}@${source.ref}` : pkg;
       const { stdout } = await execFileAsync("npm", ["view", spec, "version", "dist.integrity", "--json"], { timeout: 30000 });
       const metadata = JSON.parse(stdout) as { version?: string; dist?: { integrity?: string }; "dist.integrity"?: string };
@@ -168,7 +168,7 @@ export class PluginCache {
     }
 
     if (source.type === "npm") {
-      const pkg = source.original.replace(/^npm:/, "");
+      const pkg = source.packageName ?? source.original.replace(/^npm:/, "").replace(source.ref ? `@${source.ref}` : "", "");
       const spec = source.ref ? `${pkg}@${source.ref}` : pkg;
       const tmpDir = fs.mkdtempSync(path.join(this.cacheRoot, TMP_PREFIX));
       try {

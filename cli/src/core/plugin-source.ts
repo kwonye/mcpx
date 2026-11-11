@@ -21,6 +21,7 @@ export function parseSource(source: string): PluginSource {
     return {
       type: "npm",
       original: source,
+      packageName: npm[1],
       ref: npm[2] || undefined,
     };
   }
@@ -54,7 +55,7 @@ export function sourceCacheKey(source: PluginSource): string {
   const base = source.type === "github"
     ? `github/${source.original.split("@")[0]}`
     : source.type === "npm"
-    ? `npm/${source.original.replace(/^npm:/, "").split("@")[0]}`
+    ? `npm/${source.packageName ?? source.original.replace(/^npm:/, "").split("@")[0]}`
     : source.type === "local"
     ? `local/${source.original.replace(/[^a-zA-Z0-9_/-]/g, "_")}`
     : `git/${source.original.replace(/[^a-zA-Z0-9_./@-]/g, "_")}`;

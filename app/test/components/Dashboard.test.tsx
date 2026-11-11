@@ -163,6 +163,37 @@ describe("Dashboard", () => {
     expect(mockMcpx.setServerEnabled).toHaveBeenCalledWith("vercel", false);
   });
 
+  it("protects a skill draft when leaving the Plugins dashboard tab", async () => {
+    Object.assign(mockMcpx, {
+      plugins: {
+        list: vi.fn().mockResolvedValue([]),
+        marketplaces: {
+          list: vi.fn().mockResolvedValue([]),
+          browse: vi.fn().mockResolvedValue([])
+        }
+      },
+      skills: {
+        list: vi.fn().mockResolvedValue([{ id: "draft", content: "Original" }]),
+        save: vi.fn().mockResolvedValue(undefined),
+        delete: vi.fn().mockResolvedValue(undefined)
+      }
+    });
+    mockMcpx.getDesktopSettings.mockResolvedValueOnce({
+      autoUpdateEnabled: true,
+      startOnLoginEnabled: true,
+      activeTab: "plugins"
+    });
+
+    render(<Dashboard />);
+    fireEvent.click(await screen.findByRole("tab", { name: "Shared Skills" }));
+    fireEvent.change(await screen.findByPlaceholderText("Enter skill instructions..."), { target: { value: "Unsaved" } });
+    fireEvent.click(screen.getByRole("button", { name: /My Servers/i }));
+
+    expect(await screen.findByText("Save your changes before leaving Shared Skills?")).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Discard" }));
+    expect(await screen.findByRole("heading", { name: "My Servers" })).toBeDefined();
+  });
+
   describe("pending auth", () => {
     it("opens the auth modal for the first of several pending servers, not just showing one forever", async () => {
       // Regression test: pendingAuth used to be a single nullable entry, so a

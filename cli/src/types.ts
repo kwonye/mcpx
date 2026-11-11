@@ -245,6 +245,8 @@ export type PluginSourceType = "github" | "git" | "git-subdir" | "local" | "npm"
 export interface PluginSource {
   type: PluginSourceType;
   original: string;
+  /** Canonical package name for npm sources, without the npm: prefix or ref. */
+  packageName?: string;
   ref?: string;
   resolvedSha?: string;
   path?: string;

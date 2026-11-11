@@ -11,6 +11,7 @@ let initialized = false;
 let pendingResolve: ((result: { status: string; message: string }) => void) | null = null;
 let pendingTimeout: ReturnType<typeof setTimeout> | null = null;
 let pendingUpdateVersion: string | undefined;
+let pendingCheck: Promise<{ status: string; message: string }> | null = null;
 
 function currentVersion(): string | undefined {
   try {
@@ -55,7 +56,32 @@ function settlePending(result: { status: string; message: string }): void {
   pendingTimeout = null;
   const resolve = pendingResolve;
   pendingResolve = null;
+  pendingCheck = null;
   resolve?.(result);
+}
+
+function runUpdaterCheck(): void {
+  let check: Promise<unknown> | undefined;
+  try {
+    check = autoUpdater.checkForUpdates();
+  } catch (error) {
+    if (pendingResolve) {
+      settlePending({ status: "error", message: `Update check failed: ${error instanceof Error ? error.message : String(error)}` });
+    } else {
+      captureUpdate("check", "failure", "update_check_failed");
+    }
+    return;
+  }
+  void Promise.resolve(check).catch((error: unknown) => {
+    // electron-updater emits `error` and also rejects its check promise.
+    // The event normally settles manual callers; this catch prevents an
+    // unhandled rejection if the event is delayed or a background check fails.
+    if (pendingResolve) {
+      settlePending({ status: "error", message: `Update check failed: ${error instanceof Error ? error.message : String(error)}` });
+    } else {
+      captureUpdate("check", "failure", "update_check_failed");
+    }
+  });
 }
 
 function ensureInitialized(): void {
@@ -117,10 +143,10 @@ function clearCheckInterval(): void {
 }
 
 function startChecking(): void {
-  autoUpdater.checkForUpdates();
+  runUpdaterCheck();
   if (!checkInterval) {
     checkInterval = setInterval(() => {
-      autoUpdater.checkForUpdates();
+      runUpdaterCheck();
     }, CHECK_INTERVAL_MS);
   }
 }
@@ -157,25 +183,31 @@ export function checkForUpdatesNow(): Promise<{ status: string; message: string 
 
   ensureInitialized();
 
-  return new Promise((resolve) => {
-    if (pendingResolve) {
-      pendingResolve({ status: "error", message: "An update check is already in progress." });
-    }
+  if (pendingCheck) {
+    return pendingCheck;
+  }
+
+  pendingCheck = new Promise((resolve) => {
     pendingResolve = resolve;
     pendingTimeout = setTimeout(() => {
       captureUpdate("check", "failure", "update_check_timeout");
       settlePending({ status: "error", message: "Update check timed out." });
     }, 30_000);
     pendingTimeout.unref?.();
-    autoUpdater.checkForUpdates();
+    runUpdaterCheck();
   });
+  return pendingCheck;
 }
 
 export function disposeUpdateManager(): void {
   clearCheckInterval();
-  pendingResolve = null;
-  if (pendingTimeout) clearTimeout(pendingTimeout);
-  pendingTimeout = null;
+  if (pendingResolve) {
+    settlePending({ status: "error", message: "Update manager disposed." });
+  } else {
+    pendingCheck = null;
+    if (pendingTimeout) clearTimeout(pendingTimeout);
+    pendingTimeout = null;
+  }
   pendingUpdateVersion = undefined;
   initialized = false;
 }

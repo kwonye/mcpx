@@ -38,7 +38,6 @@ import {
   toSecretRef,
   maybePrefixBearer,
   parseCliAddCommand,
-  tokenizeCommandLine,
   runOAuthLogin,
   clearOAuthCredentials,
   ensureGatewayToken,
@@ -212,24 +211,6 @@ function getCliDaemonPath(): string {
   return resolveCliDaemonPath(process.resourcesPath, app.getAppPath());
 }
 
-function normalizeUpdatedSpec(spec: UpstreamServerSpec): UpstreamServerSpec {
-  if (spec.transport !== "stdio") {
-    return spec;
-  }
-
-  const parts = tokenizeCommandLine(spec.command);
-  if (parts.length <= 1) {
-    return parts[0] ? { ...spec, command: parts[0] } : spec;
-  }
-
-  const [command, ...args] = parts;
-  return {
-    ...spec,
-    command,
-    args: [...args, ...(spec.args ?? [])]
-  };
-}
-
 // In-flight OAuth logins, keyed by server name. Shared across every window in
 // this process: if the dashboard and the popover both trigger sign-in for the
 // same server, the second call joins the first instead of racing it (the
@@ -332,11 +313,12 @@ export function registerIpcHandlers(): void {
     return checkForUpdatesNow();
   });
 
-  registerTelemetryHandler(IPC.ADD_SERVER, "server_add", async (_event, name: string, spec: UpstreamServerSpec) => {
+  registerTelemetryHandler(IPC.ADD_SERVER, "server_add", async (_event, name: string, spec: UpstreamServerSpec, options?: { force?: boolean }) => {
     serverNameSchema.parse(name);
     if (!spec || typeof spec !== "object" || !("transport" in spec)) throw new Error("Invalid server spec");
+    const force = z.object({ force: z.boolean().optional() }).optional().parse(options)?.force ?? false;
     await mutateConfig((config) => {
-      addServer(config, name, spec, true);
+      addServer(config, name, spec, force);
     });
     const secrets = new SecretsManager();
     const config = loadConfig();
@@ -567,8 +549,6 @@ export function registerIpcHandlers(): void {
       }
     }
 
-    spec = normalizeUpdatedSpec(spec);
-
     // Auto-migrate plain-text values that look like secrets but weren't marked
     const secretKeyPattern = /^(api.?key|token|secret|password|auth.?token|access.?key|service.?role.?key)/i;
     const entries = spec.transport === "http"
@@ -580,7 +560,12 @@ export function registerIpcHandlers(): void {
       if (!secretKeyPattern.test(key.replace(/[_-]/g, "."))) continue;
 
       const secretName = `auth_${name.toLowerCase().replace(/[^a-z0-9._-]/g, "_")}_${kind}_${key.toLowerCase().replace(/[^a-z0-9._-]/g, "_")}`;
-      if (!secrets.getSecret(secretName)) {
+      // A value explicitly supplied by the editor is a replacement, even if
+      // the generated secret name already exists. Only untouched plaintext
+      // values should preserve an existing secret.
+      if (Object.prototype.hasOwnProperty.call(resolvedSecrets ?? {}, secretName)) {
+        secrets.setSecret(secretName, resolvedSecrets?.[secretName] ?? value);
+      } else if (!secrets.getSecret(secretName)) {
         secrets.setSecret(secretName, value);
       }
 
@@ -702,7 +687,7 @@ export function registerIpcHandlers(): void {
     }
     const { name, spec } = parsed;
     await mutateConfig((config) => {
-      addServer(config, name, spec, true);
+      addServer(config, name, spec, Boolean(parsed.force));
     });
     const secrets = new SecretsManager();
     const config = loadConfig();

@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import { SkillsTab } from "./SkillsTab";
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
+import { SkillsTab, type SkillsTabHandle } from "./SkillsTab";
 import { Toggle } from "./ui/Toggle";
 import { ConfirmDialog } from "./ConfirmDialog";
 import type {
@@ -12,7 +12,13 @@ import type {
 
 type View = "discover" | "installed" | "marketplaces" | "skills";
 
-export function PluginsTab() {
+export interface PluginsTabHandle {
+  isDirty: boolean;
+  save: () => Promise<boolean>;
+  discard: () => void;
+}
+
+export const PluginsTab = forwardRef<PluginsTabHandle>(function PluginsTab(_props, ref) {
   const [view, setView] = useState<View>("discover");
   const [plugins, setPlugins] = useState<ManagedPlugin[]>([]);
   const [marketplaces, setMarketplaces] = useState<ManagedMarketplace[]>([]);
@@ -37,6 +43,8 @@ export function PluginsTab() {
     destructive?: boolean;
     action: () => Promise<void>;
   } | null>(null);
+  const [pendingView, setPendingView] = useState<View | null>(null);
+  const skillsRef = useRef<SkillsTabHandle>(null);
 
   async function loadPlugins() {
     try {
@@ -256,6 +264,47 @@ export function PluginsTab() {
     });
   }
 
+  function selectView(nextView: View): void {
+    if (nextView === view) return;
+    if (view === "skills" && skillsRef.current?.isDirty) {
+      setPendingView(nextView);
+      return;
+    }
+    setView(nextView);
+  }
+
+  const saveAndSelectView = async (): Promise<void> => {
+    if (!pendingView) return;
+    const nextView = pendingView;
+    const saved = await skillsRef.current?.save();
+    if (saved === false) return;
+    setPendingView(null);
+    setView(nextView);
+  };
+
+  const discardAndSelectView = (): void => {
+    if (!pendingView) return;
+    const nextView = pendingView;
+    skillsRef.current?.discard();
+    setPendingView(null);
+    setView(nextView);
+  };
+
+  useImperativeHandle(ref, () => ({
+    get isDirty() {
+      return Boolean(view === "skills" && skillsRef.current?.isDirty);
+    },
+    save: async () => {
+      const saved = await (skillsRef.current?.save() ?? Promise.resolve(true));
+      if (saved) setPendingView(null);
+      return saved;
+    },
+    discard: () => {
+      skillsRef.current?.discard();
+      setPendingView(null);
+    }
+  }), [view]);
+
   const gatedComponents = ["hooks", "commands", "mcpServers"] as const;
 
   return (
@@ -276,10 +325,21 @@ export function PluginsTab() {
           if (action) void action();
         }}
       />
+      <ConfirmDialog
+        open={pendingView !== null}
+        title="Unsaved changes"
+        message="Save your changes before leaving Shared Skills?"
+        initialFocus="cancel"
+        confirmLabel="Save"
+        secondaryLabel="Discard"
+        onConfirm={() => void saveAndSelectView()}
+        onSecondary={discardAndSelectView}
+        onCancel={() => setPendingView(null)}
+      />
 
       <div className="plugin-view-tabs" role="tablist" aria-label="Plugin views">
         {(["discover", "installed", "marketplaces", "skills"] as View[]).map((item) => (
-          <button key={item} role="tab" aria-selected={view === item} className="plugin-view-tab" data-active={view === item} onClick={() => setView(item)}>
+          <button key={item} role="tab" aria-selected={view === item} className="plugin-view-tab" data-active={view === item} onClick={() => selectView(item)}>
             {item === "skills" ? "Shared Skills" : item[0].toUpperCase() + item.slice(1)}
             {item === "installed" && plugins.length > 0 ? ` (${plugins.length})` : ""}
           </button>
@@ -386,7 +446,9 @@ export function PluginsTab() {
         </section>
       )}
 
-      {view === "skills" && <SkillsTab />}
+      <div hidden={view !== "skills"}>
+        <SkillsTab ref={skillsRef} />
+      </div>
     </div>
   );
-}
+});

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { DesktopSettings } from "../../shared/desktop-settings";
 import type { TelemetryStatus } from "@mcpx/core";
 import { Toggle } from "./ui";
@@ -22,17 +22,31 @@ export function SettingsPanel() {
   const [telemetry, setTelemetry] = useState<TelemetryStatus | null>(null);
   const [savingTelemetry, setSavingTelemetry] = useState(false);
   const [telemetryMessage, setTelemetryMessage] = useState<string | null>(null);
+  const [loadingSettings, setLoadingSettings] = useState(true);
+
+  const loadSettings = useCallback(async () => {
+    setLoadingSettings(true);
+    setError(null);
+    const [settingsResult, telemetryResult] = await Promise.allSettled([
+      window.mcpx.getDesktopSettings(),
+      window.mcpx.getTelemetryStatus?.()
+    ]);
+
+    if (settingsResult.status === "fulfilled") {
+      setSettings(settingsResult.value);
+    } else {
+      setError(formatError(settingsResult.reason));
+    }
+
+    if (telemetryResult.status === "fulfilled" && telemetryResult.value) {
+      setTelemetry(telemetryResult.value);
+    }
+    setLoadingSettings(false);
+  }, []);
 
   useEffect(() => {
-    Promise.all([window.mcpx.getDesktopSettings(), window.mcpx.getTelemetryStatus?.()])
-      .then(([loaded, status]) => {
-        setSettings(loaded);
-        if (status) setTelemetry(status);
-      })
-      .catch((loadError) => {
-        setError(formatError(loadError));
-      });
-  }, []);
+    void loadSettings();
+  }, [loadSettings]);
 
   const onToggle = async (key: SettingKey, nextValue: boolean) => {
     if (!settings) {
@@ -95,7 +109,16 @@ export function SettingsPanel() {
   };
 
   if (!settings) {
-    return <div className="empty-state">Loading settings...</div>;
+    return (
+      <div className="empty-state">
+        {loadingSettings ? "Loading settings..." : (
+          <>
+            <p>{error ?? "Settings could not be loaded."}</p>
+            <button type="button" className="btn btn-secondary" onClick={() => void loadSettings()}>Retry</button>
+          </>
+        )}
+      </div>
+    );
   }
 
   const busy = savingKey !== null;

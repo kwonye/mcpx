@@ -40,7 +40,12 @@ const mockMcpx = {
     }
   },
   skills: {
-    list: vi.fn().mockResolvedValue([])
+    list: vi.fn().mockResolvedValue([]),
+    save: vi.fn().mockResolvedValue(undefined),
+    delete: vi.fn().mockResolvedValue(undefined),
+    customize: vi.fn().mockResolvedValue(undefined),
+    update: vi.fn().mockResolvedValue({}),
+    rollback: vi.fn().mockResolvedValue({})
   }
 };
 
@@ -141,5 +146,25 @@ describe("PluginsTab", () => {
     await screen.findByText("Reviewer");
     expect(mockMcpx.plugins.marketplaces.browse).toHaveBeenCalledTimes(2);
     expect(screen.queryByText("Installed")).toBeNull();
+  });
+
+  it("protects an unsaved skill draft when leaving Shared Skills", async () => {
+    mockMcpx.skills.list.mockResolvedValueOnce([
+      { id: "draft-skill", content: "Original draft" }
+    ]);
+
+    render(<PluginsTab />);
+    fireEvent.click(await screen.findByRole("tab", { name: "Shared Skills" }));
+    const editor = await screen.findByPlaceholderText("Enter skill instructions...");
+    fireEvent.change(editor, { target: { value: "Unsaved draft" } });
+
+    fireEvent.click(screen.getByRole("tab", { name: /Installed/ }));
+    expect(await screen.findByText("Save your changes before leaving Shared Skills?")).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect((editor as HTMLTextAreaElement).value).toBe("Unsaved draft");
+
+    fireEvent.click(screen.getByRole("tab", { name: /Installed/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Discard" }));
+    expect(await screen.findByText("Install from source")).toBeDefined();
   });
 });

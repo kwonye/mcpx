@@ -1,7 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { loadConfig, defaultConfig, saveConfig } from "../src/core/config.js";
+import { loadConfig, defaultConfig, saveConfig, loadProjectConfig, saveProjectConfig } from "../src/core/config.js";
+import { mutateActiveConfig } from "../src/core/config-store.js";
 import { SecretsManager } from "../src/core/secrets.js";
 import { runCli } from "../src/cli.js";
 import { setupTempEnv } from "./helpers.js";
@@ -121,5 +122,31 @@ describe("cli config locking", () => {
     });
     // the standalone sync command's persistSyncState mutation also survived
     expect(Object.keys(finalConfig.clients).length).toBeGreaterThan(0);
+  });
+
+  it("preserves a local override when an unrelated local server is added", async () => {
+    const env = setupTempEnv("mcpx-cli-lock-local-override-");
+    cleanups.push(env.restore);
+    const projectPath = path.join(env.root, "project");
+    fs.mkdirSync(projectPath, { recursive: true });
+
+    const config = defaultConfig();
+    config.servers.shared = { transport: "http", url: "https://global.example/mcp" };
+    saveConfig(config);
+    const localPath = path.join(projectPath, ".mcpx.json");
+    saveProjectConfig({ servers: { shared: { transport: "http", url: "https://local.example/mcp" } } }, localPath);
+
+    const previousCwd = process.cwd();
+    process.chdir(projectPath);
+    try {
+      await mutateActiveConfig({ local: true }, (active) => {
+        active.servers.localOnly = { transport: "stdio", command: "local-server" };
+      });
+    } finally {
+      process.chdir(previousCwd);
+    }
+
+    expect(loadProjectConfig(localPath).servers.shared).toEqual({ transport: "http", url: "https://local.example/mcp", enabled: true });
+    expect(loadProjectConfig(localPath).servers.localOnly).toMatchObject({ command: "local-server" });
   });
 });

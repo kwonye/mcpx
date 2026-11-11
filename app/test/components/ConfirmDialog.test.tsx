@@ -74,4 +74,35 @@ describe("ConfirmDialog", () => {
     expect(onCancel).toHaveBeenCalledOnce();
     expect(onConfirm).not.toHaveBeenCalled();
   });
+
+  it("focuses cancel first for destructive actions and traps tab navigation", () => {
+    const { rerender } = render(
+      <ConfirmDialog
+        open={true}
+        title="Delete"
+        message="Delete?"
+        destructive
+        onConfirm={vi.fn()}
+        onCancel={vi.fn()}
+      />
+    );
+    const cancel = screen.getByRole("button", { name: "Cancel" });
+    const confirm = screen.getByRole("button", { name: "Confirm" });
+    expect(document.activeElement).toBe(cancel);
+
+    confirm.focus();
+    fireEvent.keyDown(window, { key: "Tab" });
+    expect(document.activeElement).toBe(cancel);
+
+    rerender(
+      <ConfirmDialog
+        open={false}
+        title="Delete"
+        message="Delete?"
+        destructive
+        onConfirm={vi.fn()}
+        onCancel={vi.fn()}
+      />
+    );
+  });
 });

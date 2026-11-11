@@ -1,26 +1,6 @@
 import { useState } from "react";
 import type { UpstreamServerSpec } from "@mcpx/core";
 
-function tokenizeArguments(value: string): string[] {
-  const tokens: string[] = [];
-  let token = "";
-  let quote: string | null = null;
-  for (const char of value.trim()) {
-    if ((char === '"' || char === "'") && (!quote || quote === char)) {
-      quote = quote ? null : char;
-    } else if (/\s/.test(char) && !quote) {
-      if (token) {
-        tokens.push(token);
-        token = "";
-      }
-    } else {
-      token += char;
-    }
-  }
-  if (token) tokens.push(token);
-  return tokens;
-}
-
 interface AuthBinding {
   kind: "env" | "header";
   key: string;
@@ -31,6 +11,7 @@ interface EditServerFormProps {
   serverName: string;
   transport: string;
   target: string;
+  spec?: UpstreamServerSpec;
   authBindings: AuthBinding[];
   onSubmit: (spec: UpstreamServerSpec, resolvedSecrets: Record<string, string>) => void;
   onCancel: () => void;
@@ -40,13 +21,18 @@ export function EditServerForm({
   serverName,
   transport,
   target,
+  spec,
   authBindings,
   onSubmit,
   onCancel
 }: EditServerFormProps) {
-  const [command, setCommand] = useState(transport === "stdio" ? target : "");
-  const [url, setUrl] = useState(transport === "http" ? target : "");
-  const [args, setArgs] = useState("");
+  const initialSpec = spec ?? (transport === "stdio"
+    ? { transport: "stdio" as const, command: target }
+    : { transport: "http" as const, url: target });
+  const [command, setCommand] = useState(initialSpec.transport === "stdio" ? initialSpec.command : "");
+  const [url, setUrl] = useState(initialSpec.transport === "http" ? initialSpec.url : "");
+  const [args, setArgs] = useState<string[]>(initialSpec.transport === "stdio" ? [...(initialSpec.args ?? [])] : []);
+  const [cwd, setCwd] = useState(initialSpec.transport === "stdio" ? initialSpec.cwd ?? "" : "");
   const [envVars, setEnvVars] = useState<Array<{ key: string; value: string; isSecret: boolean; originalRef?: string }>>(
     authBindings
       .filter((b) => b.kind === "env")
@@ -74,6 +60,12 @@ export function EditServerForm({
 
   const handleRemoveEnvVar = (index: number) => {
     setEnvVars((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const handleAddArg = () => setArgs((prev) => [...prev, ""]);
+  const handleRemoveArg = (index: number) => setArgs((prev) => prev.filter((_, i) => i !== index));
+  const handleUpdateArg = (index: number, value: string) => {
+    setArgs((prev) => prev.map((arg, i) => i === index ? value : arg));
   };
 
   const handleUpdateEnvVar = (index: number, field: "key" | "value" | "isSecret", value: string | boolean) => {
@@ -143,15 +135,18 @@ export function EditServerForm({
         }
       });
 
-      const argsList = args.trim() ? tokenizeArguments(args) : undefined;
+      const argsList = args;
 
       spec = {
         transport: "stdio",
         command: command.trim(),
-        args: argsList,
+        args: argsList.length > 0 ? argsList : undefined,
         env: Object.keys(envObj).length > 0 ? envObj : undefined
       };
+      if (cwd.trim()) spec.cwd = cwd.trim();
     }
+
+    if (initialSpec.enabled !== undefined) spec.enabled = initialSpec.enabled;
 
     onSubmit(spec, resolvedSecrets);
   };
@@ -188,14 +183,32 @@ export function EditServerForm({
               />
             </div>
             <div className="form-field">
-              <label htmlFor="args">Arguments (space-separated)</label>
+              <div className="section-heading">
+                <label>Arguments</label>
+                <button type="button" className="btn btn-sm btn-secondary" onClick={handleAddArg}>+ Add argument</button>
+              </div>
+              {args.map((arg, index) => (
+                <div className="auth-entry" key={index}>
+                  <input
+                    aria-label={`Argument ${index + 1}`}
+                    className="form-control mono-text"
+                    type="text"
+                    value={arg}
+                    onChange={(e) => handleUpdateArg(index, e.target.value)}
+                  />
+                  <button type="button" className="btn btn-sm btn-secondary" onClick={() => handleRemoveArg(index)} title="Remove argument">×</button>
+                </div>
+              ))}
+            </div>
+            <div className="form-field">
+              <label htmlFor="cwd">Working directory</label>
               <input
-                id="args"
+                id="cwd"
                 className="form-control mono-text"
                 type="text"
-                value={args}
-                onChange={(e) => setArgs(e.target.value)}
-                placeholder="e.g., -y @openai/stitch-mcp"
+                value={cwd}
+                onChange={(e) => setCwd(e.target.value)}
+                placeholder="Optional working directory"
               />
             </div>
           </>

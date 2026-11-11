@@ -134,6 +134,51 @@ describe("update manager", () => {
     });
   });
 
+  it("shares one pending manual check between concurrent callers", async () => {
+    const { checkForUpdatesNow } = await import("../../src/main/update-manager");
+
+    const first = checkForUpdatesNow();
+    const second = checkForUpdatesNow();
+    expect(first).toBe(second);
+    triggerEvent("update-not-available");
+
+    await expect(first).resolves.toEqual({
+      status: "downloaded",
+      message: "You're already on the latest version."
+    });
+  });
+
+  it("converts a rejected updater promise into a settled manual result", async () => {
+    checkForUpdatesMock.mockRejectedValueOnce(new Error("network unavailable"));
+    const { checkForUpdatesNow } = await import("../../src/main/update-manager");
+
+    await expect(checkForUpdatesNow()).resolves.toEqual({
+      status: "error",
+      message: "Update check failed: network unavailable"
+    });
+  });
+
+  it("clears the completed check timeout before a later check starts", async () => {
+    const { checkForUpdatesNow } = await import("../../src/main/update-manager");
+
+    const first = checkForUpdatesNow();
+    triggerEvent("update-not-available");
+    await first;
+
+    await vi.advanceTimersByTimeAsync(20_000);
+    const second = checkForUpdatesNow();
+    let settled = false;
+    void second.then(() => { settled = true; });
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(settled).toBe(false);
+
+    triggerEvent("update-not-available");
+    await expect(second).resolves.toEqual({
+      status: "downloaded",
+      message: "You're already on the latest version."
+    });
+  });
+
   it("returns unsupported status when not packaged", async () => {
     appMock.isPackaged = false;
     const { checkForUpdatesNow } = await import("../../src/main/update-manager");

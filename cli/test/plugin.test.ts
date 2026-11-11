@@ -67,6 +67,7 @@ describe("plugin source parsing", () => {
   it("parses npm sources", () => {
     const s = parseSource("npm:@scope/pkg@1.0.0");
     expect(s.type).toBe("npm");
+    expect(s.packageName).toBe("@scope/pkg");
     expect(s.ref).toBe("1.0.0");
   });
 });

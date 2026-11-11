@@ -174,4 +174,45 @@ describe("SkillsTab", () => {
 
     expect(window.mcpx.skills.save).toHaveBeenCalledWith("editable-skill", "Updated content");
   });
+
+  it("asks before discarding an unsaved draft when switching skills", async () => {
+    const mockSkills = [
+      { id: "draft-one", content: "Original one" },
+      { id: "draft-two", content: "Original two" }
+    ];
+    (window.mcpx.skills.list as ReturnType<typeof vi.fn>).mockResolvedValue(mockSkills);
+    (window.mcpx.skills.save as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+
+    render(<SkillsTab />);
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
+
+    fireEvent.change(screen.getByPlaceholderText("Enter skill instructions..."), { target: { value: "Unsaved draft" } });
+    fireEvent.click(screen.getByText("draft-two"));
+    expect(await screen.findByText("Save your changes before switching skills?")).toBeDefined();
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect((screen.getByPlaceholderText("Enter skill instructions...") as HTMLTextAreaElement).value).toBe("Unsaved draft");
+
+    fireEvent.click(screen.getByText("draft-two"));
+    fireEvent.click(screen.getByRole("button", { name: "Discard" }));
+    expect((screen.getByPlaceholderText("Enter skill instructions...") as HTMLTextAreaElement).value).toBe("Original two");
+  });
+
+  it("keeps the draft and prompt open when saving before navigation fails", async () => {
+    const mockSkills = [
+      { id: "draft-one", content: "Original one" },
+      { id: "draft-two", content: "Original two" }
+    ];
+    (window.mcpx.skills.list as ReturnType<typeof vi.fn>).mockResolvedValue(mockSkills);
+    (window.mcpx.skills.save as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("save failed"));
+
+    render(<SkillsTab />);
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
+    fireEvent.change(screen.getByPlaceholderText("Enter skill instructions..."), { target: { value: "Unsaved draft" } });
+    fireEvent.click(screen.getByText("draft-two"));
+    fireEvent.click((await screen.findByRole("dialog", { name: "Unsaved changes" })).querySelector("button.btn-primary")!);
+
+    expect(await screen.findByText("Save your changes before switching skills?")).toBeDefined();
+    expect((screen.getByPlaceholderText("Enter skill instructions...") as HTMLTextAreaElement).value).toBe("Unsaved draft");
+  });
 });

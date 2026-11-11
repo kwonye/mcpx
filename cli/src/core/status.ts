@@ -28,6 +28,8 @@ export interface StatusServerEntry {
   enabled: boolean;
   transport: UpstreamServerSpec["transport"];
   target: string;
+  /** Typed source configuration used by the desktop editor. */
+  spec?: UpstreamServerSpec;
   authBindings: StatusAuthBinding[];
   clients: StatusClientMapping[];
   tokenCount?: UpstreamTokenCount;
@@ -152,6 +154,7 @@ export async function buildStatusReport(
       enabled: isServerEnabled(spec),
       transport: spec.transport,
       target: describeServerTarget(spec),
+      spec,
       authBindings: buildAuthBindings(spec),
       clients: buildClientMappings(config, managedIndex, name),
       tokenCount,

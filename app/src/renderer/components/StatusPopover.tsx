@@ -67,6 +67,8 @@ export function StatusPopover() {
   const [showAddServer, setShowAddServer] = useState(true);
   const [showMenu, setShowMenu] = useState(false);
   const [pendingAuth, setPendingAuth] = useState<Array<{ serverName: string; oauthLikely?: boolean }>>([]);
+  const [daemonBusy, setDaemonBusy] = useState(false);
+  const [daemonError, setDaemonError] = useState<string | null>(null);
 
   useEffect(() => {
     void window.mcpx.getPendingAuth?.().then((result: Array<{ serverName: string; oauthLikely?: boolean }> | null) => {
@@ -100,11 +102,24 @@ export function StatusPopover() {
   });
   const syncedCount = syncedClients.size;
 
-  function handleDaemonToggle(): void {
-    if (report.daemon.running) {
-      void window.mcpx.daemonStop().then(() => refresh());
-    } else {
-      void window.mcpx.daemonStart().then(() => refresh());
+  async function handleDaemonToggle(): Promise<void> {
+    if (daemonBusy) return;
+    setDaemonBusy(true);
+    setDaemonError(null);
+    try {
+      if (report.daemon.running) {
+        await window.mcpx.daemonStop();
+      } else {
+        await window.mcpx.daemonStart();
+      }
+    } catch (error) {
+      setDaemonError(error instanceof Error ? error.message : String(error));
+    } finally {
+      try {
+        await refresh();
+      } finally {
+        setDaemonBusy(false);
+      }
     }
   }
 
@@ -136,8 +151,8 @@ export function StatusPopover() {
           </span>
         </div>
         <div className="popover-header-actions">
-          <button type="button" onClick={handleDaemonToggle} className="popover-daemon-btn">
-            {report.daemon.running ? "Stop" : "Start"}
+          <button type="button" onClick={() => void handleDaemonToggle()} className="popover-daemon-btn" disabled={daemonBusy}>
+            {daemonBusy ? "Working…" : report.daemon.running ? "Stop" : "Start"}
           </button>
           <div className="popover-menu-wrap">
             <button
@@ -159,6 +174,8 @@ export function StatusPopover() {
           </div>
         </div>
       </header>
+
+      {daemonError && <div className="feedback-message error">{daemonError}</div>}
 
       <main className="popover-main">
         {pendingAuth.length > 0 && (

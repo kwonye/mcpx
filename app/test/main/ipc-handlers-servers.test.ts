@@ -132,7 +132,6 @@ describe("ipc-handlers.ts - servers group", () => {
   const setServerEnabledMock = vi.fn();
   const updateServerMock = vi.fn();
   const parseCliAddCommandMock = vi.fn();
-  const tokenizeCommandLineMock = vi.fn();
   const probeHttpAuthRequirementMock = vi.fn();
   const resolveAuthTargetMock = vi.fn();
   const maybePrefixBearerMock = vi.fn();
@@ -182,7 +181,6 @@ describe("ipc-handlers.ts - servers group", () => {
     setServerEnabledMock.mockReturnValue(undefined);
     updateServerMock.mockReturnValue(undefined);
     parseCliAddCommandMock.mockReturnValue({ name: "stub", spec: { transport: "stdio", command: "stub" } });
-    tokenizeCommandLineMock.mockImplementation((command: string) => [command]);
     probeHttpAuthRequirementMock.mockResolvedValue({ authRequired: false });
     resolveAuthTargetMock.mockReturnValue({ kind: "header", key: "Authorization" });
     maybePrefixBearerMock.mockImplementation((_target: unknown, value: string) => value);
@@ -262,7 +260,6 @@ describe("ipc-handlers.ts - servers group", () => {
       toSecretRef: toSecretRefMock,
       maybePrefixBearer: maybePrefixBearerMock,
       parseCliAddCommand: parseCliAddCommandMock,
-      tokenizeCommandLine: tokenizeCommandLineMock,
       runOAuthLogin: vi.fn(async () => ({ serverName: "stub", authorized: true })),
       OAuthCancelledError: class OAuthCancelledError extends Error {},
       clearOAuthCredentials: vi.fn(() => []),
@@ -311,8 +308,13 @@ describe("ipc-handlers.ts - servers group", () => {
       const result = await invokeHandler(IPC.ADD_SERVER, "my-server", spec);
 
       expect(mutateConfigMock).toHaveBeenCalled();
-      expect(addServerMock).toHaveBeenCalledWith(fakeConfig, "my-server", spec, true);
+      expect(addServerMock).toHaveBeenCalledWith(fakeConfig, "my-server", spec, false);
       expect(result).toEqual({ added: "my-server", sync: fakeSyncSummary });
+    });
+
+    it("passes explicit overwrite intent through the desktop add IPC", async () => {
+      await invokeHandler(IPC.ADD_SERVER, "my-server", spec, { force: true });
+      expect(addServerMock).toHaveBeenCalledWith(fakeConfig, "my-server", spec, true);
     });
 
     it("rejects when addServer rejects (e.g. duplicate name)", async () => {
@@ -406,6 +408,21 @@ describe("ipc-handlers.ts - servers group", () => {
         ...httpSpec,
         headers: { API_KEY: "secret://auth_my-server_header_api_key" }
       });
+    });
+
+    it("replaces an existing generated secret when the editor supplies a new value", async () => {
+      secretsGetSecretMock.mockReturnValue("old value");
+      const httpSpec = {
+        transport: "http" as const,
+        url: "https://example.com/mcp",
+        headers: { API_KEY: "new plain-text value" }
+      };
+
+      await invokeHandler(IPC.UPDATE_SERVER, "my-server", httpSpec, {
+        "auth_my-server_header_api_key": "replacement value"
+      });
+
+      expect(secretsSetSecretMock).toHaveBeenCalledWith("auth_my-server_header_api_key", "replacement value");
     });
 
     it("leaves empty, referenced, and non-secret values unchanged", async () => {
@@ -536,7 +553,7 @@ describe("ipc-handlers.ts - servers group", () => {
       const result = await invokeHandler(IPC.EXECUTE_CLI_COMMAND, "mcpx add parsed-server -- node server.js");
 
       expect(mutateConfigMock).toHaveBeenCalled();
-      expect(addServerMock).toHaveBeenCalledWith(fakeConfig, "parsed-server", spec, true);
+      expect(addServerMock).toHaveBeenCalledWith(fakeConfig, "parsed-server", spec, false);
       expect(result).toEqual({ added: "parsed-server", sync: fakeSyncSummary });
     });
 

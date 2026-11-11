@@ -75,45 +75,37 @@ function parseKeyValueFlag(value: string, label: string): [string, string] {
   return [value.slice(0, split), value.slice(split + 1)];
 }
 
-export function parseCliAddCommand(command: string): { name: string; spec: UpstreamServerSpec } {
+export function parseCliAddCommand(command: string): { name: string; spec: UpstreamServerSpec; force?: boolean } {
   let trimmed = command.trim();
   if (trimmed.startsWith("mcpx ")) {
     trimmed = trimmed.slice(5).trim();
   }
 
   const parts = tokenizeCommandLine(trimmed);
+  const force = parts.includes("--force");
+  const parseParts = parts.filter((part) => part !== "--force");
+  let parsed: { name: string; spec: UpstreamServerSpec };
 
-  if (parts[0] === "claude" && parts[1] === "mcp" && parts[2] === "add") {
-    return parseClaudeAdd(parts.slice(3));
+  if (parseParts[0] === "claude" && parseParts[1] === "mcp" && parseParts[2] === "add") {
+    parsed = parseClaudeAdd(parseParts.slice(3));
+  } else if (parseParts[0] === "codex" && parseParts[1] === "mcp" && parseParts[2] === "add") {
+    parsed = parseCodexAdd(parseParts.slice(3));
+  } else if (parseParts[0] === "qwen" && parseParts[1] === "mcp" && parseParts[2] === "add") {
+    parsed = parseQwenAdd(parseParts.slice(3));
+  } else if (parseParts[0] === "code" && parseParts[1] === "--add-mcp") {
+    parsed = parseVSCodeAdd(parseParts[2]);
+  } else if (parseParts[0] === "openclaw" && parseParts[1] === "mcp" && parseParts[2] === "add") {
+    parsed = parseOpenClawAdd(parseParts.slice(3));
+  } else if (parseParts[0] === "hermes" && parseParts[1] === "mcp" && parseParts[2] === "add") {
+    parsed = parseHermesAdd(parseParts.slice(3));
+  } else if (parseParts[0] === "add") {
+    parsed = parseStandardAdd(parseParts.slice(1));
+  } else {
+    throw new Error(
+      'Unrecognized command. Supported forms: "add <name> <url|command>", "claude mcp add ...", "codex mcp add ...", "qwen mcp add ...", "code --add-mcp ...", "openclaw mcp add ...", "hermes mcp add ...".'
+    );
   }
-
-  if (parts[0] === "codex" && parts[1] === "mcp" && parts[2] === "add") {
-    return parseCodexAdd(parts.slice(3));
-  }
-
-  if (parts[0] === "qwen" && parts[1] === "mcp" && parts[2] === "add") {
-    return parseQwenAdd(parts.slice(3));
-  }
-
-  if (parts[0] === "code" && parts[1] === "--add-mcp") {
-    return parseVSCodeAdd(parts[2]);
-  }
-
-  if (parts[0] === "openclaw" && parts[1] === "mcp" && parts[2] === "add") {
-    return parseOpenClawAdd(parts.slice(3));
-  }
-
-  if (parts[0] === "hermes" && parts[1] === "mcp" && parts[2] === "add") {
-    return parseHermesAdd(parts.slice(3));
-  }
-
-  if (parts[0] === "add") {
-    return parseStandardAdd(parts.slice(1));
-  }
-
-  throw new Error(
-    'Unrecognized command. Supported forms: "add <name> <url|command>", "claude mcp add ...", "codex mcp add ...", "qwen mcp add ...", "code --add-mcp ...", "openclaw mcp add ...", "hermes mcp add ...".'
-  );
+  return force ? { ...parsed, force: true } : parsed;
 }
 
 function parseStandardAdd(args: string[]): { name: string; spec: UpstreamServerSpec } {

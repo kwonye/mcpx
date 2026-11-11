@@ -211,6 +211,10 @@ jobs:
         run: bun install --frozen-lockfile
         working-directory: app
 
+      - name: Typecheck desktop
+        run: bun run typecheck
+        working-directory: app
+
       - name: Set desktop version for build
         run: bun -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync('package.json','utf8'));p.version='${{ needs.orchestrate.outputs.version }}';fs.writeFileSync('package.json',JSON.stringify(p,null,2)+'\n')"
         working-directory: app
@@ -328,6 +332,10 @@ jobs:
         run: bun install --frozen-lockfile
         working-directory: app
 
+      - name: Typecheck desktop
+        run: bun run typecheck
+        working-directory: app
+
       - name: Set desktop version for build
         run: bun -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync('package.json','utf8'));p.version='${{ needs.orchestrate.outputs.version }}';fs.writeFileSync('package.json',JSON.stringify(p,null,2)+'\n')"
         working-directory: app
@@ -402,6 +410,10 @@ jobs:
 
       - name: Install desktop dependencies
         run: bun install --frozen-lockfile
+        working-directory: app
+
+      - name: Typecheck desktop
+        run: bun run typecheck
         working-directory: app
 
       - name: Set desktop version for build
