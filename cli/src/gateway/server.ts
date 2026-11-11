@@ -43,7 +43,14 @@ interface GatewayServerOptions {
   port: number;
   expectedToken: string;
   secrets: SecretsManager;
+  /** Identifies the owning daemon process; reported by /health. */
+  instanceId?: string;
 }
+
+export type GatewayServer = http.Server & {
+  /** Stop accepting, drop open (keep-alive/streaming) connections, and close upstreams. */
+  shutdown(): Promise<void>;
+};
 
 interface UpstreamConnection {
   fingerprint: string;
@@ -1399,7 +1406,7 @@ function redactSensitiveHeaders(headers: http.IncomingHttpHeaders): http.Incomin
   return redacted;
 }
 
-export function createGatewayServer(options: GatewayServerOptions): http.Server {
+export function createGatewayServer(options: GatewayServerOptions): GatewayServer {
   const debug = process.env.MCPX_GATEWAY_DEBUG === "1";
   const runtime: GatewayRuntimeState = {
     upstreamConnections: new Map(),
@@ -1477,7 +1484,13 @@ export function createGatewayServer(options: GatewayServerOptions): http.Server 
         }
         response.statusCode = 200;
         response.setHeader("content-type", "application/json");
-        response.end(JSON.stringify({ ok: true, server: "mcpx", protocolVersion: MCP_V2_PROTOCOL_VERSION }));
+        response.end(JSON.stringify({
+          ok: true,
+          server: "mcpx",
+          protocolVersion: MCP_V2_PROTOCOL_VERSION,
+          version: SERVER_VERSION,
+          instanceId: options.instanceId ?? null
+        }));
         return;
       }
 
@@ -1558,15 +1571,31 @@ export function createGatewayServer(options: GatewayServerOptions): http.Server 
     }
   });
 
-  server.on("close", () => {
-    emitGatewayHealthSummary(runtime, startedAt);
-    void mcpHandler.close();
-    for (const entry of runtime.upstreamConnections.values()) {
-      void closeUpstreamConnection(entry);
+  let runtimeClosed: Promise<void> | null = null;
+  const closeRuntime = (): Promise<void> => {
+    if (!runtimeClosed) {
+      emitGatewayHealthSummary(runtime, startedAt);
+      const entries = [...runtime.upstreamConnections.values()];
+      runtime.upstreamConnections.clear();
+      runtimeClosed = Promise.allSettled([
+        Promise.resolve().then(() => mcpHandler.close()),
+        ...entries.map((entry) => closeUpstreamConnection(entry))
+      ]).then(() => undefined);
     }
-    runtime.upstreamConnections.clear();
+    return runtimeClosed;
+  };
+
+  server.on("close", () => {
+    void closeRuntime();
   });
 
+  const gateway = server as GatewayServer;
+  gateway.shutdown = async () => {
+    if (server.listening) server.close();
+    server.closeAllConnections?.();
+    await closeRuntime();
+  };
+
   server.listen(options.port, "127.0.0.1");
-  return server;
+  return gateway;
 }

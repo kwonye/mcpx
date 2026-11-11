@@ -76,6 +76,43 @@ export function getLogPath(): string {
   return path.join(getLogDir(), "daemon.log");
 }
 
+/** Daemon-owned runtime record ({pid, port, version, startedAt, instanceId}). */
+export function getRuntimeRecordPath(): string {
+  return path.join(getRuntimeDir(), "daemon.json");
+}
+
+/** Supervisor-level output (launchd StandardOutPath); the daemon logs to getLogPath(). */
+export function getServiceLogPath(): string {
+  return path.join(getLogDir(), "service.log");
+}
+
+/** Generated service files that have no fixed OS location (Windows task XML and launcher). */
+export function getServiceDir(): string {
+  return path.join(getDataRoot(), "mcpx", "service");
+}
+
+// sun_path is 104 bytes on macOS and 108 on Linux.
+const MAX_SOCKET_PATH = 100;
+
+/**
+ * Per-user local endpoint that is both the daemon's single-instance guard and
+ * its control channel: a Unix domain socket in the runtime dir on POSIX, a
+ * named pipe on Windows. Both are scoped by the runtime dir so separate
+ * MCPX_STATE_HOME roots get separate daemons.
+ */
+export function getControlEndpoint(platform: NodeJS.Platform = process.platform): string {
+  const hash = crypto
+    .createHash("sha256")
+    .update(`${os.userInfo().username}\0${getRuntimeDir()}`)
+    .digest("hex")
+    .slice(0, 16);
+  if (platform === "win32") {
+    return `\\\\.\\pipe\\mcpx-${hash}`;
+  }
+  const preferred = path.join(getRuntimeDir(), "daemon.sock");
+  return Buffer.byteLength(preferred) <= MAX_SOCKET_PATH ? preferred : path.join(os.tmpdir(), `mcpx-${hash}.sock`);
+}
+
 export function getGatewayTokenPath(secretName: string): string {
   return path.join(getConfigRoot(), "mcpx", `${secretName}.token`);
 }

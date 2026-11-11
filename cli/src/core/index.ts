@@ -59,13 +59,29 @@ export type {
 // Daemon
 export {
   getDaemonStatus,
+  probeDaemonStatus,
   startDaemon,
   stopDaemon,
+  stopDaemonAsync,
   restartDaemon,
   readDaemonLogs,
-  runDaemonForeground
+  runDaemonForeground,
+  DaemonPortInUseError
 } from "./daemon.js";
-export type { DaemonStatus, DaemonStartResult } from "./daemon.js";
+export type { DaemonStatus, DaemonStartResult, DaemonStopResult, DaemonStartOptions, DaemonLifecycleOptions } from "./daemon.js";
+
+// OS background service (launchd / systemd --user / Task Scheduler)
+export {
+  installService,
+  uninstallService,
+  getServiceStatus,
+  startService,
+  stopService,
+  restartService,
+  DAEMON_EXIT_ALREADY_RUNNING,
+  DAEMON_EXIT_PORT_IN_USE
+} from "../service/index.js";
+export type { ServiceResult, ServiceStatus, ServiceOptions, ServiceInstallOptions, ServiceAction, ServiceManagerKind } from "../service/index.js";
 
 // Sync
 export { syncAllClients, getGatewayUrl, getGatewayInternalUrl, persistSyncState } from "./sync.js";

@@ -386,45 +386,6 @@ describe("GW-06-c: Staged CLI fallback", () => {
   });
 });
 
-describe("DAEMON-01: PID file port recording", () => {
-  it("writes PID and port to pidfile", async () => {
-    // This test verifies the fix is in place by checking the source code
-    const daemonPath = path.join(process.cwd(), "src/core/daemon.ts");
-    const source = fs.readFileSync(daemonPath, "utf8");
-    
-    // Should write both PID and port
-    expect(source).toMatch(/writeFileSync\(pidPath.*\$\{child\.pid\}:\$\{port\}/);
-    
-    // Should read both PID and port
-    expect(source).toContain("readPidRecordFromFile");
-    expect(source).toMatch(/const \[pidRaw, portRaw\] = raw\.split\(":"\)/);
-  });
-
-  it("reports portMismatch when config port differs from pidfile port", async () => {
-    // This test verifies the fix is in place by checking the source code
-    const daemonPath = path.join(process.cwd(), "src/core/daemon.ts");
-    const source = fs.readFileSync(daemonPath, "utf8");
-    
-    // Should include portMismatch in DaemonStatus
-    expect(source).toContain("portMismatch");
-    
-    // Should compare record.port with config.gateway.port
-    expect(source).toMatch(/record\.port !== config\.gateway\.port/);
-  });
-});
-
-describe("REVIEW-02: Daemon stop process check", () => {
-  it("requires 'daemon run' in process command", async () => {
-    // This test verifies the fix is in place by checking the source code
-    const daemonPath = path.join(process.cwd(), "src/core/daemon.ts");
-    const source = fs.readFileSync(daemonPath, "utf8");
-    
-    // Should check for "daemon run" AND (mcpx OR cli.js)
-    expect(source).toContain('cmd.includes("daemon run")');
-    expect(source).toMatch(/looksLikeMcpxDaemon.*daemon run.*mcpx.*cli\.js/);
-  });
-});
-
 describe("SYNC-01: Adapter disable/enable fixes", () => {
   it("codex uses enabled-only names for writability checks", async () => {
     const codexPath = path.join(process.cwd(), "src/adapters/codex.ts");
@@ -516,42 +477,6 @@ describe("GW-07: Token-count cache invalidation", () => {
     // Should resolve secret:// and oauth:// references in fingerprint
     expect(source).toMatch(/specFingerprint.*secrets/);
     expect(source).toContain("resolvedMarkers");
-  });
-});
-
-describe("LOG-01: Log rotation", () => {
-  it("rotates logs when exceeding 10MB", async () => {
-    // This test verifies the fix is in place by checking the source code
-    const daemonPath = path.join(process.cwd(), "src/core/daemon.ts");
-    const source = fs.readFileSync(daemonPath, "utf8");
-    
-    // Should check for 10MB threshold
-    expect(source).toContain("10 * 1024 * 1024");
-    
-    // Should rotate to .1 and .2 suffixes
-    expect(source).toContain("}.1`");
-    expect(source).toContain("}.2`");
-  });
-});
-
-describe("REVIEW-01: Port fallback warning", () => {
-  it("returns fellBackFrom in resolveGatewayPort", async () => {
-    // This test verifies the fix is in place by checking the source code
-    const daemonPath = path.join(process.cwd(), "src/core/daemon.ts");
-    const source = fs.readFileSync(daemonPath, "utf8");
-    
-    // Should return object with port and fellBackFrom
-    expect(source).toMatch(/return \{ port.*fellBackFrom/);
-  });
-
-  it("prints warning to stderr when fallback occurs", async () => {
-    // This test verifies the fix is in place by checking the source code
-    const daemonPath = path.join(process.cwd(), "src/core/daemon.ts");
-    const source = fs.readFileSync(daemonPath, "utf8");
-    
-    // Should print warning about port fallback
-    expect(source).toContain("was unavailable");
-    expect(source).toContain("stderr");
   });
 });
 
