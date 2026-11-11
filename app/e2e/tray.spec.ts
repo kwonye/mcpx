@@ -93,15 +93,18 @@ test.describe("tray icon", () => {
       // and the internal togglePopover() is no longer reachable via require
       // from electronApplication.evaluate() - see openPopoverWindow's doc
       // comment). Opening the popover's own route exercises the same real
-      // StatusPopover component and IPC bridge that a tray click would show.
+      // Popover component and IPC bridge that a tray click would show.
       const popover = await openPopoverWindow(app);
 
-      const openDashboardButton = popover.getByRole("button", { name: "Open Dashboard" });
-      await expect(openDashboardButton).toBeVisible();
+      // The first-run privacy notice never appears in the popover.
+      await expect(popover.getByText("Help improve mcpx")).toHaveCount(0);
+      await expect(popover.getByText(/Running|Stopped|Checking/).first()).toBeVisible();
+
+      const openDashboardButton = popover.getByRole("button", { name: "Open mcpx" });
       await openDashboardButton.click();
 
       const dashboard = await openDashboardWindow(app);
-      await expect(dashboard.locator(".sidebar")).toBeVisible();
+      await expect(dashboard.getByRole("navigation", { name: "Main" })).toBeVisible();
     } finally {
       if (app) {
         await closeApp(app);

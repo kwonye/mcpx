@@ -1,6 +1,6 @@
-import { expect, type ElectronApplication, type Page } from "@playwright/test";
+import { _electron as electron, expect, type ElectronApplication, type Page } from "@playwright/test";
 import { resolve, join } from "node:path";
-import { mkdtempSync, rmSync, readFileSync, existsSync } from "node:fs";
+import { mkdtempSync, rmSync, readFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 
 /**
@@ -28,11 +28,15 @@ export interface Sandbox {
  * cli/src/core/paths.ts, which reads these env vars before falling back to
  * the real home directory.
  */
-export function createSandbox(): Sandbox {
+export function createSandbox(options: { config?: object } = {}): Sandbox {
   const home = mkdtempSync(join(tmpdir(), "mcpx-e2e-home-"));
   const configHome = mkdtempSync(join(tmpdir(), "mcpx-e2e-config-"));
   const dataHome = mkdtempSync(join(tmpdir(), "mcpx-e2e-data-"));
   const stateHome = mkdtempSync(join(tmpdir(), "mcpx-e2e-state-"));
+  if (options.config) {
+    mkdirSync(join(configHome, "mcpx"), { recursive: true });
+    writeFileSync(join(configHome, "mcpx", "config.json"), JSON.stringify(options.config));
+  }
 
   return {
     launchArgs: [
@@ -153,9 +157,8 @@ export async function openDashboardWindow(app: ElectronApplication): Promise<Pag
     throw new Error("Dashboard window (#dashboard) did not open after emitting 'activate'.");
   }
   await window.waitForLoadState("domcontentloaded");
-  // Dashboard renders a "Loading..." placeholder (no .sidebar) until the
-  // initial GET_STATUS IPC call resolves - wait past that gate.
-  await expect(window.locator(".sidebar")).toBeVisible({ timeout: 15000 });
+  // The shell renders immediately; wait for React to mount the sidebar.
+  await expect(window.getByRole("navigation", { name: "Main" })).toBeVisible({ timeout: 15000 });
   return window;
 }
 
@@ -168,7 +171,7 @@ export async function openDashboardWindow(app: ElectronApplication): Promise<Pag
  * function - which, since the main process is now a single bundled file
  * with no `require` available inside electronApplication.evaluate(), can no
  * longer be reached from a test. Constructing the window this way exercises
- * the real StatusPopover component end-to-end (real preload, real IPC)
+ * the real Popover component end-to-end (real preload, real IPC)
  * without depending on either of those.
  */
 export async function openPopoverWindow(app: ElectronApplication): Promise<Page> {
@@ -179,7 +182,7 @@ export async function openPopoverWindow(app: ElectronApplication): Promise<Page>
         height: 520,
         webPreferences: {
           preload: paths.preloadPath,
-          sandbox: false
+          sandbox: true
         }
       });
       await win.loadFile(paths.indexPath, { hash: "popover" });
@@ -192,9 +195,45 @@ export async function openPopoverWindow(app: ElectronApplication): Promise<Page>
     throw new Error("Popover window (#popover) did not open.");
   }
   await window.waitForLoadState("domcontentloaded");
-  // Popover renders "Loading..." (no .popover-header) until the initial
-  // GET_STATUS IPC call resolves - wait past that gate, same as the
-  // dashboard's .sidebar wait above.
-  await expect(window.locator(".popover-header")).toBeVisible({ timeout: 15000 });
+  await expect(window.getByRole("button", { name: "Open mcpx" })).toBeVisible({ timeout: 15000 });
   return window;
+}
+
+export interface AppContext {
+  app: ElectronApplication;
+  window: Page;
+  sandbox: Sandbox;
+}
+
+/**
+ * Launches the built app in a fresh sandbox, opens the dashboard and always
+ * cleans up (app process, detached daemon, temp dirs). Set
+ * MCPX_E2E_EXECUTABLE to run against an installed build instead.
+ */
+export async function withDashboard(body: (context: AppContext) => Promise<void>, options: { config?: object } = {}): Promise<void> {
+  const sandbox = createSandbox(options);
+  const executablePath = process.env.MCPX_E2E_EXECUTABLE;
+  let app: ElectronApplication | undefined;
+  try {
+    app = await electron.launch({
+      ...(executablePath ? { executablePath } : {}),
+      args: [...sandbox.launchArgs, ...(executablePath ? [] : [mainPath])],
+      env: sandbox.env
+    });
+    const window = await openDashboardWindow(app);
+    await body({ app, window, sandbox });
+  } finally {
+    if (app) await closeApp(app);
+    cleanupSandbox(sandbox);
+  }
+}
+
+/** Clicks a primary section in the sidebar. */
+export async function goTo(window: Page, section: "Servers" | "Clients" | "Add-ons" | "Projects" | "Settings"): Promise<void> {
+  await window.getByRole("navigation", { name: "Main" }).getByRole("button", { name: section }).click();
+  await expect(window.getByRole("heading", { name: section, level: 1 })).toBeVisible();
+}
+
+export function readConfig(sandbox: Sandbox): any {
+  return JSON.parse(readFileSync(join(sandbox.env.MCPX_CONFIG_HOME!, "mcpx", "config.json"), "utf8"));
 }
