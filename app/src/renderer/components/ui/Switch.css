@@ -1,0 +1,47 @@
+.ui-switch {
+  --switch-w: 30px;
+  --switch-h: 18px;
+  --switch-pad: 2px;
+  position: relative;
+  flex: none;
+  width: var(--switch-w);
+  height: var(--switch-h);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: var(--color-border-strong);
+  transition: background-color var(--duration-base) var(--ease-out);
+}
+
+.ui-switch--sm {
+  --switch-w: 26px;
+  --switch-h: 16px;
+}
+
+.ui-switch[aria-checked="true"] {
+  background: var(--color-accent);
+}
+
+.ui-switch:disabled {
+  opacity: 0.45;
+}
+
+.ui-switch[aria-busy="true"] {
+  opacity: 0.7;
+}
+
+.ui-switch__thumb {
+  position: absolute;
+  top: var(--switch-pad);
+  left: var(--switch-pad);
+  width: calc(var(--switch-h) - var(--switch-pad) * 2);
+  height: calc(var(--switch-h) - var(--switch-pad) * 2);
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.25);
+  transition: transform var(--duration-base) var(--ease-out);
+}
+
+.ui-switch[aria-checked="true"] .ui-switch__thumb {
+  transform: translateX(calc(var(--switch-w) - var(--switch-h)));
+}

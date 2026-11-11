@@ -20,20 +20,19 @@ test("installed app saves one stdio credential and syncs two harnesses without c
   const app = await electron.launch({ executablePath, args: ["--dev", ...sandbox.launchArgs], env: sandbox.env });
   try {
     const window = await openDashboardWindow(app);
-    await window.evaluate(() => document.fonts.load('24px "Material Symbols Outlined Variable"'));
-    expect(await window.evaluate(() => document.fonts.check('24px "Material Symbols Outlined Variable"'))).toBe(true);
-    const iconBounds = await window.locator(".nav-button .material-symbols-outlined").first().boundingBox();
+    // Icons are bundled inline SVG: correct size, no font downloads.
+    const iconBounds = await window.getByRole("navigation", { name: "Main" }).locator("svg").first().boundingBox();
     expect(iconBounds!.width).toBeLessThan(40);
     await expect(window.locator('link[href*="fonts.googleapis.com"]')).toHaveCount(0);
-    await window.evaluate(async spec => { await window.mcpx.addServer("echo", spec); }, {
+    await window.evaluate(async spec => { await window.mcpx.servers.add({ name: "echo", spec }); }, {
       transport: "stdio", command: process.execPath,
       args: [upstreamPath]
     });
-    await window.getByRole("button", { name: /Servers$/ }).click();
-    await expect(window.getByRole("heading", { name: "echo", exact: true })).toBeVisible();
-    await window.evaluate(() => window.mcpx.requestAuth("echo"));
-    await window.getByLabel("Environment variable").fill("API_KEY");
-    await window.getByLabel("Auth value").fill("installed-fixture-private-value");
+    await window.getByRole("navigation", { name: "Main" }).getByRole("button", { name: "Servers" }).click();
+    await expect(window.getByRole("button", { name: /^echo, / })).toBeVisible();
+    await window.evaluate(() => window.mcpx.auth.request("echo"));
+    await window.getByRole("dialog", { name: "Sign in to echo" }).getByLabel("Environment variable").fill("API_KEY");
+    await window.getByRole("dialog", { name: "Sign in to echo" }).getByLabel("Token or API key").fill("installed-fixture-private-value");
     await window.getByRole("button", { name: "Save token" }).click();
     await expect(window.getByRole("dialog", { name: "Sign in to echo" })).not.toBeVisible();
     const config = fs.readFileSync(path.join(sandbox.env.MCPX_CONFIG_HOME!, "mcpx/config.json"), "utf8");
@@ -54,10 +53,10 @@ test("installed app saves one stdio credential and syncs two harnesses without c
       expect((await response.json() as any).result.content[0].text).toBe("authorized through the shared gateway");
     }
     const before = pi.headers.Authorization;
-    await window.evaluate(() => window.mcpx.management.sync());
+    await window.evaluate(() => window.mcpx.status.syncAll());
     expect(JSON.parse(fs.readFileSync(piPath, "utf8")).mcpServers.echo__mcpx.headers.Authorization).toBe(before);
-    await window.getByRole("button", { name: /Harnesses$/ }).click();
-    await expect(window.getByText("Synchronized", { exact: true })).toHaveCount(2);
+    await window.getByRole("navigation", { name: "Main" }).getByRole("button", { name: "Clients" }).click();
+    await expect(window.getByRole("list", { name: "Installed apps" }).getByText("Synced", { exact: true })).toHaveCount(2);
     await window.screenshot({ path: "/tmp/mcpx-shared-credentials.png" });
   } finally { await closeApp(app); cleanupSandbox(sandbox); }
 });
@@ -75,14 +74,13 @@ test("installed app adopts native integrations, serves MCP, and undoes the cutov
   const app = await electron.launch({ executablePath, args: ["--dev", ...sandbox.launchArgs], env: sandbox.env });
   try {
     const window = await openDashboardWindow(app);
-    await window.getByRole("button", { name: /Overview$/ }).click();
-    await expect(window.getByRole("heading", { name: "Everything, connected." })).toBeVisible();
-    await window.screenshot({ path: "/tmp/mcpx-overview.png" });
-    await window.getByRole("button", { name: /Scan existing installs/ }).click();
+    await window.getByRole("navigation", { name: "Main" }).getByRole("button", { name: "Clients" }).click();
+    await expect(window.getByRole("heading", { name: "Clients", level: 1 })).toBeVisible();
+    await window.getByRole("button", { name: "Find existing setups" }).click();
     await expect(window.getByRole("dialog")).toBeVisible();
-    await expect(window.getByRole("checkbox", { name: "Adopt echo from pi" })).toBeChecked();
+    await expect(window.getByRole("checkbox", { name: /^Move echo from /i })).toBeChecked();
     await window.screenshot({ path: "/tmp/mcpx-adoption-preview.png" });
-    await window.getByRole("button", { name: "Adopt selected" }).click();
+    await window.getByRole("button", { name: "Move selected" }).click();
     await expect(window.getByRole("dialog")).not.toBeVisible({ timeout: 20000 });
     const managed = JSON.parse(fs.readFileSync(nativePath, "utf8"));
     expect(managed.mcpServers.echo).toBeUndefined();
@@ -95,12 +93,10 @@ test("installed app adopts native integrations, serves MCP, and undoes the cutov
     expect(config).not.toContain("fixture-private-value");
     managed.addedLater = true;
     fs.writeFileSync(nativePath, JSON.stringify(managed));
-    await window.getByRole("button", { name: /Harnesses$/ }).click();
-    await window.screenshot({ path: "/tmp/mcpx-harnesses.png" });
-    await window.getByRole("button", { name: /Activity$/ }).click();
-    await window.getByRole("button", { name: /^Undo$/ }).click();
-    await window.getByRole("button", { name: "Undo operation" }).click();
-    await expect(window.getByText("Operation undone.")).toBeVisible({ timeout: 15000 });
+    // Recent activity lives on the Clients page.
+    await window.getByRole("region", { name: "Recent activity" }).getByRole("button", { name: /^(Undo|Recover)$/ }).first().click();
+    await window.getByRole("alertdialog").getByRole("button", { name: /^(Undo|Recover)$/ }).click();
+    await expect(window.getByText("Change undone")).toBeVisible({ timeout: 15000 });
     const restored = JSON.parse(fs.readFileSync(nativePath, "utf8"));
     expect(restored.mcpServers.echo.command).toBe(process.execPath);
     expect(restored.addedLater).toBe(true);

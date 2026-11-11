@@ -1,44 +1,56 @@
-import { useEffect, useState } from "react";
-import { StatusPopover } from "./components/StatusPopover";
-import { Dashboard } from "./components/Dashboard";
-import { TelemetryDisclosure } from "./components/TelemetryDisclosure";
-import type { TelemetryStatus } from "@mcpx/core";
+import { ToastProvider } from "./components/ui";
+import { platform } from "./lib/api";
+import { AppShell } from "./shell/AppShell";
+import { FirstRunNotice } from "./shell/FirstRunNotice";
+import { NavigationProvider, useNavigation } from "./shell/navigation";
+import { Popover } from "./popover/Popover";
+import { ServersView } from "./views/servers/ServersView";
+import { SignInHost } from "./views/servers/SignInHost";
+import { ClientsView } from "./views/clients/ClientsView";
+import { AddonsView } from "./views/addons/AddonsView";
+import { ProjectsView } from "./views/projects/ProjectsView";
+import { SettingsView } from "./views/settings/SettingsView";
+import { useManagementEvents } from "./hooks/useManagement";
 
+function ManagementEvents() {
+  useManagementEvents();
+  return null;
+}
+
+export function isPopoverWindow(hash = window.location.hash): boolean {
+  return hash.replace(/^#\/?/, "") === "popover";
+}
+
+/** Renderer entry: the tray popover at #popover, the dashboard everywhere else. */
 export function App() {
-  const [view] = useState<"popover" | "dashboard">(() => {
-    const hash = window.location.hash.replace("#", "");
-    return hash === "popover" ? "popover" : "dashboard";
-  });
-  const [telemetryStatus, setTelemetryStatus] = useState<TelemetryStatus | null>(null);
-  const [telemetryReady, setTelemetryReady] = useState(false);
-
-  useEffect(() => {
-    void Promise.resolve(window.mcpx.getTelemetryStatus?.()).then((status) => {
-      if (status) setTelemetryStatus(status);
-    }).catch(() => {
-      setTelemetryStatus(null);
-    }).finally(() => setTelemetryReady(true));
-  }, []);
-
-  if (!telemetryReady) {
-    return <div className="app-shell"><div className="empty-state">Loading privacy settings...</div></div>;
-  }
-
-  if (telemetryStatus && telemetryStatus.noticeAcknowledgedVersion < 1 && telemetryStatus.blockedReason !== "environment") {
-    return <TelemetryDisclosure status={telemetryStatus} onComplete={() => void Promise.resolve(window.mcpx.getTelemetryStatus?.()).then((status) => status && setTelemetryStatus(status))} />;
-  }
-
-  if (view === "popover") {
+  if (isPopoverWindow()) {
     return (
-      <div className="app-shell app-shell--popover">
-        <StatusPopover />
-      </div>
+      <ToastProvider>
+        <ManagementEvents />
+        <Popover />
+      </ToastProvider>
     );
   }
-
   return (
-    <div className="app-shell app-shell--dashboard">
-      <Dashboard />
-    </div>
+    <ToastProvider>
+      <NavigationProvider>
+        <ManagementEvents />
+        <Dashboard />
+      </NavigationProvider>
+    </ToastProvider>
+  );
+}
+
+export function Dashboard() {
+  const { route } = useNavigation();
+  return (
+    <AppShell platform={platform()} banner={<FirstRunNotice />}>
+      {route === "servers" && <ServersView />}
+      {route === "clients" && <ClientsView />}
+      {route === "addons" && <AddonsView />}
+      {route === "projects" && <ProjectsView />}
+      {route === "settings" && <SettingsView />}
+      <SignInHost />
+    </AppShell>
   );
 }

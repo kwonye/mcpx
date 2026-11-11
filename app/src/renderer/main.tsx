@@ -1,26 +1,28 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import "./index.css";
+import "./styles/base.css";
+import "./views/views.css";
 import { App } from "./App";
 import { DESKTOP_PRODUCT_NAME } from "../shared/build-constants";
 import { initializeRendererErrorReporting, updateRendererErrorReporting } from "./telemetry";
 
 const root = document.getElementById("root");
-async function bootstrap(): Promise<void> {
+
+function bootstrap(): void {
   if (!root) return;
+  document.title = DESKTOP_PRODUCT_NAME;
+  document.documentElement.dataset.platform = window.mcpx?.platform ?? "linux";
+
+  // Diagnostics initialise in the background; rendering never waits on them.
   try {
-    const status = await window.mcpx.getTelemetryStatus?.();
-    if (status) initializeRendererErrorReporting(status);
-    window.mcpx.onTelemetryChanged?.((next) => {
+    void window.mcpx.telemetry.status().then(initializeRendererErrorReporting).catch(() => {});
+    window.mcpx.telemetry.onChanged((next) => {
       void updateRendererErrorReporting(next);
     });
   } catch {
-    // Rendering remains available if diagnostics initialization fails.
+    // Rendering stays available if diagnostics initialisation fails.
   }
 
-  document.title = DESKTOP_PRODUCT_NAME;
-  // Clear any existing children (e.g. injected by extensions or dev tools)
-  // to avoid React 19 Hydration mismatch errors on strictly SCR (Client) renders.
   root.innerHTML = "";
   createRoot(root).render(
     <StrictMode>
@@ -29,4 +31,4 @@ async function bootstrap(): Promise<void> {
   );
 }
 
-void bootstrap();
+bootstrap();

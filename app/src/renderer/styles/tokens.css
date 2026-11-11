@@ -1,0 +1,175 @@
+/*
+ * Design tokens. Every colour, size and duration in the renderer comes from
+ * here. Light values are the default; dark values apply via the OS setting
+ * or an explicit [data-theme="dark"] on <html> ([data-theme="light"] pins light).
+ * Text colours meet WCAG AA (>= 4.5:1) on bg, surface and surface-raised.
+ */
+:root {
+  color-scheme: light;
+
+  /* Neutrals */
+  --color-bg: #f7f7f8;
+  --color-surface: #ffffff;
+  --color-surface-raised: #ffffff;
+  --color-surface-sunken: #f1f1f3;
+  --color-surface-hover: #f1f1f3;
+  --color-surface-selected: #e9e9ec;
+  --color-border: #e4e4e8;
+  --color-border-strong: #cfcfd5;
+  --color-text: #18181b;
+  --color-text-secondary: #52525b;
+  --color-text-tertiary: #6b6b74;
+  --color-overlay: rgb(15 15 20 / 0.32);
+
+  /* Accent (from the logo indigo #3730a3) */
+  --color-accent: #4338ca;
+  --color-accent-hover: #3730a3;
+  --color-accent-contrast: #ffffff;
+  --color-accent-text: #4338ca;
+  --color-accent-subtle: #eef0ff;
+  --color-focus: #6366f1;
+
+  /* Status */
+  --color-success: #15803d;
+  --color-success-subtle: #ecfdf3;
+  --color-success-dot: #22a352;
+  --color-warning: #b45309;
+  --color-warning-subtle: #fff7ed;
+  --color-warning-dot: #e8900c;
+  --color-danger: #b91c1c;
+  --color-danger-hover: #991b1b;
+  --color-danger-subtle: #fef2f2;
+  --color-danger-dot: #dc2626;
+  --color-danger-solid: #b91c1c;
+  --color-neutral-dot: #a1a1aa;
+
+  /* Spacing (4px scale) */
+  --space-0-5: 2px;
+  --space-1: 4px;
+  --space-1-5: 6px;
+  --space-2: 8px;
+  --space-2-5: 10px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+
+  /* Type */
+  --font-ui: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", "Ubuntu", "Cantarell", "Noto Sans", "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, "Cascadia Mono", "Segoe UI Mono", "JetBrains Mono", "DejaVu Sans Mono", Menlo, Consolas, monospace;
+  --text-xs: 11px;
+  --text-sm: 12px;
+  --text-md: 13px;
+  --text-lg: 15px;
+  --text-xl: 20px;
+  --text-2xl: 26px;
+  --leading-tight: 1.25;
+  --leading-normal: 1.5;
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+
+  /* Shape + depth */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+  --radius-full: 999px;
+  --shadow-1: 0 1px 2px rgb(16 16 24 / 0.06), 0 4px 12px rgb(16 16 24 / 0.08);
+  --shadow-2: 0 2px 6px rgb(16 16 24 / 0.08), 0 16px 40px rgb(16 16 24 / 0.16);
+  --focus-ring: 0 0 0 2px var(--color-surface), 0 0 0 4px var(--color-focus);
+
+  /* Sizes */
+  --control-sm: 24px;
+  --control-md: 30px;
+  --control-lg: 36px;
+  --sidebar-width: 216px;
+
+  /* Motion */
+  --duration-fast: 120ms;
+  --duration-base: 180ms;
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --color-bg: #141416;
+    --color-surface: #1b1b1f;
+    --color-surface-raised: #232328;
+    --color-surface-sunken: #17171a;
+    --color-surface-hover: #26262c;
+    --color-surface-selected: #2d2d34;
+    --color-border: #2c2c33;
+    --color-border-strong: #3d3d46;
+    --color-text: #ededef;
+    --color-text-secondary: #a1a1aa;
+    --color-text-tertiary: #8b8b94;
+    --color-overlay: rgb(0 0 0 / 0.55);
+    --color-accent: #5552d4;
+    --color-accent-hover: #6461e0;
+    --color-accent-contrast: #ffffff;
+    --color-accent-text: #9b9cf8;
+    --color-accent-subtle: #23233a;
+    --color-focus: #8b8ef8;
+    --color-success: #4ade80;
+    --color-success-subtle: #13261b;
+    --color-success-dot: #34c46a;
+    --color-warning: #fbbf24;
+    --color-warning-subtle: #2a2111;
+    --color-warning-dot: #f0a51a;
+    --color-danger: #f87171;
+    --color-danger-hover: #fca5a5;
+    --color-danger-subtle: #2d1517;
+    --color-danger-dot: #ef4444;
+    --color-danger-solid: #b4282c;
+    --color-neutral-dot: #5f5f69;
+    --shadow-1: 0 1px 2px rgb(0 0 0 / 0.4), 0 4px 12px rgb(0 0 0 / 0.35);
+    --shadow-2: 0 2px 8px rgb(0 0 0 / 0.45), 0 18px 48px rgb(0 0 0 / 0.5);
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --color-bg: #141416;
+  --color-surface: #1b1b1f;
+  --color-surface-raised: #232328;
+  --color-surface-sunken: #17171a;
+  --color-surface-hover: #26262c;
+  --color-surface-selected: #2d2d34;
+  --color-border: #2c2c33;
+  --color-border-strong: #3d3d46;
+  --color-text: #ededef;
+  --color-text-secondary: #a1a1aa;
+  --color-text-tertiary: #8b8b94;
+  --color-overlay: rgb(0 0 0 / 0.55);
+  --color-accent: #5552d4;
+  --color-accent-hover: #6461e0;
+  --color-accent-contrast: #ffffff;
+  --color-accent-text: #9b9cf8;
+  --color-accent-subtle: #23233a;
+  --color-focus: #8b8ef8;
+  --color-success: #4ade80;
+  --color-success-subtle: #13261b;
+  --color-success-dot: #34c46a;
+  --color-warning: #fbbf24;
+  --color-warning-subtle: #2a2111;
+  --color-warning-dot: #f0a51a;
+  --color-danger: #f87171;
+  --color-danger-hover: #fca5a5;
+  --color-danger-subtle: #2d1517;
+  --color-danger-dot: #ef4444;
+  --color-danger-solid: #b4282c;
+  --color-neutral-dot: #5f5f69;
+  --shadow-1: 0 1px 2px rgb(0 0 0 / 0.4), 0 4px 12px rgb(0 0 0 / 0.35);
+  --shadow-2: 0 2px 8px rgb(0 0 0 / 0.45), 0 18px 48px rgb(0 0 0 / 0.5);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-fast: 0ms;
+    --duration-base: 0ms;
+  }
+}

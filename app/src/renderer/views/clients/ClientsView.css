@@ -1,0 +1,57 @@
+.client-mode select {
+  height: var(--control-sm);
+  padding: 0 var(--space-6) 0 var(--space-2);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'%3E%3Cpath d='M2 3.5 5 6.5 8 3.5' fill='none' stroke='%2371717a' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 8px center;
+  appearance: none;
+  font-size: var(--text-sm);
+  color: var(--color-text);
+}
+
+.client-mode select:focus-visible {
+  border-color: var(--color-focus);
+}
+
+.adoption__items {
+  display: flex;
+  flex-direction: column;
+  margin: 0 calc(var(--space-3) * -1);
+}
+
+.adoption__reason {
+  color: var(--color-warning);
+}
+
+.adoption__count {
+  margin-right: auto;
+  font-size: var(--text-sm);
+  color: var(--color-text-tertiary);
+}
+
+.adoption__diagnostics {
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+}
+
+.adoption__diagnostics summary {
+  cursor: default;
+}
+
+.adoption__diagnostics ul {
+  margin-top: var(--space-2);
+  padding-left: var(--space-4);
+  list-style: disc;
+}
+
+.activity__progress {
+  width: calc(100% - 40px);
+  margin-left: 40px;
+  height: 4px;
+  accent-color: var(--color-accent);
+}
+
+.activity__details {
+  padding-left: 56px;
+  list-style: disc;
+}
