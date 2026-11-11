@@ -1,26 +1,80 @@
+import crypto from "node:crypto";
 import fs from "node:fs";
-import net from "node:net";
-import { spawn, execFileSync } from "node:child_process";
-import { getLogPath, getPidPath, ensureParentDir } from "./paths.js";
+import { spawn, type ChildProcess } from "node:child_process";
+import {
+  getConfigPath,
+  getControlEndpoint,
+  getLogPath,
+  getPidPath,
+  getRuntimeRecordPath,
+  getServiceLogPath,
+  ensureParentDir
+} from "./paths.js";
 import { createGatewayServer } from "../gateway/server.js";
 import { SecretsManager } from "./secrets.js";
 import { ensureGatewayToken } from "./registry.js";
 import type { McpxConfig } from "../types.js";
-import { saveConfig } from "./config.js";
-import { syncAllClients, persistSyncState } from "./sync.js";
 import { startBackgroundUpdateCheck } from "./update-manager.js";
 import { withManagedIndexLock } from "./managed-index-lock.js";
 import { getManagedIndexPath } from "./paths.js";
 import { startMarketplaceAutoUpdater } from "./marketplace-updater.js";
 import { captureTelemetryEvent, durationBucket } from "./telemetry.js";
+import { APP_VERSION } from "../version.js";
+import {
+  DAEMON_EXIT_ALREADY_RUNNING,
+  DAEMON_EXIT_PORT_IN_USE,
+  DAEMON_LOG_FILE_ENV,
+  SUPERVISED_ENV
+} from "../service/constants.js";
+import {
+  DaemonAlreadyRunningError,
+  acquireInstanceGuard,
+  endpointIsLive,
+  looksLikeMcpxGateway,
+  looksLikeMcpxGatewaySync,
+  pingDaemon,
+  pingDaemonSync,
+  readRuntimeRecord,
+  removeRuntimeRecord,
+  requestShutdown,
+  requestShutdownSync,
+  writeRuntimeRecord,
+  type DaemonPing
+} from "../service/endpoint.js";
+import {
+  bootTimeMs,
+  forceKill,
+  isPidAlive,
+  isPortAvailable,
+  rotateLogIfNeeded,
+  waitFor,
+  waitForSync
+} from "../service/process.js";
+import {
+  findInstalledServiceManager,
+  resolveServiceContext,
+  type ServiceContext,
+  type ServiceManager,
+  type ServiceManagerKind
+} from "../service/managers.js";
 
 export interface DaemonStatus {
   running: boolean;
   pid?: number;
+  /** The daemon-owned runtime record (formerly the parent-written pid file). */
   pidFile: string;
   logFile: string;
   port?: number;
   portMismatch?: boolean;
+  version?: string;
+  instanceId?: string;
+  startedAt?: string;
+  /** True when the answer came from the daemon itself rather than from files. */
+  verified?: boolean;
+  /** A daemon started by an older mcpx (pid-file era). */
+  legacy?: boolean;
+  /** The installed OS service definition, if any. */
+  service?: ServiceManagerKind | null;
 }
 
 export interface DaemonStartResult {
@@ -28,7 +82,50 @@ export interface DaemonStartResult {
   pid: number;
   port: number;
   message: string;
+  version?: string;
+  instanceId?: string;
+  /** Set when an installed OS service manager started (or already runs) the daemon. */
+  supervisor?: ServiceManagerKind | null;
 }
+
+export interface DaemonStopResult {
+  stopped: boolean;
+  message: string;
+  pid?: number;
+  /** The daemon did not exit after a shutdown request and was killed. */
+  forced?: boolean;
+  supervisor?: ServiceManagerKind | null;
+}
+
+export interface DaemonLifecycleOptions {
+  /** Service context overrides (tests inject a fake runner/home), or false to ignore installed services. */
+  service?: Partial<ServiceContext> | false;
+  /** Bound for the graceful part of a stop and for startup readiness. */
+  timeoutMs?: number;
+}
+
+export interface DaemonStartOptions extends DaemonLifecycleOptions {
+  /** Port override for a detached start; a service-managed daemon always uses gateway.port. */
+  port?: number;
+}
+
+export class DaemonPortInUseError extends Error {
+  readonly code = "port_in_use";
+  constructor(readonly port: number) {
+    super(
+      `Port ${port} is already in use by another process, so the mcpx gateway cannot start. ` +
+      `Free the port, or choose another one by setting gateway.port in ${getConfigPath()} ` +
+      `(or run "mcpx daemon run --port <port>" for a one-off foreground gateway). ` +
+      "mcpx does not move the gateway to a different port on its own because every client is configured with this one."
+    );
+    this.name = "DaemonPortInUseError";
+  }
+}
+
+const ALREADY_RUNNING_MESSAGE = "mcpx daemon already running.";
+// Records written well before boot cannot belong to a live process (pid reuse after reboot).
+const BOOT_SLACK_MS = 5 * 60 * 1000;
+const LOG_ROTATE_INTERVAL_MS = 60 * 1000;
 
 export function buildDaemonChildEnv(
   baseEnv: NodeJS.ProcessEnv = process.env,
@@ -41,87 +138,165 @@ export function buildDaemonChildEnv(
   };
 }
 
-function readPidRecordFromFile(pidPath = getPidPath()): { pid: number; port: number | null } | null {
-  if (!fs.existsSync(pidPath)) {
-    return null;
-  }
-
-  const raw = fs.readFileSync(pidPath, "utf8").trim();
-  if (!raw) {
-    return null;
-  }
-
-  const [pidRaw, portRaw] = raw.split(":");
-  const pid = Number(pidRaw);
-  if (!Number.isFinite(pid) || pid <= 0) {
-    return null;
-  }
-  const port = portRaw ? Number(portRaw) : null;
-  return { pid, port: Number.isFinite(port) && port! > 0 ? port : null };
+function activeSupervisor(options: DaemonLifecycleOptions | undefined): ServiceManager | null {
+  if (options?.service === false) return null;
+  const manager = findInstalledServiceManager(resolveServiceContext(options?.service || {}));
+  return manager?.supervised ? manager : null;
 }
 
-function readPidFromFile(pidPath = getPidPath()): number | null {
-  return readPidRecordFromFile(pidPath)?.pid ?? null;
-}
-
-function processExists(pid: number): boolean {
+function installedServiceKind(options?: DaemonLifecycleOptions): ServiceManagerKind | null {
+  if (options?.service === false) return null;
   try {
-    process.kill(pid, 0);
-    return true;
+    return findInstalledServiceManager(resolveServiceContext(options?.service || {}))?.kind ?? null;
   } catch {
-    return false;
+    return null;
   }
 }
 
-async function isPortAvailable(port: number): Promise<boolean> {
-  return new Promise((resolve) => {
-    const tester = net.createServer();
+// ---------------------------------------------------------------------------
+// Legacy pid file ("pid:port", written by the parent in older versions). Read
+// only to recognise and clean up a daemon an older mcpx started.
 
-    tester.once("error", () => {
-      resolve(false);
-    });
-
-    tester.once("listening", () => {
-      tester.close(() => resolve(true));
-    });
-
-    tester.listen(port, "127.0.0.1");
-  });
+interface LegacyPidRecord {
+  pid: number;
+  port: number | null;
+  writtenAtMs: number;
 }
 
-export async function resolveGatewayPort(config: McpxConfig, secrets?: SecretsManager): Promise<{ port: number; fellBackFrom?: number }> {
-  if (await isPortAvailable(config.gateway.port)) {
-    return { port: config.gateway.port };
+function readLegacyPidRecord(): LegacyPidRecord | null {
+  const pidPath = getPidPath();
+  try {
+    const raw = fs.readFileSync(pidPath, "utf8").trim();
+    const [pidRaw, portRaw] = raw.split(":");
+    const pid = Number(pidRaw);
+    if (!Number.isInteger(pid) || pid <= 0) return null;
+    const port = portRaw ? Number(portRaw) : NaN;
+    return { pid, port: Number.isInteger(port) && port > 0 ? port : null, writtenAtMs: fs.statSync(pidPath).mtimeMs };
+  } catch {
+    return null;
   }
-
-  for (let offset = 1; offset <= 20; offset += 1) {
-    const candidate = config.gateway.port + offset;
-    if (candidate > 65535) {
-      break;
-    }
-
-    if (await isPortAvailable(candidate)) {
-      const oldPort = config.gateway.port;
-      config.gateway.port = candidate;
-      saveConfig(config);
-
-      // Sync clients so their URLs reflect the new port
-      if (secrets) {
-        try {
-          const summary = syncAllClients(config, secrets);
-          persistSyncState(summary, config);
-          saveConfig(config);
-        } catch {
-          // Best-effort sync after port change
-        }
-      }
-
-      return { port: candidate, fellBackFrom: oldPort };
-    }
-  }
-
-  throw new Error(`No available local port found near ${config.gateway.port}.`);
 }
+
+function removeLegacyPidFile(): void {
+  try { fs.unlinkSync(getPidPath()); } catch { /* none */ }
+}
+
+function legacyMayBeAlive(record: LegacyPidRecord): boolean {
+  return isPidAlive(record.pid) && record.writtenAtMs >= bootTimeMs() - BOOT_SLACK_MS;
+}
+
+function terminateLegacy(pid: number): void {
+  if (process.platform === "win32") {
+    forceKill(pid);
+    return;
+  }
+  try { process.kill(pid, "SIGTERM"); } catch { /* gone */ }
+}
+
+async function stopLegacyDaemon(timeoutMs: number): Promise<DaemonStopResult | null> {
+  const record = readLegacyPidRecord();
+  if (!record) {
+    removeLegacyPidFile();
+    return null;
+  }
+  if (!legacyMayBeAlive(record) || record.port === null || !(await looksLikeMcpxGateway(record.port))) {
+    removeLegacyPidFile();
+    return null;
+  }
+  terminateLegacy(record.pid);
+  let stopped = await waitFor(() => !isPidAlive(record.pid), timeoutMs);
+  const forced = !stopped && forceKill(record.pid);
+  if (forced) stopped = await waitFor(() => !isPidAlive(record.pid), 3000) || forced;
+  removeLegacyPidFile();
+  return { stopped, forced, pid: record.pid, message: `Stopped legacy mcpx daemon (pid ${record.pid}).` };
+}
+
+function stopLegacyDaemonSync(timeoutMs: number): DaemonStopResult | null {
+  const record = readLegacyPidRecord();
+  if (!record) {
+    removeLegacyPidFile();
+    return null;
+  }
+  if (!legacyMayBeAlive(record) || record.port === null || !looksLikeMcpxGatewaySync(record.port)) {
+    removeLegacyPidFile();
+    return null;
+  }
+  terminateLegacy(record.pid);
+  let stopped = waitForSync(() => !isPidAlive(record.pid), timeoutMs);
+  const forced = !stopped && forceKill(record.pid);
+  if (forced) stopped = waitForSync(() => !isPidAlive(record.pid), 3000) || forced;
+  removeLegacyPidFile();
+  return { stopped, forced, pid: record.pid, message: `Stopped legacy mcpx daemon (pid ${record.pid}).` };
+}
+
+// ---------------------------------------------------------------------------
+// Status
+
+/**
+ * Fast, synchronous status from the daemon-owned runtime record, the pid,
+ * the boot time and (POSIX) the presence of the control socket. It never
+ * signals anything; use probeDaemonStatus() for an answer from the daemon.
+ */
+export function getDaemonStatus(config: McpxConfig): DaemonStatus {
+  const base = { pidFile: getRuntimeRecordPath(), logFile: getLogPath(), service: installedServiceKind() };
+  const record = readRuntimeRecord();
+  if (record) {
+    const running = isPidAlive(record.pid)
+      && Date.parse(record.startedAt) >= bootTimeMs() - BOOT_SLACK_MS
+      && (process.platform === "win32" || fs.existsSync(record.endpoint));
+    return {
+      ...base,
+      running,
+      pid: record.pid,
+      port: record.port,
+      portMismatch: running && record.port !== config.gateway.port,
+      version: record.version,
+      instanceId: record.instanceId,
+      startedAt: record.startedAt,
+      verified: false
+    };
+  }
+
+  const legacy = readLegacyPidRecord();
+  if (legacy) {
+    const running = legacyMayBeAlive(legacy);
+    const port = legacy.port ?? config.gateway.port;
+    return { ...base, running, pid: legacy.pid, port, portMismatch: running && port !== config.gateway.port, legacy: true, verified: false };
+  }
+
+  return { ...base, running: false, port: config.gateway.port };
+}
+
+function statusFromPing(config: McpxConfig, ping: DaemonPing): DaemonStatus {
+  const port = ping.port ?? config.gateway.port;
+  return {
+    pidFile: getRuntimeRecordPath(),
+    logFile: getLogPath(),
+    service: installedServiceKind(),
+    running: true,
+    pid: ping.pid,
+    port,
+    portMismatch: port !== config.gateway.port,
+    version: ping.version,
+    instanceId: ping.instanceId,
+    startedAt: ping.startedAt,
+    verified: true
+  };
+}
+
+/** Status confirmed by the daemon itself over the control endpoint (version + instanceId). */
+export async function probeDaemonStatus(config: McpxConfig): Promise<DaemonStatus> {
+  const ping = await pingDaemon();
+  if (ping) return statusFromPing(config, ping);
+  const legacy = readLegacyPidRecord();
+  if (legacy && legacy.port !== null && legacyMayBeAlive(legacy) && await looksLikeMcpxGateway(legacy.port)) {
+    return { ...getDaemonStatus(config), running: true, legacy: true, verified: true };
+  }
+  return { pidFile: getRuntimeRecordPath(), logFile: getLogPath(), service: installedServiceKind(), running: false, port: config.gateway.port, verified: true };
+}
+
+// ---------------------------------------------------------------------------
+// Start
 
 async function waitForGatewayReady(port: number, token: string, timeoutMs = 15000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
@@ -150,92 +325,144 @@ async function waitForGatewayReady(port: number, token: string, timeoutMs = 1500
   throw new Error(`Gateway did not become ready within ${timeoutMs}ms: ${lastError instanceof Error ? lastError.message : String(lastError)}`);
 }
 
-export function getDaemonStatus(config: McpxConfig): DaemonStatus {
-  const pidPath = getPidPath();
-  const record = readPidRecordFromFile(pidPath);
-  if (!record) {
-    return {
-      running: false,
-      pidFile: pidPath,
-      logFile: getLogPath(),
-      port: config.gateway.port
-    };
-  }
+async function waitForReadyPing(timeoutMs: number, stopEarly: () => boolean = () => false): Promise<DaemonPing | null> {
+  let found: DaemonPing | null = null;
+  await waitFor(async () => {
+    if (stopEarly()) return true;
+    const ping = await pingDaemon(undefined, 500);
+    if (ping?.ready) found = ping;
+    return found !== null;
+  }, timeoutMs);
+  return found;
+}
 
-  const running = processExists(record.pid);
-  const port = record.port ?? config.gateway.port;
+function alreadyRunning(ping: DaemonPing, config: McpxConfig, supervisor: ServiceManagerKind | null): DaemonStartResult {
   return {
-    running,
-    pid: record.pid,
-    pidFile: pidPath,
-    logFile: getLogPath(),
-    port,
-    portMismatch: running && record.port !== null && record.port !== config.gateway.port
+    started: false,
+    pid: ping.pid,
+    port: ping.port ?? config.gateway.port,
+    message: ALREADY_RUNNING_MESSAGE,
+    version: ping.version,
+    instanceId: ping.instanceId,
+    supervisor
   };
 }
 
-export async function startDaemon(config: McpxConfig, cliPath: string, secrets: SecretsManager): Promise<DaemonStartResult> {
-  const startedAt = Date.now();
-  const existingStatus = getDaemonStatus(config);
-  if (existingStatus.running && existingStatus.pid) {
-    // Treat a live pid record as authoritative while the daemon is starting.
-    // Removing it when the port has not bound yet can launch a second daemon
-    // during the desktop auto-start/toggle race.
-    const result = {
-      started: false,
-      pid: existingStatus.pid,
-      port: existingStatus.port ?? config.gateway.port,
-      message: "mcpx daemon already running."
-    };
-    captureTelemetryEvent({
-      name: "operation_completed",
-      properties: { operation: "daemon_start", outcome: "success", durationBucket: durationBucket(Date.now() - startedAt) }
-    });
-    return result;
-  }
+async function startDaemonInner(config: McpxConfig, cliPath: string, secrets: SecretsManager, options: DaemonStartOptions): Promise<DaemonStartResult> {
+  const timeoutMs = options.timeoutMs ?? 15_000;
+  const supervisor = activeSupervisor(options);
+  const supervisorKind = supervisor?.kind ?? null;
 
-  const { port, fellBackFrom } = await resolveGatewayPort(config, secrets);
-  if (fellBackFrom) {
-    process.stderr.write(`mcpx: port ${fellBackFrom} was unavailable; gateway started on ${port} instead. All client configs were re-synced to the new port.\n`);
+  const existing = await pingDaemon();
+  if (existing) {
+    return alreadyRunning(existing, config, supervisorKind);
+  }
+  // Starting while a daemon from an older mcpx holds the port: replace it.
+  await stopLegacyDaemon(5000);
+
+  const port = supervisor ? config.gateway.port : options.port ?? config.gateway.port;
+  if (!(await isPortAvailable(port))) {
+    throw new DaemonPortInUseError(port);
   }
   const token = ensureGatewayToken(config, secrets);
 
-  const pidPath = getPidPath();
   const logPath = getLogPath();
-  ensureParentDir(pidPath);
   ensureParentDir(logPath);
+  rotateLogIfNeeded(logPath);
 
-  let logFd = fs.openSync(logPath, "a", 0o600);
-  const logStat = fs.fstatSync(logFd);
-  if (logStat.size > 10 * 1024 * 1024) {
-    fs.closeSync(logFd);
-    const log1 = `${logPath}.1`;
-    const log2 = `${logPath}.2`;
-    try { if (fs.existsSync(log2)) fs.unlinkSync(log2); } catch {}
-    try { if (fs.existsSync(log1)) fs.renameSync(log1, log2); } catch {}
-    try { fs.renameSync(logPath, log1); } catch {}
-    logFd = fs.openSync(logPath, "a", 0o600);
+  if (supervisor) {
+    // The OS service manager owns the process; starting it ourselves would
+    // race the supervisor (and lose to its single-instance guard anyway).
+    const started = supervisor.start();
+    if (!started.ok) {
+      throw new Error(`Could not start the mcpx ${supervisor.kind} service: ${started.message}`);
+    }
+    const ping = await waitForReadyPing(timeoutMs);
+    if (!ping) {
+      throw new Error(`The ${supervisor.kind} service did not bring the mcpx daemon up within ${timeoutMs}ms. See ${logPath} and ${getServiceLogPath()}.`);
+    }
+    await waitForGatewayReady(ping.port ?? port, token);
+    startBackgroundUpdateCheck();
+    return {
+      started: true,
+      pid: ping.pid,
+      port: ping.port ?? port,
+      message: "mcpx daemon started.",
+      version: ping.version,
+      instanceId: ping.instanceId,
+      supervisor: supervisorKind
+    };
   }
 
-  const child = spawn(process.execPath, [cliPath, "daemon", "run", "--port", String(port)], {
-    detached: true,
-    stdio: ["ignore", logFd, logFd],
-    env: buildDaemonChildEnv()
+  const logFd = fs.openSync(logPath, "a", 0o600);
+  let child: ChildProcess;
+  try {
+    child = spawn(process.execPath, [cliPath, "daemon", "run", "--port", String(port)], {
+      detached: true,
+      windowsHide: true,
+      stdio: ["ignore", logFd, logFd],
+      env: buildDaemonChildEnv()
+    });
+  } finally {
+    fs.closeSync(logFd);
+  }
+  let exitCode: number | null = null;
+  let exited = false;
+  child.once("exit", (code, signal) => {
+    exited = true;
+    exitCode = code ?? (signal ? -1 : null);
   });
-
+  child.once("error", () => {
+    exited = true;
+  });
   child.unref();
 
-  fs.writeFileSync(pidPath, `${child.pid}:${port}\n`, { mode: 0o600 });
+  const ping = await waitForReadyPing(timeoutMs, () => exited);
+  if (!ping) {
+    if (exited && exitCode === DAEMON_EXIT_ALREADY_RUNNING) {
+      const other = await pingDaemon();
+      if (other) return alreadyRunning(other, config, null);
+    }
+    if (exited && exitCode === DAEMON_EXIT_PORT_IN_USE) {
+      throw new DaemonPortInUseError(port);
+    }
+    if (!exited) forceKill(child.pid ?? -1);
+    throw new Error(exited
+      ? `mcpx daemon exited during startup (exit code ${exitCode ?? "unknown"}). See ${logPath}.`
+      : `mcpx daemon did not become ready within ${timeoutMs}ms. See ${logPath}.`);
+  }
+  if (ping.pid !== child.pid) {
+    // Lost a concurrent start; our child exits with DAEMON_EXIT_ALREADY_RUNNING.
+    return alreadyRunning(ping, config, null);
+  }
 
   startBackgroundUpdateCheck();
   await waitForGatewayReady(port, token);
 
-  const result = {
+  return {
     started: true,
-    pid: child.pid ?? -1,
+    pid: ping.pid,
     port,
-    message: "mcpx daemon started."
+    message: "mcpx daemon started.",
+    version: ping.version,
+    instanceId: ping.instanceId,
+    supervisor: null
   };
+}
+
+/**
+ * Starts the gateway daemon. When an OS service is installed the service
+ * manager starts it; otherwise a detached child is spawned. Either way the
+ * result reflects the daemon's own identity, never a bare pid.
+ */
+export async function startDaemon(
+  config: McpxConfig,
+  cliPath: string,
+  secrets: SecretsManager,
+  options: DaemonStartOptions = {}
+): Promise<DaemonStartResult> {
+  const startedAt = Date.now();
+  const result = await startDaemonInner(config, cliPath, secrets, options);
   captureTelemetryEvent({
     name: "operation_completed",
     properties: { operation: "daemon_start", outcome: "success", durationBucket: durationBucket(Date.now() - startedAt) }
@@ -243,81 +470,146 @@ export async function startDaemon(config: McpxConfig, cliPath: string, secrets: 
   return result;
 }
 
-export function stopDaemon(): { stopped: boolean; message: string } {
-  const startedAt = Date.now();
-  const pidPath = getPidPath();
-  const pid = readPidFromFile(pidPath);
+// ---------------------------------------------------------------------------
+// Stop
 
-  if (!pid) {
-    const result = {
-      stopped: false,
-      message: "mcpx daemon is not running."
-    };
-    captureTelemetryEvent({
-      name: "operation_completed",
-      properties: { operation: "daemon_stop", outcome: "success", durationBucket: durationBucket(Date.now() - startedAt) }
-    });
-    return result;
-  }
+function notRunning(supervisor: ServiceManagerKind | null): DaemonStopResult {
+  return { stopped: false, message: "mcpx daemon is not running.", supervisor };
+}
 
-  // PID safety: verify the process is actually a mcpx daemon before killing
-  try {
-    const cmd = execFileSync("ps", ["-p", String(pid), "-o", "command="], { encoding: "utf8", timeout: 2000 }).trim();
-    const looksLikeMcpxDaemon = cmd.includes("daemon run") && (cmd.includes("mcpx") || cmd.includes("cli.js"));
-    if (!looksLikeMcpxDaemon) {
-      fs.unlinkSync(pidPath);
-      const result = {
-        stopped: false,
-        message: `PID ${pid} is not a mcpx daemon (command: ${cmd.slice(0, 80)}). Pidfile cleaned up.`
-      };
-      captureTelemetryEvent({
-        name: "operation_completed",
-        properties: { operation: "daemon_stop", outcome: "failure", errorCode: "invalid_pid", durationBucket: durationBucket(Date.now() - startedAt) }
-      });
-      return result;
-    }
-  } catch {
-    // Process doesn't exist or ps failed; clean up pidfile
-    try { fs.unlinkSync(pidPath); } catch {}
-    const result = {
-      stopped: false,
-      message: `PID ${pid} not found. Pidfile cleaned up.`
-    };
-    captureTelemetryEvent({
-      name: "operation_completed",
-      properties: { operation: "daemon_stop", outcome: "failure", errorCode: "pid_not_found", durationBucket: durationBucket(Date.now() - startedAt) }
-    });
-    return result;
-  }
+function stoppedMessage(pid: number, forced: boolean): string {
+  return `Stopped mcpx daemon (pid ${pid})${forced ? " after forcing it to exit" : ""}.`;
+}
 
-  try {
-    process.kill(pid, "SIGTERM");
-  } catch {
-    // Ignore already dead process.
-  }
-
-  try {
-    fs.unlinkSync(pidPath);
-  } catch {
-    // Ignore cleanup failure.
-  }
-
-  const result = {
-    stopped: true,
-    message: `Stopped mcpx daemon (pid ${pid}).`
-  };
+function recordTelemetry(operation: "daemon_stop", result: DaemonStopResult, startedAt: number): void {
   captureTelemetryEvent({
     name: "operation_completed",
-    properties: { operation: "daemon_stop", outcome: "success", durationBucket: durationBucket(Date.now() - startedAt) }
+    properties: {
+      operation,
+      outcome: result.stopped || result.message === "mcpx daemon is not running." ? "success" : "failure",
+      ...(result.stopped || result.message === "mcpx daemon is not running." ? {} : { errorCode: "timeout" as const }),
+      durationBucket: durationBucket(Date.now() - startedAt)
+    }
   });
+}
+
+/** Removes identity files whose owner is gone (e.g. after a crash or kill -9). */
+function removeStaleRecord(): void {
+  const record = readRuntimeRecord();
+  if (record && !isPidAlive(record.pid)) removeRuntimeRecord(record.instanceId);
+}
+
+/**
+ * Verified stop: ask the daemon to shut down over the control channel, wait
+ * (bounded) until its endpoint is gone and its pid has exited, escalate to
+ * the service manager and then to a forced kill, and only then report.
+ */
+export async function stopDaemonAsync(options: DaemonLifecycleOptions = {}): Promise<DaemonStopResult> {
+  const startedAt = Date.now();
+  const timeoutMs = options.timeoutMs ?? 10_000;
+  const supervisor = activeSupervisor(options);
+  const supervisorKind = supervisor?.kind ?? null;
+
+  const legacy = await stopLegacyDaemon(timeoutMs);
+  const ping = await pingDaemon();
+  if (!ping) {
+    removeStaleRecord();
+    const result = legacy ?? notRunning(supervisorKind);
+    recordTelemetry("daemon_stop", result, startedAt);
+    return result;
+  }
+
+  const gone = async () => !isPidAlive(ping.pid)
+    || (readRuntimeRecord()?.instanceId !== ping.instanceId && !(await endpointIsLive(undefined, 500)));
+
+  await requestShutdown(ping.instanceId);
+  let stopped = await waitFor(gone, timeoutMs);
+  if (!stopped && supervisor) {
+    supervisor.stop();
+    stopped = await waitFor(gone, 5000);
+  }
+  let forced = false;
+  if (!stopped) {
+    forced = forceKill(ping.pid);
+    stopped = (await waitFor(() => !isPidAlive(ping.pid), 3000)) || forced;
+  }
+  if (stopped) removeRuntimeRecord(ping.instanceId);
+
+  const result: DaemonStopResult = {
+    stopped,
+    pid: ping.pid,
+    forced,
+    supervisor: supervisorKind,
+    message: stopped ? stoppedMessage(ping.pid, forced) : `Could not stop mcpx daemon (pid ${ping.pid}).`
+  };
+  recordTelemetry("daemon_stop", result, startedAt);
   return result;
 }
 
-export async function restartDaemon(config: McpxConfig, cliPath: string, secrets: SecretsManager): Promise<DaemonStartResult> {
+/**
+ * Synchronous form of stopDaemonAsync() for existing callers. It performs the
+ * same verified sequence, using a short-lived helper process for the control
+ * channel. Prefer stopDaemonAsync() where the caller can await.
+ */
+export function stopDaemon(options: DaemonLifecycleOptions = {}): DaemonStopResult {
   const startedAt = Date.now();
-  stopDaemon();
+  const timeoutMs = options.timeoutMs ?? 10_000;
+  const supervisor = activeSupervisor(options);
+  const supervisorKind = supervisor?.kind ?? null;
+
+  const legacy = stopLegacyDaemonSync(timeoutMs);
+  const ping = pingDaemonSync();
+  if (!ping) {
+    removeStaleRecord();
+    const result = legacy ?? notRunning(supervisorKind);
+    recordTelemetry("daemon_stop", result, startedAt);
+    return result;
+  }
+
+  // The daemon removes its record and then closes the endpoint as its last
+  // steps; checking that pair (not only the pid) also covers a zombie child
+  // of this very process, which cannot be reaped while we block.
+  const gone = () => !isPidAlive(ping.pid)
+    || (readRuntimeRecord()?.instanceId !== ping.instanceId && pingDaemonSync(undefined, 500) === null);
+
+  requestShutdownSync(ping.instanceId);
+  let stopped = waitForSync(gone, timeoutMs);
+  if (!stopped && supervisor) {
+    supervisor.stop();
+    stopped = waitForSync(gone, 5000);
+  }
+  let forced = false;
+  if (!stopped) {
+    forced = forceKill(ping.pid);
+    stopped = waitForSync(() => !isPidAlive(ping.pid), 3000) || forced;
+  }
+  if (stopped) removeRuntimeRecord(ping.instanceId);
+
+  const result: DaemonStopResult = {
+    stopped,
+    pid: ping.pid,
+    forced,
+    supervisor: supervisorKind,
+    message: stopped ? stoppedMessage(ping.pid, forced) : `Could not stop mcpx daemon (pid ${ping.pid}).`
+  };
+  recordTelemetry("daemon_stop", result, startedAt);
+  return result;
+}
+
+/** Verified stop, then start (through the service manager when one is installed). */
+export async function restartDaemon(
+  config: McpxConfig,
+  cliPath: string,
+  secrets: SecretsManager,
+  options: DaemonStartOptions = {}
+): Promise<DaemonStartResult> {
+  const startedAt = Date.now();
   try {
-    const result = await startDaemon(config, cliPath, secrets);
+    const stopped = await stopDaemonAsync(options);
+    if (!stopped.stopped && stopped.pid !== undefined) {
+      throw new Error(stopped.message);
+    }
+    const result = await startDaemon(config, cliPath, secrets, options);
     captureTelemetryEvent({
       name: "operation_completed",
       properties: { operation: "daemon_restart", outcome: "success", durationBucket: durationBucket(Date.now() - startedAt) }
@@ -342,24 +634,137 @@ export function readDaemonLogs(maxLines = 200): string {
   return lines.slice(Math.max(lines.length - maxLines, 0)).join("\n");
 }
 
-export function runDaemonForeground(config: McpxConfig, port: number, secrets: SecretsManager): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const token = ensureGatewayToken(config, secrets);
+// ---------------------------------------------------------------------------
+// The daemon process itself
 
-    const server = createGatewayServer({
-      port,
-      expectedToken: token,
-      secrets
+/** Supervised mode on every OS: the daemon writes its own output (no shell redirection needed). */
+function redirectOutputToFile(logPath: string): void {
+  ensureParentDir(logPath);
+  const fd = fs.openSync(logPath, "a", 0o600);
+  for (const stream of [process.stdout, process.stderr]) {
+    stream.write = ((chunk: string | Uint8Array, encoding?: unknown, callback?: unknown) => {
+      try {
+        if (typeof chunk === "string") fs.writeSync(fd, chunk);
+        else fs.writeSync(fd, chunk);
+      } catch {
+        // Logging must never crash the daemon.
+      }
+      const done = typeof encoding === "function" ? encoding : callback;
+      if (typeof done === "function") (done as () => void)();
+      return true;
+    }) as typeof stream.write;
+  }
+}
+
+function waitForListening(server: ReturnType<typeof createGatewayServer>): Promise<NodeJS.ErrnoException | null> {
+  return new Promise((resolve) => {
+    if (server.listening) {
+      resolve(null);
+      return;
+    }
+    const onListening = () => {
+      server.off("error", onError);
+      resolve(null);
+    };
+    const onError = (error: NodeJS.ErrnoException) => {
+      server.off("listening", onListening);
+      resolve(error);
+    };
+    server.once("listening", onListening);
+    server.once("error", onError);
+  });
+}
+
+function withTimeout(promise: Promise<unknown>, ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, ms);
+    promise.finally(() => {
+      clearTimeout(timer);
+      resolve();
     });
-    const stopMarketplaceUpdater = startMarketplaceAutoUpdater();
+  });
+}
 
-    const cleanup = () => {
+/**
+ * Runs the gateway in this process until asked to stop. Acquires the per-user
+ * instance guard first (exiting with DAEMON_EXIT_ALREADY_RUNNING if another
+ * daemon holds it), binds the port (exiting with DAEMON_EXIT_PORT_IN_USE if
+ * something else holds it), then writes its own runtime record. Never
+ * detaches; this is the entry point for both detached and supervised mode.
+ */
+export async function runDaemonForeground(config: McpxConfig, port: number, secrets: SecretsManager): Promise<void> {
+  const ownLogFile = process.env[DAEMON_LOG_FILE_ENV];
+  if (ownLogFile) redirectOutputToFile(ownLogFile);
+  const supervised = process.env[SUPERVISED_ENV] === "1";
+
+  let guard;
+  try {
+    guard = await acquireInstanceGuard(getControlEndpoint());
+  } catch (error) {
+    if (error instanceof DaemonAlreadyRunningError) {
+      process.stderr.write(`mcpx: ${error.message} Not starting a second instance.\n`);
+      process.exit(DAEMON_EXIT_ALREADY_RUNNING);
+    }
+    throw error;
+  }
+
+  const instanceId = crypto.randomUUID();
+  const startedAt = new Date().toISOString();
+  let ready = false;
+  let shutdown: () => Promise<void> = async () => {};
+  guard.setHandlers({
+    ping: () => ({ ok: true, pid: process.pid, ready, version: APP_VERSION, instanceId, startedAt, port, supervised }),
+    shutdown: () => void shutdown()
+  });
+
+  const token = ensureGatewayToken(config, secrets);
+  const server = createGatewayServer({ port, expectedToken: token, secrets, instanceId });
+  const listenError = await waitForListening(server);
+  if (listenError) {
+    await guard.close();
+    if (listenError.code === "EADDRINUSE") {
+      process.stderr.write(`mcpx: ${new DaemonPortInUseError(port).message}\n`);
+      process.exit(DAEMON_EXIT_PORT_IN_USE);
+    }
+    throw listenError;
+  }
+
+  writeRuntimeRecord({
+    schema: 1,
+    pid: process.pid,
+    port,
+    version: APP_VERSION,
+    startedAt,
+    instanceId,
+    endpoint: guard.endpoint,
+    supervised
+  });
+  ready = true;
+
+  const logToRotate = ownLogFile ?? getLogPath();
+  const rotateTimer = setInterval(() => rotateLogIfNeeded(logToRotate), LOG_ROTATE_INTERVAL_MS);
+  rotateTimer.unref();
+  const stopMarketplaceUpdater = startMarketplaceAutoUpdater();
+
+  return new Promise((resolve, reject) => {
+    let shuttingDown = false;
+    shutdown = async () => {
+      if (shuttingDown) return;
+      shuttingDown = true;
+      // Hard ceiling: a stuck upstream must not keep the daemon alive.
+      setTimeout(() => process.exit(0), 8000).unref();
+      clearInterval(rotateTimer);
       stopMarketplaceUpdater();
-      server.close(() => resolve());
+      await withTimeout(server.shutdown(), 5000);
+      removeRuntimeRecord(instanceId);
+      await guard.close();
+      resolve();
+      // Exit even if a stray handle would keep the loop alive.
+      setTimeout(() => process.exit(0), 1000).unref();
     };
 
-    process.on("SIGINT", cleanup);
-    process.on("SIGTERM", cleanup);
+    process.on("SIGINT", () => void shutdown());
+    process.on("SIGTERM", () => void shutdown());
 
     server.on("error", (error) => {
       reject(error);
