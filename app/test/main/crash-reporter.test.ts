@@ -72,14 +72,29 @@ describe("crashReporter initialization", () => {
     vi.doMock("../../src/main/app-control", () => ({
       hideDashboard: vi.fn(),
       quitApp: vi.fn(),
+      isTrayAvailable: vi.fn().mockReturnValue(true),
+      markQuitting: vi.fn(),
+      setTrayAvailable: vi.fn(),
     }));
 
     vi.doMock("../../src/main/ipc-handlers", () => ({
       registerIpcHandlers: vi.fn(),
     }));
 
-    vi.doMock("../../src/main/daemon-child", () => ({
-      runDaemonChildIfRequested: vi.fn().mockResolvedValue(false),
+    vi.doMock("../../src/main/security", () => ({
+      installAppSecurity: vi.fn(),
+    }));
+
+    vi.doMock("../../src/main/gateway-control", () => ({
+      consumeGatewayResumeMarker: vi.fn().mockReturnValue(false),
+      refreshGatewayStatus: vi.fn().mockReturnValue(false),
+      startGateway: vi.fn(),
+      stopGateway: vi.fn(),
+      stopGatewayForUpdate: vi.fn(),
+    }));
+
+    vi.doMock("../../src/main/platform/linux-tray", () => ({
+      probeLinuxTrayHost: vi.fn().mockResolvedValue(true),
     }));
 
     vi.doMock("../../src/main/settings-store", () => ({
@@ -96,6 +111,7 @@ describe("crashReporter initialization", () => {
 
     vi.doMock("../../src/main/update-manager", () => ({
       setAutoUpdateEnabled: vi.fn(),
+      setBeforeQuitAndInstall: vi.fn(),
     }));
 
     const { startMainProcess } = await import("../../src/main/index");
@@ -165,14 +181,29 @@ describe("crashReporter initialization", () => {
     vi.doMock("../../src/main/app-control", () => ({
       hideDashboard: vi.fn(),
       quitApp: vi.fn(),
+      isTrayAvailable: vi.fn().mockReturnValue(true),
+      markQuitting: vi.fn(),
+      setTrayAvailable: vi.fn(),
     }));
 
     vi.doMock("../../src/main/ipc-handlers", () => ({
       registerIpcHandlers: vi.fn(),
     }));
 
-    vi.doMock("../../src/main/daemon-child", () => ({
-      runDaemonChildIfRequested: vi.fn().mockResolvedValue(false),
+    vi.doMock("../../src/main/security", () => ({
+      installAppSecurity: vi.fn(),
+    }));
+
+    vi.doMock("../../src/main/gateway-control", () => ({
+      consumeGatewayResumeMarker: vi.fn().mockReturnValue(false),
+      refreshGatewayStatus: vi.fn().mockReturnValue(false),
+      startGateway: vi.fn(),
+      stopGateway: vi.fn(),
+      stopGatewayForUpdate: vi.fn(),
+    }));
+
+    vi.doMock("../../src/main/platform/linux-tray", () => ({
+      probeLinuxTrayHost: vi.fn().mockResolvedValue(true),
     }));
 
     vi.doMock("../../src/main/settings-store", () => ({
@@ -186,6 +217,7 @@ describe("crashReporter initialization", () => {
 
     vi.doMock("../../src/main/update-manager", () => ({
       setAutoUpdateEnabled: vi.fn(),
+      setBeforeQuitAndInstall: vi.fn(),
     }));
 
     vi.doMock("../../src/shared/build-constants", () => ({

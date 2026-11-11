@@ -1,28 +1,36 @@
 import { app, dialog, Menu } from "electron";
-import {
-  loadConfig,
-  startDaemon,
-  stopDaemon,
-  getDaemonStatus,
-  SecretsManager,
-  startMarketplaceAutoUpdater,
-} from "@mcpx/core";
-import { createTray, setStartDaemonHandler, setStopDaemonHandler, updateTrayForDaemonStatus } from "./tray";
+import { loadConfig, startMarketplaceAutoUpdater } from "@mcpx/core";
+import { createTray, setStartDaemonHandler, setStopDaemonHandler } from "./tray";
 import { buildApplicationMenu } from "./menu";
 import { openDashboard } from "./dashboard";
 import { registerIpcHandlers } from "./ipc-handlers";
-import { runDaemonChildIfRequested } from "./daemon-child";
-import { showPopover } from "./popover";
+import { hidePopover, showPopover } from "./popover";
 import { loadDesktopSettings } from "./settings-store";
 import { applyStartOnLoginSetting, wasOpenedAtLogin } from "./login-item";
-import { setAutoUpdateEnabled } from "./update-manager";
+import { setAutoUpdateEnabled, setBeforeQuitAndInstall } from "./update-manager";
 import { startErrorNotifier } from "./error-notifier";
 import { getDesktopProductName, isDevDesktopApp } from "./app-flavor";
 import { DESKTOP_BUILD_FLAVOR } from "../shared/build-constants";
 import * as buildConstants from "../shared/build-constants";
 import { resolveLoginShellPath } from "./shell-env";
-import { hideDashboard } from "./app-control";
-import { resolveCliDaemonPath } from "./cli-path";
+import { hideDashboard, isTrayAvailable, markQuitting, setTrayAvailable } from "./app-control";
+import {
+  consumeGatewayResumeMarker,
+  refreshGatewayStatus,
+  startGateway,
+  stopGateway,
+  stopGatewayForUpdate
+} from "./gateway-control";
+import { installAppSecurity } from "./security";
+import { appContentLocation } from "./app-paths";
+import {
+  isCliUpdateChildLaunch,
+  shouldOpenDashboardAtLaunch,
+  shouldRevealOnSecondInstance,
+  windowAllClosedAction
+} from "./platform/lifecycle";
+import { probeLinuxTrayHost } from "./platform/linux-tray";
+import { toDesktopPlatform } from "./platform/types";
 import {
   captureDesktopError,
   flushDesktopErrorReporting,
@@ -52,21 +60,23 @@ function readOptional<T>(read: () => T): T | undefined {
   }
 }
 
-let daemonRunning = false;
-
 /**
- * Register macOS/Linux lifecycle event handlers.
- * Extracted into a separate function for testability.
+ * App lifecycle on every OS. With a tray, mcpx is background-resident: the
+ * last window closing changes nothing and only an explicit Quit exits.
+ * Without one (Linux with no StatusNotifier host) it is a normal windowed app.
  */
 export function registerLifecycleHandlers(deps: {
-  app: typeof import("electron").app;
+  app: Pick<typeof import("electron").app, "on" | "quit">;
   openDashboard: () => void;
-  hideDashboard: () => void;
+  isTrayAvailable: () => boolean;
+  markQuitting: () => void;
 }): void {
+  deps.app.on("before-quit", () => {
+    deps.markQuitting();
+  });
+
   deps.app.on("window-all-closed", () => {
-    if (process.platform === "win32") {
-      deps.app.quit();
-    } else if (process.platform === "linux" && !process.env.MCPX_ENABLE_TRAY) {
+    if (windowAllClosedAction({ trayAvailable: deps.isTrayAvailable() }) === "quit") {
       deps.app.quit();
     }
   });
@@ -76,42 +86,24 @@ export function registerLifecycleHandlers(deps: {
   });
 }
 
-function getCliDaemonPath(): string {
-  return resolveCliDaemonPath(process.resourcesPath, app.getAppPath());
-}
-
-async function maybeStartDaemonForLoginLaunch(): Promise<void> {
-  const settings = loadDesktopSettings();
-  if (!settings.startOnLoginEnabled || !wasOpenedAtLogin()) {
-    return;
+/** Windows toast notifications and taskbar grouping need the installer's AppUserModelID. */
+function windowsAppUserModelId(): string {
+  if (!app.isPackaged) {
+    return process.execPath;
   }
-
-  const config = loadConfig();
-  const secrets = new SecretsManager();
-  await startDaemon(config, getCliDaemonPath(), secrets);
-  daemonRunning = true;
-  updateTrayForDaemonStatus(true);
+  return isDevDesktopApp() ? "io.github.kwonye.mcpx.dev" : "io.github.kwonye.mcpx";
 }
 
-async function handleStartDaemon(): Promise<void> {
-  try {
-    const config = loadConfig();
-    const secrets = new SecretsManager();
-    await startDaemon(config, getCliDaemonPath(), secrets);
-    daemonRunning = true;
-    updateTrayForDaemonStatus(true);
-  } catch (error) {
-    console.error("[main] failed to start daemon:", error);
+async function createTrayIfSupported(): Promise<ReturnType<typeof createTray> | null> {
+  if (toDesktopPlatform() === "linux" && !(await probeLinuxTrayHost())) {
+    console.warn("[main] no StatusNotifier host found; running without a tray icon");
+    return null;
   }
-}
-
-async function handleStopDaemon(): Promise<void> {
   try {
-    await stopDaemon();
-    daemonRunning = false;
-    updateTrayForDaemonStatus(false);
+    return createTray();
   } catch (error) {
-    console.error("[main] failed to stop daemon:", error);
+    console.error("[main] failed to create tray:", error);
+    return null;
   }
 }
 
@@ -126,6 +118,15 @@ function handleStartupError(error: unknown): void {
 }
 
 async function startMainProcessImpl(): Promise<void> {
+  // Core's background CLI updater (started by startDaemon) re-spawns
+  // process.execPath with MCPX_UPDATE_CHILD=1. In the app that binary is the
+  // GUI, so such a launch is not a real app start: leave immediately, before
+  // the single-instance lock would pop the dashboard in the running app.
+  if (isCliUpdateChildLaunch(process.env)) {
+    app.exit(0);
+    return;
+  }
+
   const productName = getDesktopProductName();
 
   // Initialize diagnostics BEFORE any Electron API calls. Sentry owns the
@@ -162,28 +163,26 @@ async function startMainProcessImpl(): Promise<void> {
   });
   await initializeDesktopErrorReporting(release, productName);
 
-  if (await runDaemonChildIfRequested()) {
-    return;
-  }
-
-  if (process.platform === "darwin") {
-    app.setActivationPolicy("regular");
-  }
-
-  const loginShellPath = await resolveLoginShellPath();
-  if (loginShellPath) {
-    process.env.PATH = loginShellPath;
-  }
-
   const gotTheLock = app.requestSingleInstanceLock();
   if (!gotTheLock) {
     app.quit();
     return;
   }
 
-  app.on("second-instance", () => {
-    openDashboard();
+  app.on("second-instance", (_event, argv) => {
+    if (shouldRevealOnSecondInstance(argv)) {
+      void app.whenReady().then(() => openDashboard());
+    }
   });
+
+  if (toDesktopPlatform() === "win32") {
+    app.setAppUserModelId(windowsAppUserModelId());
+  }
+
+  const loginShellPath = await resolveLoginShellPath();
+  if (loginShellPath) {
+    process.env.PATH = loginShellPath;
+  }
 
   await app.whenReady();
 
@@ -200,58 +199,58 @@ async function startMainProcessImpl(): Promise<void> {
     });
   }
 
-  // On Linux, don't use the macOS-style application menu — rely on tray context menu
-  if (process.platform !== "linux") {
-    Menu.setApplicationMenu(buildApplicationMenu());
-  }
+  // Before any window exists: navigation/window-open guards, CSP, permissions.
+  installAppSecurity(appContentLocation());
+
+  Menu.setApplicationMenu(buildApplicationMenu());
 
   const settings = loadDesktopSettings();
   applyStartOnLoginSetting(settings.startOnLoginEnabled);
+  setBeforeQuitAndInstall(() => {
+    markQuitting();
+    hidePopover();
+    stopGatewayForUpdate();
+  });
   setAutoUpdateEnabled(settings.autoUpdateEnabled);
 
-  // Create tray (starts with daemon stopped)
-  const tray = createTray();
-  updateTrayForDaemonStatus(false);
+  const tray = await createTrayIfSupported();
+  setTrayAvailable(tray !== null);
 
-  if (isDevDesktopApp()) {
-    showPopover(tray);
-  }
-
-  // Register IPC handlers
   registerIpcHandlers();
 
-  // Surface upstream call-time / re-auth errors as macOS notifications.
+  // Surface upstream call-time / re-auth errors as native notifications.
   startErrorNotifier();
   startMarketplaceAutoUpdater();
 
-  // Set up daemon start/stop handlers from tray
   setStartDaemonHandler(() => {
-    void handleStartDaemon();
+    void startGateway();
   });
   setStopDaemonHandler(() => {
-    void handleStopDaemon();
+    stopGateway();
   });
 
-  // ============================================================================
-  // Lifecycle Handlers
-  // ============================================================================
-  registerLifecycleHandlers({ app, openDashboard, hideDashboard });
-  // ============================================================================
+  registerLifecycleHandlers({ app, openDashboard, isTrayAvailable, markQuitting });
 
-  // Check daemon status on startup and auto-start if needed
+  const hiddenLaunch = wasOpenedAtLogin();
+  if (shouldOpenDashboardAtLaunch({ hiddenLaunch, trayAvailable: tray !== null })) {
+    openDashboard();
+  } else {
+    // Hidden login launch: stay out of the Dock (macOS) and live in the tray.
+    hideDashboard();
+    if (tray && isDevDesktopApp()) {
+      showPopover(tray);
+    }
+  }
+
+  // Gateway: reflect the real state (the CLI may own it), then start it when
+  // configured to, after an update stopped it, or on a login launch.
   try {
-    const config = loadConfig();
-    const status = getDaemonStatus(config);
-    daemonRunning = status.running;
-    updateTrayForDaemonStatus(daemonRunning);
-    
-    if (!daemonRunning && config.gateway.autoStart) {
-      const secrets = new SecretsManager();
-      await startDaemon(config, getCliDaemonPath(), secrets);
-      daemonRunning = true;
-      updateTrayForDaemonStatus(true);
-    } else if (wasOpenedAtLogin()) {
-      await maybeStartDaemonForLoginLaunch();
+    const resumeAfterUpdate = consumeGatewayResumeMarker();
+    if (!refreshGatewayStatus()) {
+      const config = loadConfig();
+      if (config.gateway.autoStart || resumeAfterUpdate || (hiddenLaunch && settings.startOnLoginEnabled)) {
+        await startGateway();
+      }
     }
   } catch (error) {
     console.error("[main] failed to check daemon status:", error);

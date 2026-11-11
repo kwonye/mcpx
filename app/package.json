@@ -54,6 +54,9 @@
       ]
     },
     "asar": true,
+    "asarUnpack": [
+      "resources/**"
+    ],
     "files": [
       "out/**",
       "!out/**/*.map",

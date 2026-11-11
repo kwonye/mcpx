@@ -49,8 +49,10 @@ describe("popover window behavior", () => {
 
   const screenMock = {
     getDisplayMatching: vi.fn(() => ({
-      workArea: { x: 0, y: 0, width: 1440, height: 900 }
-    }))
+      bounds: { x: 0, y: 0, width: 1440, height: 900 },
+      workArea: { x: 0, y: 25, width: 1440, height: 875 }
+    })),
+    getCursorScreenPoint: vi.fn(() => ({ x: 700, y: 10 }))
   };
 
   const trayMock = {
@@ -85,6 +87,36 @@ describe("popover window behavior", () => {
     togglePopover(trayMock as never);
     expect(first.show).toHaveBeenCalledTimes(2);
     expect(browserWindowConstructor).toHaveBeenCalledTimes(1);
+  });
+
+  it("positions below a top menu bar icon inside the work area", async () => {
+    const { togglePopover } = await import("../../src/main/popover");
+    const window = togglePopover(trayMock as never) as unknown as MockBrowserWindow;
+
+    expect(window.setPosition).toHaveBeenCalledWith(8, 33, false);
+  });
+
+  it("a tray click that blurred the open popover closes it instead of reopening", async () => {
+    const { togglePopover } = await import("../../src/main/popover");
+    const window = togglePopover(trayMock as never) as unknown as MockBrowserWindow;
+
+    window.handlers.blur();
+    togglePopover(trayMock as never);
+
+    expect(window.show).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not use the macOS panel type off macOS", async () => {
+    const original = process.platform;
+    Object.defineProperty(process, "platform", { value: "win32", configurable: true });
+    try {
+      const { togglePopover } = await import("../../src/main/popover");
+      togglePopover(trayMock as never);
+      expect(browserWindowConstructor.mock.calls[0][0].type).toBeUndefined();
+      expect(browserWindowConstructor.mock.calls[0][0].webPreferences.contextIsolation).toBe(true);
+    } finally {
+      Object.defineProperty(process, "platform", { value: original, configurable: true });
+    }
   });
 
   it("hides the popover when it loses focus", async () => {

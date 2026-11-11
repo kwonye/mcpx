@@ -90,9 +90,22 @@ describe("tray icon requirements", () => {
         "utf-8"
       );
 
-      expect(traySource).toContain("trayIconDevTemplate-green.png");
-      expect(traySource).toContain("trayIconDevTemplate-red.png");
-      expect(traySource).toContain("isDevDesktopApp()");
+      expect(traySource).toContain("trayIconFile(platform, running, isDevDesktopApp())");
+    });
+  });
+
+  describe("ICON-06: Windows tray state icons", () => {
+    it("running and stopped icons exist at 1x and 2x as valid PNGs", async () => {
+      const pngSignature = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
+      for (const name of ["trayIcon-running", "trayIcon-stopped"]) {
+        const icon = await readFile(join(__dirname, `../../resources/win/${name}.png`));
+        const retina = await readFile(join(__dirname, `../../resources/win/${name}@2x.png`));
+        expect(icon.subarray(0, 4)).toEqual(pngSignature);
+        expect(retina.subarray(0, 4)).toEqual(pngSignature);
+        // IHDR width/height
+        expect([icon.readUInt32BE(16), icon.readUInt32BE(20)]).toEqual([16, 16]);
+        expect([retina.readUInt32BE(16), retina.readUInt32BE(20)]).toEqual([32, 32]);
+      }
     });
   });
 

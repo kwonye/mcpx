@@ -105,6 +105,50 @@ describe("update manager", () => {
     expect(showMessageBoxMock).toHaveBeenCalledTimes(1);
   });
 
+  it("runs the coordinated quit preparation before quitAndInstall", async () => {
+    const { setAutoUpdateEnabled, setBeforeQuitAndInstall } = await import("../../src/main/update-manager");
+    const { autoUpdater } = await import("electron-updater");
+    const order: string[] = [];
+    const prepare = vi.fn(() => order.push("prepare"));
+    vi.mocked(autoUpdater.quitAndInstall).mockImplementation(() => {
+      order.push("install");
+    });
+    showMessageBoxMock.mockResolvedValue({ response: 0 });
+    setBeforeQuitAndInstall(prepare);
+
+    setAutoUpdateEnabled(true);
+    triggerEvent("update-downloaded", { version: "2.0.0" });
+    await vi.waitFor(() => expect(autoUpdater.quitAndInstall).toHaveBeenCalledTimes(1));
+
+    expect(order).toEqual(["prepare", "install"]);
+  });
+
+  it("maps updater outcomes to manual check statuses", async () => {
+    const { updateCheckResult } = await import("../../src/main/update-manager");
+
+    expect(updateCheckResult("update-available", "1.2.3").status).toBe("available");
+    expect(updateCheckResult("update-not-available").status).toBe("up-to-date");
+    expect(updateCheckResult("update-downloaded", "1.2.3")).toEqual({
+      status: "downloaded",
+      message: "Update 1.2.3 is ready. Restart to install it."
+    });
+  });
+
+  it("reports a downloaded update on later manual checks without re-checking", async () => {
+    const { checkForUpdatesNow } = await import("../../src/main/update-manager");
+
+    const first = checkForUpdatesNow();
+    triggerEvent("update-available", { version: "1.2.3" });
+    await first;
+    triggerEvent("update-downloaded", { version: "1.2.3" });
+
+    await expect(checkForUpdatesNow()).resolves.toEqual({
+      status: "downloaded",
+      message: "Update 1.2.3 is ready. Restart to install it."
+    });
+    expect(checkForUpdatesMock).toHaveBeenCalledTimes(1);
+  });
+
   it("returns a manual check message when an update is found", async () => {
     const { checkForUpdatesNow } = await import("../../src/main/update-manager");
 
@@ -114,7 +158,7 @@ describe("update manager", () => {
     const result = await resultPromise;
 
     expect(result).toEqual({
-      status: "checking",
+      status: "available",
       message: "Update 1.2.3 found. Downloading now and it will install on the next restart."
     });
     expect(checkForUpdatesMock).toHaveBeenCalledTimes(1);
@@ -129,7 +173,7 @@ describe("update manager", () => {
     const result = await resultPromise;
 
     expect(result).toEqual({
-      status: "downloaded",
+      status: "up-to-date",
       message: "You're already on the latest version."
     });
   });
@@ -143,7 +187,7 @@ describe("update manager", () => {
     triggerEvent("update-not-available");
 
     await expect(first).resolves.toEqual({
-      status: "downloaded",
+      status: "up-to-date",
       message: "You're already on the latest version."
     });
   });
@@ -174,7 +218,7 @@ describe("update manager", () => {
 
     triggerEvent("update-not-available");
     await expect(second).resolves.toEqual({
-      status: "downloaded",
+      status: "up-to-date",
       message: "You're already on the latest version."
     });
   });
