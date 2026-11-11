@@ -1,4 +1,4 @@
-export type ClientId = "claude" | "claude-desktop" | "codex" | "cursor" | "cline" | "opencode" | "kiro" | "vscode" | "qwen" | "openclaw" | "hermes";
+export type ClientId = "claude" | "claude-desktop" | "codex" | "cursor" | "cline" | "opencode" | "kiro" | "vscode" | "vscode-insiders" | "qwen" | "openclaw" | "hermes";
 
 export type PluginComponent = "mcpServers" | "skills" | "hooks" | "agents" | "commands";
 
@@ -137,6 +137,8 @@ export interface SyncResult {
   configPath?: string;
   message?: string;
   driftedEntries?: string[];
+  /** Set with status "SKIPPED" when the client was not detected and nothing was written for it. */
+  reason?: "not-installed";
 }
 
 export interface Skill {
@@ -170,9 +172,18 @@ export interface PluginSyncResult {
   error?: string;
 }
 
+export interface ClientInstallation {
+  installed: boolean;
+  /** The path (config file/dir, app bundle, binary) that proved the client is installed. */
+  evidence?: string;
+}
+
 export interface ClientAdapter {
   id: ClientId;
+  displayName?: string;
   detectConfigPath(): string | null;
+  /** Whether the client is installed on this machine. Adapters without it are treated as installed. */
+  detectInstallation?(): ClientInstallation;
   supportsHttp(): boolean;
   scanForImports(config: McpxConfig, managedIndex: ManagedIndex): ClientImportScanResult;
   syncGateway(config: McpxConfig, options: SyncClientOptions): SyncResult;

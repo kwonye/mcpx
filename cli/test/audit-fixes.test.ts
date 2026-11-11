@@ -7,6 +7,7 @@ import { syncPluginsToClient } from "../src/core/plugin-projections.js";
 import { withManagedIndexLock } from "../src/core/managed-index-lock.js";
 import { loadManagedIndex, saveManagedIndex } from "../src/core/managed-index.js";
 import { detectManagedEntryDrift } from "../src/adapters/utils/index.js";
+import { getAdapter } from "../src/adapters/index.js";
 import { sha256 } from "../src/util/fs.js";
 
 function setupTempEnv(prefix: string) {
@@ -317,7 +318,7 @@ describe("SYNC-03: Drift detection", () => {
 describe("GW-05: Proxy bridge version pinning", () => {
   it("uses APP_VERSION instead of @latest in proxy fallback", async () => {
     // This test verifies the fix is in place by checking the source code
-    const claudeDesktopPath = path.join(process.cwd(), "src/adapters/claude-desktop.ts");
+    const claudeDesktopPath = path.join(process.cwd(), "src/adapters/catalogue.ts");
     const source = fs.readFileSync(claudeDesktopPath, "utf8");
     
     // Should contain APP_VERSION import
@@ -426,43 +427,29 @@ describe("REVIEW-02: Daemon stop process check", () => {
 });
 
 describe("SYNC-01: Adapter disable/enable fixes", () => {
-  it("codex uses enabled-only names for writability checks", async () => {
-    const codexPath = path.join(process.cwd(), "src/adapters/codex.ts");
-    const source = fs.readFileSync(codexPath, "utf8");
-    
-    // Should have enabledManagedNames
-    expect(source).toContain("enabledManagedNames");
-    
-    // Should use enabledManagedNames in ensureManagedEntryWritable loop
-    expect(source).toMatch(/for \(const name of enabledManagedNames\)[\s\S]*?ensureManagedEntryWritable/);
-    
-    // Should use enabledManagedNames in pruneStaleManagedEntries
-    expect(source).toMatch(/pruneStaleManagedEntries[\s\S]*?enabledManagedNames/);
-  });
-
-  it("opencode uses enabled-only names", async () => {
-    const opencodePath = path.join(process.cwd(), "src/adapters/opencode.ts");
-    const source = fs.readFileSync(opencodePath, "utf8");
-    expect(source).toContain("enabledManagedNames");
-  });
-
-  it("kiro uses enabled-only names", async () => {
-    const kiroPath = path.join(process.cwd(), "src/adapters/kiro.ts");
-    const source = fs.readFileSync(kiroPath, "utf8");
-    expect(source).toContain("enabledManagedNames");
-  });
-
-  it("qwen uses enabled-only names", async () => {
-    const qwenPath = path.join(process.cwd(), "src/adapters/qwen.ts");
-    const source = fs.readFileSync(qwenPath, "utf8");
-    expect(source).toContain("enabledManagedNames");
-  });
-
-  it("cline uses enabled-only names", async () => {
-    const clinePath = path.join(process.cwd(), "src/adapters/cline.ts");
-    const source = fs.readFileSync(clinePath, "utf8");
-    expect(source).toContain("enabledManagedNames");
-  });
+  // A disabled managed server is omitted, so it must not trip the unmanaged-entry
+  // conflict check (only enabled names are checked for writability).
+  for (const id of ["codex", "opencode", "kiro", "qwen", "cline"] as const) {
+    it(`${id} only checks enabled managed names for writability`, () => {
+      const env = setupTempEnv(`mcpx-sync01-${id}-`);
+      try {
+        const adapter = getAdapter(id)!;
+        const result = adapter.syncGateway({} as never, {
+          managedEntries: [
+            { name: "off (mcpx)", url: "http://127.0.0.1:1/mcp?upstream=off", headers: {}, enabled: false },
+            { name: "on (mcpx)", url: "http://127.0.0.1:1/mcp?upstream=on", headers: {}, enabled: true }
+          ],
+          managedIndex: { schemaVersion: 1, managed: {} },
+          managedIndexPath: path.join(env.root, "managed-index.json")
+        });
+        expect(result.status).toBe("SYNCED");
+        expect(fs.readFileSync(adapter.detectConfigPath()!, "utf8")).toContain("upstream=on");
+        expect(fs.readFileSync(adapter.detectConfigPath()!, "utf8")).not.toContain("upstream=off");
+      } finally {
+        env.restore();
+      }
+    });
+  }
 });
 
 describe("GW-04: strict MCP v2 transport", () => {

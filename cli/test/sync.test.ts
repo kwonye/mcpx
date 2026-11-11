@@ -7,7 +7,7 @@ import { syncAllClients } from "../src/core/sync.js";
 import { SecretsManager } from "../src/core/secrets.js";
 import { loadManagedIndex } from "../src/core/managed-index.js";
 import { getManagedIndexPath } from "../src/core/paths.js";
-import { setupTempEnv } from "./helpers.js";
+import { installClients, isolatedHost, setupTempEnv } from "./helpers.js";
 
 describe("sync engine", () => {
   const cleanups: Array<() => void> = [];
@@ -60,8 +60,8 @@ describe("sync engine", () => {
       )
     );
 
-    const summary1 = syncAllClients(config, new SecretsManager(), { importScan: true });
-    const summary2 = syncAllClients(config, new SecretsManager(), { importScan: true });
+    const summary1 = syncAllClients(config, new SecretsManager(), { importScan: true, host: isolatedHost(env.root) });
+    const summary2 = syncAllClients(config, new SecretsManager(), { importScan: true, host: isolatedHost(env.root) });
 
     expect(summary1.hasErrors).toBe(false);
     expect(summary2.hasErrors).toBe(false);
@@ -114,7 +114,7 @@ describe("sync engine", () => {
     );
     fs.mkdirSync(clinePathAsDirectory, { recursive: true });
 
-    const summary = syncAllClients(config, new SecretsManager(), { importScan: true });
+    const summary = syncAllClients(config, new SecretsManager(), { importScan: true, host: isolatedHost(env.root) });
 
     expect(summary.hasErrors).toBe(true);
     expect(summary.results.some((result) => result.clientId === "cline" && result.status === "ERROR")).toBe(true);
@@ -139,7 +139,7 @@ describe("sync engine", () => {
     const vscodePath = path.join(env.root, "Library", "Application Support", "Code", "User", "mcp.json");
     fs.mkdirSync(path.dirname(vscodePath), { recursive: true });
 
-    const first = syncAllClients(config, new SecretsManager(), { importScan: true });
+    const first = syncAllClients(config, new SecretsManager(), { importScan: true, host: isolatedHost(env.root) });
     expect(first.hasErrors).toBe(false);
 
     const firstDoc = JSON.parse(fs.readFileSync(vscodePath, "utf8")) as {
@@ -151,7 +151,7 @@ describe("sync engine", () => {
     delete config.servers.vercel;
     saveConfig(config);
 
-    const second = syncAllClients(config, new SecretsManager(), { importScan: true });
+    const second = syncAllClients(config, new SecretsManager(), { importScan: true, host: isolatedHost(env.root) });
     expect(second.hasErrors).toBe(false);
 
     const secondDoc = JSON.parse(fs.readFileSync(vscodePath, "utf8")) as {
@@ -198,7 +198,7 @@ describe("sync engine", () => {
       }, null, 2)
     );
 
-    const summary = syncAllClients(config, new SecretsManager(), { importScan: true });
+    const summary = syncAllClients(config, new SecretsManager(), { importScan: true, host: isolatedHost(env.root) });
     expect(summary.hasErrors).toBe(false);
 
     const synced = JSON.parse(fs.readFileSync(vscodePath, "utf8")) as {
@@ -239,7 +239,7 @@ describe("sync engine", () => {
     };
     fs.writeFileSync(claudePath, JSON.stringify(initialClaude, null, 2));
 
-    const summary = syncAllClients(config, new SecretsManager(), { importScan: true });
+    const summary = syncAllClients(config, new SecretsManager(), { importScan: true, host: isolatedHost(env.root) });
     expect(summary.hasErrors).toBe(false);
     expect(summary.results.some((result) => result.clientId === "claude" && result.status === "SYNCED")).toBe(true);
 
@@ -281,7 +281,7 @@ describe("sync engine", () => {
     const claudePath = path.join(env.root, ".claude.json");
     fs.writeFileSync(claudePath, JSON.stringify({ mcpServers: {} }, null, 2));
 
-    const summary = syncAllClients(config, new SecretsManager(), { importScan: true });
+    const summary = syncAllClients(config, new SecretsManager(), { importScan: true, host: isolatedHost(env.root) });
     expect(summary.hasErrors).toBe(false);
 
     const syncedClaude = JSON.parse(fs.readFileSync(claudePath, "utf8")) as {
@@ -319,7 +319,7 @@ describe("sync engine", () => {
       }
     }, null, 2));
 
-    syncAllClients(config, new SecretsManager(), { importScan: true });
+    syncAllClients(config, new SecretsManager(), { importScan: true, host: isolatedHost(env.root) });
 
     const syncedClaude = JSON.parse(fs.readFileSync(claudePath, "utf8")) as {
       projects?: Record<string, { disabledMcpServers?: string[] }>;
@@ -350,7 +350,7 @@ describe("sync engine", () => {
     const claudePath = path.join(env.root, ".claude.json");
     fs.writeFileSync(claudePath, JSON.stringify({ mcpServers: {} }, null, 2));
 
-    syncAllClients(config, new SecretsManager(), { importScan: true });
+    syncAllClients(config, new SecretsManager(), { importScan: true, host: isolatedHost(env.root) });
 
     const managedIndex = loadManagedIndex(getManagedIndexPath());
     const claudeEntries = Object.keys(managedIndex.managed.claude?.entries ?? {});
@@ -386,7 +386,7 @@ describe("sync engine", () => {
     };
     fs.writeFileSync(claudeDesktopPath, JSON.stringify(initialClaudeDesktop, null, 2));
 
-    const summary = syncAllClients(config, new SecretsManager(), { importScan: true });
+    const summary = syncAllClients(config, new SecretsManager(), { importScan: true, host: isolatedHost(env.root) });
     expect(summary.hasErrors).toBe(false);
     expect(summary.results.some((result) => result.clientId === "claude-desktop" && result.status === "SYNCED")).toBe(true);
 
@@ -436,7 +436,7 @@ describe("sync engine", () => {
     };
     fs.writeFileSync(qwenPath, JSON.stringify(initialQwen, null, 2));
 
-    const summary = syncAllClients(config, new SecretsManager(), { importScan: true });
+    const summary = syncAllClients(config, new SecretsManager(), { importScan: true, host: isolatedHost(env.root) });
     expect(summary.hasErrors).toBe(false);
     expect(summary.results.some((result) => result.clientId === "qwen" && result.status === "SYNCED")).toBe(true);
 
@@ -461,6 +461,7 @@ describe("sync engine", () => {
   it("imports Codex stdio entries into mcpx, syncs them out, and replaces the source entry", () => {
     const env = setupTempEnv("mcpx-sync-codex-stdio-");
     cleanups.push(env.restore);
+    installClients(env.root, ["vscode"]);
 
     const config = defaultConfig();
     saveConfig(config);
@@ -479,7 +480,7 @@ describe("sync engine", () => {
       }
     } as never));
 
-    const summary = syncAllClients(config, new SecretsManager(), { importScan: true });
+    const summary = syncAllClients(config, new SecretsManager(), { importScan: true, host: isolatedHost(env.root) });
 
     expect(summary.hasErrors).toBe(false);
     expect(summary.imports.imported).toEqual([
@@ -534,7 +535,7 @@ describe("sync engine", () => {
       }
     } as never));
 
-    const summary = syncAllClients(config, new SecretsManager(), { importScan: true });
+    const summary = syncAllClients(config, new SecretsManager(), { importScan: true, host: isolatedHost(env.root) });
 
     expect(summary.hasErrors).toBe(false);
     expect(config.servers.docs).toEqual({
@@ -582,8 +583,8 @@ describe("sync engine", () => {
       }
     }, null, 2));
 
-    const first = syncAllClients(config, new SecretsManager(), { importScan: true });
-    const second = syncAllClients(config, new SecretsManager(), { importScan: true });
+    const first = syncAllClients(config, new SecretsManager(), { importScan: true, host: isolatedHost(env.root) });
+    const second = syncAllClients(config, new SecretsManager(), { importScan: true, host: isolatedHost(env.root) });
 
     expect(first.hasErrors).toBe(false);
     expect(first.imports.imported).toHaveLength(1);
@@ -628,7 +629,7 @@ describe("sync engine", () => {
       }
     } as never));
 
-    const summary = syncAllClients(config, new SecretsManager(), { importScan: true });
+    const summary = syncAllClients(config, new SecretsManager(), { importScan: true, host: isolatedHost(env.root) });
 
     expect(summary.hasErrors).toBe(true);
     expect(summary.imports.conflicts).toEqual([
@@ -668,7 +669,7 @@ describe("sync engine", () => {
       }
     } as never));
 
-    const summary = syncAllClients(config, new SecretsManager(), { importScan: true });
+    const summary = syncAllClients(config, new SecretsManager(), { importScan: true, host: isolatedHost(env.root) });
 
     expect(summary.hasErrors).toBe(false);
     expect(summary.imports.imported).toHaveLength(0);
@@ -698,7 +699,7 @@ describe("sync engine", () => {
       }
     }, null, 2));
 
-    const summary = syncAllClients(config, new SecretsManager(), { importScan: true });
+    const summary = syncAllClients(config, new SecretsManager(), { importScan: true, host: isolatedHost(env.root) });
 
     expect(summary.hasErrors).toBe(false);
     expect(summary.imports.imported).toHaveLength(0);
@@ -734,7 +735,7 @@ describe("sync engine", () => {
       }
     }, null, 2));
 
-    const summary = syncAllClients(config, new SecretsManager(), { importScan: true });
+    const summary = syncAllClients(config, new SecretsManager(), { importScan: true, host: isolatedHost(env.root) });
 
     expect(summary.hasErrors).toBe(false);
     expect(summary.imports.skipped).toEqual([
@@ -763,6 +764,7 @@ describe("sync engine", () => {
   it("syncs disabled servers correctly per client convention", () => {
     const env = setupTempEnv("mcpx-sync-disabled-");
     cleanups.push(env.restore);
+    installClients(env.root, ["vscode", "codex"]);
 
     const config = defaultConfig();
     config.servers.vercel = {
@@ -772,7 +774,7 @@ describe("sync engine", () => {
     };
     saveConfig(config);
 
-    const summary = syncAllClients(config, new SecretsManager(), { importScan: true });
+    const summary = syncAllClients(config, new SecretsManager(), { importScan: true, host: isolatedHost(env.root) });
 
     expect(summary.hasErrors).toBe(false);
 
@@ -810,7 +812,7 @@ describe("sync engine", () => {
       }
     }, null, 2));
 
-    const summary = syncAllClients(config, new SecretsManager(), { importScan: true });
+    const summary = syncAllClients(config, new SecretsManager(), { importScan: true, host: isolatedHost(env.root) });
 
     expect(summary.hasErrors).toBe(false);
     expect(summary.imports.imported).toEqual([
@@ -837,6 +839,7 @@ describe("sync engine", () => {
   it("updates managed fingerprints when a server is toggled off and back on", () => {
     const env = setupTempEnv("mcpx-sync-toggle-fingerprint-");
     cleanups.push(env.restore);
+    installClients(env.root, ["vscode"]);
 
     const config = defaultConfig();
     config.servers.vercel = {
@@ -845,17 +848,17 @@ describe("sync engine", () => {
     };
     saveConfig(config);
 
-    syncAllClients(config, new SecretsManager(), { importScan: true });
+    syncAllClients(config, new SecretsManager(), { importScan: true, host: isolatedHost(env.root) });
     const firstFingerprint = loadManagedIndex(getManagedIndexPath()).managed.vscode?.entries["vercel (mcpx)"]?.fingerprint;
 
     // Disabled → managed entry removed entirely
     config.servers.vercel.enabled = false;
-    const disableSummary = syncAllClients(config, new SecretsManager(), { importScan: true });
+    const disableSummary = syncAllClients(config, new SecretsManager(), { importScan: true, host: isolatedHost(env.root) });
     const secondFingerprint = loadManagedIndex(getManagedIndexPath()).managed.vscode?.entries["vercel (mcpx)"]?.fingerprint;
 
     // Re-enabled → entry recreated with new fingerprint
     config.servers.vercel.enabled = true;
-    const summary = syncAllClients(config, new SecretsManager(), { importScan: true });
+    const summary = syncAllClients(config, new SecretsManager(), { importScan: true, host: isolatedHost(env.root) });
     const thirdFingerprint = loadManagedIndex(getManagedIndexPath()).managed.vscode?.entries["vercel (mcpx)"]?.fingerprint;
 
     expect(firstFingerprint).toBeDefined();
@@ -887,7 +890,7 @@ describe("sync engine", () => {
       disabledMcpServers: ["existing_disabled", "vercel (mcpx)"]
     }, null, 2));
 
-    const summary = syncAllClients(config, new SecretsManager(), { importScan: true });
+    const summary = syncAllClients(config, new SecretsManager(), { importScan: true, host: isolatedHost(env.root) });
     expect(summary.hasErrors).toBe(false);
 
     const syncedClaude = JSON.parse(fs.readFileSync(claudePath, "utf8")) as {
@@ -933,7 +936,7 @@ describe("sync engine", () => {
       }
     }, null, 2));
 
-    const summary = syncAllClients(config, new SecretsManager(), { importScan: true });
+    const summary = syncAllClients(config, new SecretsManager(), { importScan: true, host: isolatedHost(env.root) });
     expect(summary.hasErrors).toBe(false);
 
     const synced = JSON.parse(fs.readFileSync(claudeDesktopPath, "utf8")) as {
@@ -974,7 +977,7 @@ describe("sync engine", () => {
       }
     }, null, 2));
 
-    const summary = syncAllClients(config, new SecretsManager(), { importScan: true });
+    const summary = syncAllClients(config, new SecretsManager(), { importScan: true, host: isolatedHost(env.root) });
     expect(summary.hasErrors).toBe(false);
 
     const synced = JSON.parse(fs.readFileSync(cursorPath, "utf8")) as {
@@ -1017,7 +1020,7 @@ describe("sync engine", () => {
       }
     }, null, 2));
 
-    const summary = syncAllClients(config, new SecretsManager(), { importScan: true });
+    const summary = syncAllClients(config, new SecretsManager(), { importScan: true, host: isolatedHost(env.root) });
     expect(summary.hasErrors).toBe(false);
 
     const synced = JSON.parse(fs.readFileSync(vscodePath, "utf8")) as {
@@ -1055,7 +1058,7 @@ describe("sync engine", () => {
       mcp: { excluded: ["existing_disabled"] }
     }, null, 2));
 
-    const summary = syncAllClients(config, new SecretsManager(), { importScan: true });
+    const summary = syncAllClients(config, new SecretsManager(), { importScan: true, host: isolatedHost(env.root) });
     expect(summary.hasErrors).toBe(false);
 
     const synced = JSON.parse(fs.readFileSync(qwenPath, "utf8")) as {
@@ -1075,6 +1078,7 @@ describe("sync engine", () => {
   it("syncs Cursor config to ~/.cursor/mcp.json with mcpServers key", () => {
     const env = setupTempEnv("mcpx-sync-cursor-path-");
     cleanups.push(env.restore);
+    installClients(env.root, ["cursor"]);
 
     const config = defaultConfig();
     config.servers.vercel = {
@@ -1083,7 +1087,7 @@ describe("sync engine", () => {
     };
     saveConfig(config);
 
-    const summary = syncAllClients(config, new SecretsManager(), { importScan: true });
+    const summary = syncAllClients(config, new SecretsManager(), { importScan: true, host: isolatedHost(env.root) });
     expect(summary.hasErrors).toBe(false);
     expect(summary.results.some((result) => result.clientId === "cursor" && result.status === "SYNCED")).toBe(true);
 
@@ -1120,7 +1124,7 @@ describe("sync engine", () => {
       }
     }, null, 2));
 
-    const summary = syncAllClients(config, new SecretsManager(), { importScan: true });
+    const summary = syncAllClients(config, new SecretsManager(), { importScan: true, host: isolatedHost(env.root) });
 
     expect(summary.hasErrors).toBe(false);
     expect(summary.imports.imported).toEqual([
@@ -1159,7 +1163,7 @@ describe("sync engine", () => {
       }
     }, null, 2));
 
-    const summary = syncAllClients(config, new SecretsManager(), { importScan: true });
+    const summary = syncAllClients(config, new SecretsManager(), { importScan: true, host: isolatedHost(env.root) });
 
     expect(summary.hasErrors).toBe(false);
     expect(summary.imports.imported).toEqual([
@@ -1203,7 +1207,7 @@ describe("sync engine", () => {
       }
     }, null, 2));
 
-    const summary = syncAllClients(config, new SecretsManager(), { importScan: true });
+    const summary = syncAllClients(config, new SecretsManager(), { importScan: true, host: isolatedHost(env.root) });
     expect(summary.hasErrors).toBe(false);
     expect(summary.results.some((result) => result.clientId === "cline" && result.status === "SYNCED")).toBe(true);
 
@@ -1246,7 +1250,7 @@ describe("sync engine", () => {
       }
     }, null, 2));
 
-    const summary = syncAllClients(config, new SecretsManager(), { importScan: true });
+    const summary = syncAllClients(config, new SecretsManager(), { importScan: true, host: isolatedHost(env.root) });
 
     expect(summary.hasErrors).toBe(false);
     expect(summary.imports.imported).toEqual([
@@ -1301,7 +1305,7 @@ describe("sync engine", () => {
       }
     }, null, 2));
 
-    const summary = syncAllClients(config, new SecretsManager(), { importScan: true });
+    const summary = syncAllClients(config, new SecretsManager(), { importScan: true, host: isolatedHost(env.root) });
 
     expect(summary.hasErrors).toBe(false);
     expect(summary.imports.imported).toEqual([
@@ -1353,7 +1357,7 @@ describe("sync engine", () => {
       }
     }, null, 2));
 
-    const summary = syncAllClients(config, new SecretsManager(), { importScan: true });
+    const summary = syncAllClients(config, new SecretsManager(), { importScan: true, host: isolatedHost(env.root) });
 
     expect(summary.hasErrors).toBe(false);
     expect(summary.imports.imported).toEqual([
@@ -1402,7 +1406,7 @@ describe("sync engine", () => {
     fs.mkdirSync(path.dirname(clinePath), { recursive: true });
     fs.writeFileSync(clinePath, JSON.stringify({ mcpServers: {} }, null, 2));
 
-    const first = syncAllClients(config, new SecretsManager(), { importScan: true });
+    const first = syncAllClients(config, new SecretsManager(), { importScan: true, host: isolatedHost(env.root) });
     expect(first.hasErrors).toBe(false);
 
     const firstDoc = JSON.parse(fs.readFileSync(clinePath, "utf8")) as {
@@ -1414,7 +1418,7 @@ describe("sync engine", () => {
     delete config.servers.context7;
     saveConfig(config);
 
-    const second = syncAllClients(config, new SecretsManager(), { importScan: true });
+    const second = syncAllClients(config, new SecretsManager(), { importScan: true, host: isolatedHost(env.root) });
     expect(second.hasErrors).toBe(false);
 
     const secondDoc = JSON.parse(fs.readFileSync(clinePath, "utf8")) as {
@@ -1451,7 +1455,7 @@ describe("sync engine", () => {
     };
     fs.writeFileSync(kiroPath, JSON.stringify(initialKiro, null, 2));
 
-    const summary = syncAllClients(config, new SecretsManager(), { importScan: true });
+    const summary = syncAllClients(config, new SecretsManager(), { importScan: true, host: isolatedHost(env.root) });
     expect(summary.hasErrors).toBe(false);
     expect(summary.results.some((result) => result.clientId === "kiro" && result.status === "SYNCED")).toBe(true);
 
@@ -1489,7 +1493,7 @@ describe("sync engine", () => {
     fs.mkdirSync(opencodeDir, { recursive: true });
     const opencodePath = path.join(opencodeDir, "opencode.json");
 
-    const summary = syncAllClients(config, new SecretsManager(), { importScan: true });
+    const summary = syncAllClients(config, new SecretsManager(), { importScan: true, host: isolatedHost(env.root) });
     expect(summary.hasErrors).toBe(false);
     expect(summary.results.some((result) => result.clientId === "opencode" && result.status === "SYNCED")).toBe(true);
 
@@ -1506,6 +1510,7 @@ describe("sync engine", () => {
   it("writes disabled managed servers with disabled/disabled field in Cline, OpenCode, and Kiro", () => {
     const env = setupTempEnv("mcpx-sync-disabled-others-");
     cleanups.push(env.restore);
+    installClients(env.root, ["opencode", "kiro"]);
 
     const config = defaultConfig();
     config.servers.vercel = {
@@ -1526,7 +1531,7 @@ describe("sync engine", () => {
     fs.mkdirSync(path.dirname(clinePrePath), { recursive: true });
     fs.writeFileSync(clinePrePath, JSON.stringify({ mcpServers: {} }, null, 2));
 
-    const summary = syncAllClients(config, new SecretsManager(), { importScan: true });
+    const summary = syncAllClients(config, new SecretsManager(), { importScan: true, host: isolatedHost(env.root) });
     expect(summary.hasErrors).toBe(false);
 
     // Cline: disabled entries omitted entirely
@@ -1574,7 +1579,7 @@ describe("sync engine", () => {
       }
     }, null, 2));
 
-    const summary = syncAllClients(config, new SecretsManager(), { importScan: true });
+    const summary = syncAllClients(config, new SecretsManager(), { importScan: true, host: isolatedHost(env.root) });
 
     expect(summary.hasErrors).toBe(false);
     expect(summary.imports.imported).toEqual([
@@ -1615,7 +1620,7 @@ describe("sync engine", () => {
       }
     }, null, 2));
 
-    const summary = syncAllClients(config, new SecretsManager(), { importScan: true });
+    const summary = syncAllClients(config, new SecretsManager(), { importScan: true, host: isolatedHost(env.root) });
 
     expect(summary.hasErrors).toBe(false);
     expect(summary.imports.imported).toEqual([]);
