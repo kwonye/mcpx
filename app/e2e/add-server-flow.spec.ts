@@ -2,7 +2,7 @@ import { test, expect } from "@playwright/test";
 import { goTo, readConfig, withDashboard } from "./helpers";
 
 // Local commands only: no network access is needed for these flows.
-const config = { gateway: { port: 38771, autoStart: false } };
+const config = { gateway: { autoStart: false } };
 
 test.describe("add server flow", () => {
   test("adds a local server from a pasted add command and removes it again", async () => {
@@ -17,7 +17,7 @@ test.describe("add server flow", () => {
       await source.getByRole("button", { name: "Continue" }).click();
 
       const details = window.getByRole("dialog", { name: "Check the details" });
-      await expect(details.getByRole("textbox", { name: "Name" })).toHaveValue("e2etest");
+      await expect(details.getByRole("textbox", { name: "Name", exact: true })).toHaveValue("e2etest");
       await expect(details.getByRole("textbox", { name: "Command" })).toHaveValue("echo");
       await details.getByRole("button", { name: "Add server" }).click();
 

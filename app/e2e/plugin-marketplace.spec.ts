@@ -78,7 +78,7 @@ test("manages a custom source and plugin end to end", async () => {
       await goTo(window, "Add-ons");
       await openTab(window, "Sources");
       const sources = window.getByRole("list", { name: "Sources" });
-      for (const name of ["Claude official", "Codex official", "Cursor official"]) await expect(sources.getByText(name, { exact: true })).toBeVisible();
+      for (const name of ["Claude official", "Codex official", "Cursor official"]) await expect(sources.getByRole("listitem").filter({ hasText: name })).toBeVisible();
       await window.getByRole("textbox", { name: "Add a source" }).fill(source);
       await window.getByRole("button", { name: "Add source" }).click();
       const teamRow = sources.getByRole("listitem").filter({ hasText: "team-tools" });

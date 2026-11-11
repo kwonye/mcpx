@@ -33,10 +33,11 @@ export function createSandbox(options: { config?: object } = {}): Sandbox {
   const configHome = mkdtempSync(join(tmpdir(), "mcpx-e2e-config-"));
   const dataHome = mkdtempSync(join(tmpdir(), "mcpx-e2e-data-"));
   const stateHome = mkdtempSync(join(tmpdir(), "mcpx-e2e-state-"));
-  if (options.config) {
-    mkdirSync(join(configHome, "mcpx"), { recursive: true });
-    writeFileSync(join(configHome, "mcpx", "config.json"), JSON.stringify(options.config));
-  }
+  // Never use the default gateway port: a developer's real mcpx may hold it.
+  const given = (options.config ?? {}) as { gateway?: object };
+  const config = { ...given, gateway: { port: 39000 + Math.floor(Math.random() * 10000), ...given.gateway } };
+  mkdirSync(join(configHome, "mcpx"), { recursive: true });
+  writeFileSync(join(configHome, "mcpx", "config.json"), JSON.stringify(config));
 
   return {
     launchArgs: [
@@ -64,14 +65,13 @@ export function createSandbox(options: { config?: object } = {}): Sandbox {
  * spec must never leak it, even if an assertion above throws first.
  */
 function killSandboxDaemon(stateHome: string): void {
-  const pidPath = join(stateHome, "mcpx", "runtime", "daemon.pid");
-  if (!existsSync(pidPath)) {
+  const recordPath = join(stateHome, "mcpx", "runtime", "daemon.json");
+  if (!existsSync(recordPath)) {
     return;
   }
 
   try {
-    const raw = readFileSync(pidPath, "utf8").trim();
-    const pid = Number(raw.split(":")[0]);
+    const pid = Number(JSON.parse(readFileSync(recordPath, "utf8")).pid);
     if (Number.isFinite(pid) && pid > 0) {
       try {
         process.kill(pid, "SIGTERM");

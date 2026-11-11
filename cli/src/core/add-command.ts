@@ -126,6 +126,9 @@ function parseStandardAdd(args: string[]): { name: string; spec: UpstreamServerS
       cwd = args[++i];
     } else if (arg === "--force") {
       // Skip.
+    } else if (arg === "--") {
+      values.push(...args.slice(i + 1));
+      break;
     } else {
       values.push(arg);
     }
@@ -150,6 +153,9 @@ function parseClaudeAdd(args: string[]): { name: string; spec: UpstreamServerSpe
       cwd = args[++i];
     } else if (arg === "--transport" || arg === "--scope") {
       i++;
+    } else if (arg === "--") {
+      values.push(...args.slice(i + 1));
+      break;
     } else {
       values.push(arg);
     }

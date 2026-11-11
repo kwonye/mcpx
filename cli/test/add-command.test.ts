@@ -116,4 +116,13 @@ describe("add command parsing", () => {
   it("rejects bare input even after stripping the optional 'mcpx ' prefix", () => {
     expect(() => parseCliAddCommand("mcpx supabase https://mcp.supabase.com/mcp")).toThrow("Unrecognized command");
   });
+
+  it("treats everything after -- as the server command, for mcpx and claude forms", () => {
+    for (const prefix of ["mcpx add", "claude mcp add"]) {
+      expect(parseCliAddCommand(`${prefix} demo --env API_TOKEN=abc -- npx -y pkg --env inner`)).toEqual({
+        name: "demo",
+        spec: { transport: "stdio", command: "npx", args: ["-y", "pkg", "--env", "inner"], env: { API_TOKEN: "abc" } }
+      });
+    }
+  });
 });
