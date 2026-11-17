@@ -2,6 +2,7 @@ name: ci
 
 on:
   pull_request:
+  workflow_dispatch:
   push:
     branches:
       - main
@@ -14,9 +15,41 @@ permissions:
   contents: read
 
 jobs:
+  typecheck:
+    name: Desktop typecheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+          no-cache: true
+
+      - name: Install CLI dependencies
+        run: bun install --frozen-lockfile
+        working-directory: cli
+
+      - name: Install desktop dependencies
+        run: bun install --frozen-lockfile
+        working-directory: app
+
+      # The local pre-push hook builds/tests both packages but does not typecheck the app.
+      - name: Typecheck desktop
+        run: bun run typecheck
+        working-directory: app
+
   test:
+    # Local pre-push and release gates already run builds/tests; full CI is on demand.
+    if: github.event_name == 'workflow_dispatch'
     name: test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -31,6 +64,7 @@ jobs:
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.0
+          no-cache: true
 
       - name: Install CLI dependencies
         run: bun install --frozen-lockfile

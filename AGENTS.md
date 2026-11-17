@@ -238,7 +238,16 @@ Checks performed:
 - `cd app && bun run build` — Electron app bundling
 - `cd app && bun run test` — Desktop unit + component tests
 
-This prevents broken builds or failing tests from reaching CI.
+The hook protects local pushes to main/master when enabled; it does not run on
+feature-branch pushes or GitHub UI commits. It also runs desktop E2E tests, but
+not the separate desktop typecheck.
+
+Automatic CI retains one Ubuntu desktop-typecheck job because the hook does not
+cover it. Use Actions → ci → Run workflow for the complete three-OS build/test
+matrix when independent cross-platform verification is needed before merging.
+Release builds retain their tests, typechecks, packaging, signing/notarization,
+and publication gates. Release transport artifacts expire after seven days;
+source-map retention is unchanged.
 
 ## CI/CD & Versioning
 
