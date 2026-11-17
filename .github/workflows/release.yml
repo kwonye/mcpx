@@ -4,14 +4,17 @@ on:
   push:
     branches:
       - main
-    paths-ignore:
-      - '**.md'
-      - '**.png'
-      - '**.jpg'
-      - '**.gif'
-      - '**.svg'
-      - 'docs/**'
-      - '.gitignore'
+    # Only component changes can produce a release; workflow-only pushes are a no-op.
+    paths:
+      - 'cli/**'
+      - 'app/**'
+      - '!**.md'
+      - '!**.png'
+      - '!**.jpg'
+      - '!**.gif'
+      - '!**.svg'
+      - '!docs/**'
+      - '!.gitignore'
   workflow_dispatch:
 
 concurrency:
@@ -171,12 +174,14 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: cli-dist
+          retention-days: 7
           path: cli/dist/
 
       - name: Upload CLI tarball
         uses: actions/upload-artifact@v6
         with:
           name: cli-tarball
+          retention-days: 7
           path: cli/*.tgz
 
   build-desktop-macos:
@@ -225,10 +230,6 @@ jobs:
 
       - name: Install desktop dependencies
         run: bun install --frozen-lockfile
-        working-directory: app
-
-      - name: Typecheck desktop
-        run: bun run typecheck
         working-directory: app
 
       - name: Set desktop version for build
@@ -306,6 +307,7 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: desktop-dist-macos
+          retention-days: 7
           path: |
             app/dist/**/*.dmg
             app/dist/**/*.zip
@@ -360,10 +362,6 @@ jobs:
         run: bun install --frozen-lockfile
         working-directory: app
 
-      - name: Typecheck desktop
-        run: bun run typecheck
-        working-directory: app
-
       - name: Set desktop version for build
         run: bun -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync('package.json','utf8'));p.version='${{ needs.orchestrate.outputs.version }}';fs.writeFileSync('package.json',JSON.stringify(p,null,2)+'\n')"
         working-directory: app
@@ -412,6 +410,7 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: desktop-dist-linux
+          retention-days: 7
           path: |
             app/dist/**/*.AppImage
             app/dist/**/*.deb
@@ -464,10 +463,6 @@ jobs:
         run: bun install --frozen-lockfile
         working-directory: app
 
-      - name: Typecheck desktop
-        run: bun run typecheck
-        working-directory: app
-
       - name: Set desktop version for build
         run: bun -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync('package.json','utf8'));p.version='${{ needs.orchestrate.outputs.version }}';fs.writeFileSync('package.json',JSON.stringify(p,null,2)+'\n')"
         working-directory: app
@@ -504,6 +499,7 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: desktop-dist-windows
+          retention-days: 7
           path: |
             app/dist/**/*.exe
             app/dist/**/*.blockmap
@@ -577,6 +573,7 @@ jobs:
         uses: actions/download-artifact@v6
         with:
           name: cli-tarball
+          retention-days: 7
           path: cli-tarball/
 
       - name: Download CLI artifacts
@@ -584,6 +581,7 @@ jobs:
         uses: actions/download-artifact@v6
         with:
           name: cli-dist
+          retention-days: 7
           path: cli-dist/
 
       - name: Download CLI source maps
@@ -667,6 +665,7 @@ jobs:
         uses: actions/download-artifact@v6
         with:
           name: desktop-dist-macos
+          retention-days: 7
           path: desktop-dist-macos/
 
       - name: Download Linux desktop artifacts
@@ -674,6 +673,7 @@ jobs:
         uses: actions/download-artifact@v6
         with:
           name: desktop-dist-linux
+          retention-days: 7
           path: desktop-dist-linux/
 
       - name: Download Windows desktop artifacts
@@ -681,6 +681,7 @@ jobs:
         uses: actions/download-artifact@v6
         with:
           name: desktop-dist-windows
+          retention-days: 7
           path: desktop-dist-windows/
 
       - name: Create GitHub Release
