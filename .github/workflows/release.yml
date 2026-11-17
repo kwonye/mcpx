@@ -4,14 +4,17 @@ on:
   push:
     branches:
       - main
-    paths-ignore:
-      - '**.md'
-      - '**.png'
-      - '**.jpg'
-      - '**.gif'
-      - '**.svg'
-      - 'docs/**'
-      - '.gitignore'
+    # Only component changes can produce a release; workflow-only pushes are a no-op.
+    paths:
+      - 'cli/**'
+      - 'app/**'
+      - '!**.md'
+      - '!**.png'
+      - '!**.jpg'
+      - '!**.gif'
+      - '!**.svg'
+      - '!docs/**'
+      - '!.gitignore'
   workflow_dispatch:
 
 concurrency:
