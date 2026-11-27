@@ -11,6 +11,10 @@ test.describe("lifecycle", () => {
     test.setTimeout(60000);
     await withDashboard(async ({ app }) => {
       const pid = app.process().pid;
+      // Renderer visibility does not mean the native window has reached ready-to-show.
+      await expect.poll(() => app.evaluate(({ BrowserWindow }) =>
+        BrowserWindow.getAllWindows().some((win) => win.webContents.getURL().includes("#dashboard") && win.isVisible())
+      )).toBe(true);
       await app.evaluate(({ BrowserWindow }) => {
         const dashboard = BrowserWindow.getAllWindows().find((win) => win.webContents.getURL().includes("#dashboard"));
         if (!dashboard) throw new Error("Dashboard window was not found");
