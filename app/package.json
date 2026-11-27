@@ -128,5 +128,9 @@
     "electron-builder",
     "app-builder-bin",
     "dmg-license"
-  ]
+  ],
+  "overrides": {
+    "minimatch@^10.2.5": "^11.0.1",
+    "minimatch@^9.0.3": "^11.0.1"
+  }
 }
