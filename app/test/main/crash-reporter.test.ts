@@ -32,6 +32,7 @@ describe("crashReporter initialization", () => {
         getAppPath: () => "/tmp/app",
         getName: () => "mcpx",
         setActivationPolicy: vi.fn(),
+        setAppUserModelId: vi.fn(),
       },
       crashReporter: {
         start: mockCrashReporterStart,
@@ -141,6 +142,7 @@ describe("crashReporter initialization", () => {
         getAppPath: () => "/tmp/app",
         getName: () => "mcpx-dev",
         setActivationPolicy: vi.fn(),
+        setAppUserModelId: vi.fn(),
       },
       crashReporter: {
         start: vi.fn(),
