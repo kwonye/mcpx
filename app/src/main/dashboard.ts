@@ -31,6 +31,7 @@ export function openDashboard(): BrowserWindow {
       linuxIconPath: resourcePath("linux", "icon-256.png")
     })
   );
+  let showWhenReady = true;
 
   const onThemeUpdated = () => {
     if (dashboard.isDestroyed()) {
@@ -59,7 +60,7 @@ export function openDashboard(): BrowserWindow {
   }
 
   dashboard.once("ready-to-show", () => {
-    if (!dashboard.isDestroyed()) {
+    if (showWhenReady && !dashboard.isDestroyed()) {
       revealDashboard();
     }
   });
@@ -68,6 +69,7 @@ export function openDashboard(): BrowserWindow {
   dashboard.on("close", (event) => {
     if (dashboardCloseAction({ quitting: isQuitting(), trayAvailable: isTrayAvailable() }) === "hide") {
       event.preventDefault();
+      showWhenReady = false;
       hideDashboardWindow();
     }
   });
