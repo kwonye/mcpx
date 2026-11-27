@@ -60,10 +60,9 @@ describe("Linux autostart entry", () => {
 });
 
 describe("login item settings", () => {
-  it("macOS keeps openAtLogin + openAsHidden", () => {
+  it("macOS registers the login item", () => {
     expect(loginItemSettingsFor("darwin", true, "/Applications/mcpx.app/Contents/MacOS/mcpx", {})).toEqual({
-      openAtLogin: true,
-      openAsHidden: true
+      openAtLogin: true
     });
   });
 

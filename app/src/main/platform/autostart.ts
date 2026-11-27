@@ -71,7 +71,7 @@ export function loginItemSettingsFor(
   env: NodeJS.ProcessEnv
 ): Electron.Settings | null {
   if (platform === "darwin") {
-    return { openAtLogin: enabled, openAsHidden: enabled };
+    return { openAtLogin: enabled };
   }
   if (platform === "win32") {
     return {
