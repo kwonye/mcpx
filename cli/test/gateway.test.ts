@@ -128,6 +128,7 @@ globalThis.fetch = async (input, init = {}) => {
       if (parsed.params?._meta?.["io.modelcontextprotocol/protocolVersion"]) {
         const headers = new Headers(init.headers);
         headers.set("mcp-method", parsed.method ?? "");
+        headers.set("mcp-protocol-version", String(parsed.params._meta["io.modelcontextprotocol/protocolVersion"]));
         const name = parsed.params.name ?? parsed.params.uri;
         if (typeof name === "string") headers.set("mcp-name", name);
         return nativeFetch(input, { ...init, headers });

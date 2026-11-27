@@ -55,18 +55,18 @@
   },
   "dependencies": {
     "@iarna/toml": "^2.2.5",
-    "@modelcontextprotocol/client": "2.0.0",
-    "@modelcontextprotocol/node": "2.0.0",
-    "@modelcontextprotocol/server": "2.0.0",
-    "@sentry/node": "^10.70.0",
-    "commander": "^14.0.1",
-    "hono": "^4.12.14",
-    "posthog-node": "^5.49.1",
-    "yaml": "^2.7.1",
-    "zod": "^4.1.12"
+    "@modelcontextprotocol/client": "^2.4.0",
+    "@modelcontextprotocol/node": "^2.1.2",
+    "@modelcontextprotocol/server": "^2.4.0",
+    "@sentry/node": "^10.78.0",
+    "commander": "^14.0.3",
+    "hono": "^4.13.23",
+    "posthog-node": "^5.74.0",
+    "yaml": "^2.9.1",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
-    "@types/node": "^25.2.3",
+    "@types/node": "^25.9.12",
     "typescript": "^5.9.3"
   },
   "engines": {
